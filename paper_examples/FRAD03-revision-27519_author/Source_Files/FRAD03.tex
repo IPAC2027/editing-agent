@@ -1,0 +1,221 @@
+% !TeX spellcheck = en_US
+% !TeX program = pdflatex
+%
+% v 2.3  Feb 2019   Volker RW Schaa
+%		# changes in the collaboration therefore updated file "jacow-collaboration.tex"
+%		# all References with DOIs have their period/full stop before the DOI (after pp. or year)
+%		# in the author/affiliation block all ZIP codes in square brackets removed as it was not 
+%         understood as optional parameter and ZIP codes had bin put in brackets
+%       # References to the current IPAC are changed to "IPAC'19, Melbourne, Australia"
+%       # font for "url" style changed to "newtxtt" as it is easier to distinguish "O" and "0"
+%
+\documentclass[letter,
+%boxit,        % check whether paper is inside correct margins
+%titlepage,    % separate title page
+%refpage       % separate references
+%biblatex,     % biblatex is used
+keeplastbox,   % flushend option: not to un-indent last line in References
+%nospread,     % flushend option: do not fill with whitespace to balance columns
+%hyphens,      % allow \url to hyphenate at "-" (hyphens)
+%xetex,        % use XeLaTeX to process the file
+%luatex,       % use LuaLaTeX to process the file
+]{jacow}
+%
+% ONLY FOR \footnote in table/tabular
+%
+\usepackage{pdfpages,multirow,ragged2e} %
+%
+% CHANGE SEQUENCE OF GRAPHICS EXTENSION TO BE EMBEDDED
+% ----------------------------------------------------
+% test for XeTeX where the sequence is by default eps-> pdf, jpg, png, pdf, ...
+%    and the JACoW template provides JACpic2v3.eps and JACpic2v3.jpg which
+%    might generates errors, therefore PNG and JPG first
+%
+\makeatletter%
+\ifboolexpr{bool{xetex}}
+{\renewcommand{\Gin@extensions}{.pdf,%
+		.png,.jpg,.bmp,.pict,.tif,.psd,.mac,.sga,.tga,.gif,%
+		.eps,.ps,%
+}}{}
+\makeatother
+
+% CHECK FOR XeTeX/LuaTeX BEFORE DEFINING AN INPUT ENCODING
+% --------------------------------------------------------
+%   utf8  is default for XeTeX/LuaTeX
+%   utf8  in LaTeX only realises a small portion of codes
+%
+\ifboolexpr{bool{xetex} or bool{luatex}} % test for XeTeX/LuaTeX
+{}                                      % input encoding is utf8 by default
+{\usepackage[utf8]{inputenc}}           % switch to utf8
+
+\usepackage[USenglish]{babel}
+
+
+%
+% if BibLaTeX is used
+%
+\ifboolexpr{bool{jacowbiblatex}}%
+{%
+	\addbibresource{jacow-test.bib}
+	\addbibresource{biblatex-examples.bib}
+}{}
+\listfiles
+
+%%
+%%   Lengths for the spaces in the title
+%%   \setlength\titleblockstartskip{..}  %before title, default 3pt
+%%   \setlength\titleblockmiddleskip{..} %between title + author, default 1em
+%%   \setlength\titleblockendskip{..}    %afterauthor, default 1em
+%%%%%%%%\documentclass[acus]{jacow}
+%%
+%%  Use \documentclass[boxit]{JAC2003}
+%%  to draw a frame with the correct margins on the output.
+%%   
+%%  Use \documentclass[acus]{JAC2003}
+%%  for US letter paper layout
+%%
+%% \usepackage{graphicx}h
+%%
+%%   VARIABLE HEIGHT FOR THE TITLE BOX (default 35mm)
+%%
+\setlength{\titleblockheight}{35mm}
+\usepackage{amsmath}
+\begin{document}
+
+\title{Crabbing Schemes for the Electron-Ion Collider\thanks{Work supported by the U.S. Department of Energy, Office of Science under contracts DE-SC0012704 and DE-AC05-06OR23177}}
+\author{Y. Luo\thanks{yluo@bnl.gov}, J. S. Berg, M. Blaskiewicz, C. Montag, S. Nagaitsev, V. Ptitsyn, F. Willeke, D. Xu, \\ Brookhaven National Laboratory, Upton, NY, USA\\
+Y. Hao, Facility for Rare Isotope Beams, Michigan State University, East Lansing, MI, USA \\
+J. Qiang, Lawrence Berkeley National Laboratory, Berkeley, CA, USA \\
+V. Morozov, Oak Ridge National Laboratory, Oak Ridge, TN, USA }
+\maketitle
+
+%******************************************************************
+\begin{abstract}
+
+The Electron-Ion Collider (EIC), to be constructed at Brookhaven National Laboratory, will collide polarized high-energy electron beams with polarized proton and ion beams, achieving peak luminosities of up to $1 \times 10^{34}$cm$^{-2}$s$^{-1}$ in the center-of-mass energy range of 20–140 GeV. Crab cavities will be used in both EIC rings to compensate for geometric luminosity loss due to the large crossing angle of 25 mrad at the interaction region. In the baseline design, a local crabbing scheme is adopted for both EIC storage rings, in which crab cavities are installed on both sides of the interaction region, with an ideal horizontal phase advance of 90 degrees between the interaction point and the crab cavities. In this article, we study the feasibility of using a global crabbing scheme and the crab waist scheme for the EIC. In particular, we examine the case in which the crab cavities in the Electron Storage Ring (ESR) are unavailable during early EIC commissioning. In this scenario, the electron beam's beam-beam parameter must be reduced to avoid electron losses during injection.
+
+\end{abstract}
+
+%*******************************************************************
+
+\section{Local CRABBING SCHEME}
+
+For the EIC design~\cite{EIC-CDR,SN-NAPAC25}, the full crossing angle in the interaction region (IR) is 25~mrad. To recover the geometric luminosity loss due to the large crossing angle, we adopt local crabbing scheme with crab cavities on both sides of interaction point (IP)  in both HSR and ESR. Figure~\ref{fig:1} shows the schematic plot of crabbing scheme for the EIC. 
+
+
+For the local crabbing scheme, the ideal horizontal phase advance between the crab cavities and the interaction point (IP) should be 90 degrees. The crab cavity applies a longitudinal-position-dependent horizontal kick to the particles based on their arrival time at the cavity or, equivalently, their longitudinal displacement from the bunch center. This generates a longitudinally dependent horizontal orbit offset, or crab dispersion, denoted as $dx/dz$, in the ring. In the local crabbing scheme, two sets of crab cavities placed symmetrically on both sides of the interaction region (IR) create a 180-degree local crab dispersion bump. The required crab dispersion at the IP should equal half the crossing angle, i.e., $dx/dz|_{IP} = -12.5$ mrad. After applying a Lorentz boost transformation into the head-on collision frame, the two bunches effectively collide as if there were no crossing angle.
+
+\begin{figure}
+\centering
+\includegraphics*[width=70mm]{./FRAD03_f1.JPG}
+\caption{Schematic plot  of crossing  angle collision with crab cavities in the EIC. }
+\label{fig:1} 
+\end{figure}
+
+\begin{figure}
+  \centering
+  \includegraphics[width=65mm]{./FRAD03_f2.JPG}
+  \caption{Particle distributions with only 197 MHz crab cavities in the HSR. Here 394~MHz crab cavities are applied in the ESR.}
+  \label{fig:2}
+\end{figure}
+
+\begin{figure}
+  \centering
+  \includegraphics[width=65mm]{./FRAD03_f3.JPG}
+  \caption{Particle distributions with both 197 MHz and 394 MHz crab cavities in the HSR. Here 394~MHz crab cavities are applied in the ESR.}
+  \label{fig:3}
+\end{figure}
+
+
+
+Two possible frequencies were initially considered for the HSR and ESR crab cavities: 197 MHz and 394 MHz. The 394 MHz frequency is used for the HL-LHC. Given the long proton bunch length of approximately 6 cm, we chose  197 MHz crab cavities for the HSR. Figure~\ref{fig:2} shows the proton distribution with 197 MHz crab cavities in the HSR. As seen in the figure, particles at both ends of the bunch are not effectively crabbed. During collisions, the resulting $z$-dependent horizontal offset can lead to synchro-betatron resonances, which in turn cause emittance blow-up and reduce the proton beam’s dynamic aperture.
+
+To further straighten the proton bunch shape in the head-on collision frame, we decided to add second harmonic crab cavities in the HSR, operating at 394 MHz. To cancel the cubic component of the horizontal offset as a function of longitudinal displacement $z$, we over-tilt the proton bunch using the 197 MHz cavities by 4/3 of the half crossing angle, and apply an opposite tilt of -1/3 of the half crossing angle using the 394 MHz cavities. Figure~\ref{fig:3} shows the proton and electron particle distributions with both 197 MHz  and 394 MHz crab cavities in the HSR. The frequency of the ESR crab cavities is 394 MHz.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Global Crabbing Scheme}
+
+The global crabbing scheme was used at KEKB. Its main advantage is that only one set of crab cavities, located on one side of the interaction region (IR), is required. However, this scheme has several disadvantages. It demands a precise phase advance between the crab cavities and the IP. Additionally, the crab dispersion at the IP depends on the global horizontal tune setting. Another drawback is that it generates global crab dispersion throughout the ring, which couples transverse and longitudinal particle motion and can lead to synchro-betatron resonances.
+
+The horizontal crab dispersion generated by a single crab cavity is proportional to $\sqrt{\beta_x(s)/\beta^*_x}$. For the HSR ring, with a design value of $\beta_x^* \approx 0.8$m and an average horizontal beta function about 30 m in the arcs, a horizontal crab dispersion of 12.5 mrad at the IP results in approximately 76.5 mrad of crab dispersion in the arcs. Given a proton bunch length of  6 cm, this leads to a requirement of an additional  14mm of horizontal physical aperture to accommodate protons at 3 $\sigma_l$, which is not feasible within the current HSR vacuum chamber.
+
+For the ESR, the shorter bunch length means the additional aperture requirement from the leaked crab dispersion generated by a single set of crab cavities is not a concern. However, the global crab dispersion along the ring  excites synchro-betatron resonances, and simulations show an increase in electron beam emittance. This is primarily due to the fractional horizontal tune of about 0.08 being too close to the longitudinal synchrotron tune of 0.069~\cite{PRAB-Derong}. Therefore, the global crabbing scheme is not suitable for the ESR either.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Crab Waist Scheme}
+
+Crab waist scheme had been successfully implemented at DA$\Phi$NE $\Phi$-factory in 2010 with the peak luminosity increased by a factor of 3~\cite{crabwaist}.  Since then, this scheme  has been widely adopted for lepton colliders,  like Super-KEKB, $\tau$-charm factories, and Higgs factories like CEPC-ee and FCC-ee, etc.  Crab waist scheme adopts a large Piwinski angle $\Phi= \sigma_z \theta / \sigma_x $ by  increasing the crossing angle $\theta$  and decreasing the horizontal beam size $\sigma_x$ at IP.  Therefore,  the crossing region or overlapping region of both bunches is greatly reduced to a very small region with a longitudinal distance about $4 \sigma_x/ \theta$. This makes a very small $\beta^*_y$  possible at the IP to boost the luminosity. To compensated the betatron and synchro-betatron resonances due to the large crossing angle, crab sextupoles are applied on both sides of IP to align $\beta^*_y$ waists along the opposite bunch's orbit near the IP. 
+
+The crab waist scheme works very well for lepton colliders; however, applying it to hadron colliders or asymmetric electron-ion colliders presents greater challenges. First, in the EIC, the electron bunch length is approximately ten times shorter than that of the proton bunch. Crab cavities in the HSR are therefore necessary to enlarge the collision overlap area and enhance luminosity. Second, unlike in lepton colliders, it is not feasible to squeeze the transverse beam sizes significantly. To detect scattered protons with large transverse momentum on the forward side of IR, the beam divergence at the IP, given by  $\sqrt{\epsilon/\beta^*}$, must be smaller than or close to 200 $\mu$rad. Furthermore, large-aperture superconducting magnets cannot be positioned as close to the IP as they can in lepton colliders, adding to the difficulty of implementing the crab waist scheme in the EIC.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Necessity of ESR Crab Cavities}
+
+Since the electron bunch length is approximately ten times shorter than that of the proton bunch, a natural question arises: can the ESR crab cavities be omitted without causing significant luminosity loss? An additional concern is that the 394 MHz ESR crab cavities may be delayed and unavailable during the first two years of EIC commissioning.
+
+Using the design beam parameters for the highest peak luminosity collision mode with 275 GeV protons colliding with 10 GeV electrons, Figure~\ref{fig:4} shows the accumulated percentage of electron losses as a function of the ESR crab cavity voltage. From the plot, in the case without ESR crab cavities, approximately 70\% of the electrons are lost within 100,000 turns after injection. Actually, due to synchrotron radiation damping and quantum excitation, all electrons will eventually be lost over time.
+
+Figure~\ref{fig:5} shows the electron distribution in the head-on collision frame. As seen in the figure, the electron bunch shape is significantly distorted compared to the baseline design. The bunch is tilted in the $x-z$ plane by about 4 mrad due to the beam-beam interaction. Some electrons go beyond the $10\sigma$ physical aperture, which is the collimation limit set to protect the IR magnets and detectors.
+
+\begin{figure}
+ \vskip2mm
+\hskip-2mm\includegraphics[width=55mm,angle=-90]{./FRAD03_f4.PDF}
+\caption{Percentage of accumulated  electrons loss  as  function of ESR crab cavity voltage.}
+\label{fig:4}
+\end{figure}
+
+
+\begin{figure} 
+ \vskip2mm
+\hskip-2mm\includegraphics[width=55mm,angle=-90]{./FRAD03_f5.PDF}
+\caption{Electron distribution with beam-beam interaction if there is no ESR crab cavity.}
+\label{fig:5}
+\end{figure}
+
+
+The primary cause of electron loss is the large beam-beam parameter, which is proportional to the proton bunch intensity. At the EIC, a swap-out electron bunch injection scheme is adopted. One solution to mitigate electron loss is to reduce the proton bunch intensity, thereby lowering the electron beam-beam parameter. Figure~\ref{fig:6} shows the accumulated percentage of electron loss as a function of proton bunch intensity. From the plot, it is evident that the proton bunch intensity must be reduced by half to prevent significant electron loss. However, this reduction also cuts the peak luminosity by half.
+
+\begin{figure} 
+ \vskip2mm
+\hskip-2mm\includegraphics[width=55mm, angle=-90]{./FRAD03_f6.PDF}
+\caption{Percentage of accumulated  electron loss  as function of proton bunch intensity if there is  no ESR crab cavity.}
+\label{fig:6}
+\end{figure}
+
+Next, we performed strong-strong beam-beam simulations to evaluate the proton emittance growth in the absence of 394 MHz crab cavities in both the ESR and HSR. In this study, the proton bunch intensity is reduced by half. Figure~\ref{fig:7} shows the evolution of the proton vertical beam size for three scenarios: (1) the baseline design with 394 MHz crab cavities in both rings, (2) full and (3) one-quarter of the design electron bunch intensity without  394 MHz crab cavities. Cases (2) and (3) are  with half the proton bunch intensity. A quarter of the design electron bunch intensity is used to represent early EIC commissioning conditions, when the installation of superconducting storage RF cavities in the ESR may be delayed. The results show that, without the 394 MHz crab cavities, stable collisions can be achieved for both protons and electrons if the proton bunch intensity is reduced by half.
+
+\begin{figure} 
+ \vskip2mm
+\hskip-2mm\includegraphics[width=85mm]{./FRAD03_f7.JPG}
+\caption{Evolution of proton vertical beam sizes with and without 394 MHz crab cavities.}
+\label{fig:7}
+\end{figure}
+
+%*******************************************************************
+  \section{Summary}
+
+In this article, we discussed several possible crabbing schemes for the EIC. To compensate for the geometric luminosity loss caused by the large  25 mrad crossing angle, a local crabbing scheme is adopted. Crab cavities are planned to be installed on both sides of the interaction point in both EIC storage rings. Both 197 MHz and its second harmonic, 394 MHz, crab cavities are employed in the HSR to straighten the long proton bunch. Our study found that neither the global crabbing scheme nor the crab waist scheme is suitable for the EIC. We also examined a scenario in which the 394 MHz crab cavities in both rings are not available during early EIC commissioning. In this case, to maintain electron beam stability under beam-beam interactions, the proton bunch intensity must be reduced by half.
+
+
+%**************************************************************
+\begin{thebibliography}{9} % Use for 1-9 references
+
+\bibitem{EIC-CDR}
+	J. Beebe-Wang \emph{et al.},
+	\textquotedblleft{Electron-Ion Collider: conceptual design report}\textquotedblright, Brookhaven National Laboratory, Jefferson Lab, 2021. \ \  \url{https://www.bnl.gov/EC/files/EIC_CDR_Final.pdf}
+
+\bibitem{SN-NAPAC25}    
+S. Nagaitsev,
+  \textquotedblleft{The EIC Accelerator - Design Highlights and Project Status}\textquotedblright, presented at NAPAC’25, Sacramento, CA, August 2025, paper MOPC67, this conference.
+
+\bibitem{PRAB-Derong} 
+Derong Xu {\it et al.},\textquotedblleft{Combined effects of crab dispersion and momentum dispersion in colliders with local crab crossing scheme}\textquotedblright, Phys. Rev. Accel. Beams 25, 071002, \url{https://doi.org/10.1103/PhysRevAccelBeams.25.071002}
+
+\bibitem{crabwaist} M. Zobov \emph{et al.},  \textquotedblleft{Test of crab-wast collisions at DA$\Phi$NE $\Phi$-factory}\textquotedblright, Phys. Rev. Lett. 104, 174801, \url{https://doi.org/10.1103/PhysRevLett.104.174801}
+
+\end{thebibliography}
+
+
+\end{document}
