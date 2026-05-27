@@ -31,8 +31,10 @@ console = Console()
 def prescreen(
     paper_folder: Path = typer.Argument(..., help="Path to one submission folder."),
     llm: bool = typer.Option(False, "--llm/--no-llm", help="Enable LLM suggestions."),
+    compile_pdf: bool = typer.Option(False, "--compile/--no-compile", help="Compile edited .tex to PDF."),
     model: str = typer.Option(None, envvar="LLM_MODEL", help="LLM model name."),
     base_url: str = typer.Option(None, envvar="LLM_BASE_URL", help="LLM base URL."),
+    open_browser: bool = typer.Option(False, "--open", help="Open index.html in browser after run."),
 ) -> None:
     """Pre-screen a single submission folder."""
     import os
@@ -50,29 +52,55 @@ def prescreen(
 
     console.print(f"[bold]Pre-screening:[/bold] {paper_folder.name}")
 
-    from src.workflow.prescreen import prescreen as _prescreen
+    from src.workflow.prescreen import prescreen as _prescreen, WordSubmissionError
 
-    paper = _prescreen(paper_folder, llm=llm)
+    try:
+        paper = _prescreen(paper_folder, llm=llm, compile=compile_pdf)
+    except WordSubmissionError as exc:
+        console.print(f"[yellow]⏭  Skipped (Word):[/yellow] {exc}")
+        raise typer.Exit(0)
+    except FileNotFoundError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1)
 
-    errors = sum(1 for f in paper.findings if f.severity.value == "error")
-    warnings = sum(1 for f in paper.findings if f.severity.value == "warning")
+    errors    = sum(1 for f in paper.findings if f.severity.value == "error"   and not f.auto_fixed)
+    warnings  = sum(1 for f in paper.findings if f.severity.value == "warning" and not f.auto_fixed)
     auto_fixed = sum(1 for f in paper.findings if f.auto_fixed)
 
-    t = Table(title=f"Results — {paper.paper_id}")
-    t.add_column("Errors", style="red")
-    t.add_column("Warnings", style="yellow")
+    traffic = "[red]🔴 Needs fixes[/red]" if errors else (
+              "[yellow]🟡 Review suggested[/yellow]" if (warnings or auto_fixed) else
+              "[green]🟢 Pass[/green]")
+
+    t = Table(title=f"Results — {paper.paper_id}  {traffic}")
+    t.add_column("Errors",     style="red")
+    t.add_column("Warnings",   style="yellow")
     t.add_column("Auto-fixed", style="green")
     t.add_row(str(errors), str(warnings), str(auto_fixed))
     console.print(t)
 
     out_dir = paper_folder / "aiagent_prescreen"
-    console.print(f"Report written to [cyan]{out_dir}[/cyan]")
+    index   = out_dir / "index.html"
+    console.print(f"\nOutputs written to [cyan]{out_dir}[/cyan]")
+    console.print(f"  [bold]index.html[/bold]   — open in browser for full review")
+    console.print(f"  [bold]changes.html[/bold] — side-by-side diff of auto-fixes")
+    console.print(f"  [bold]report.md[/bold]    — editor-friendly findings")
+    if compile_pdf:
+        pdf = out_dir / f"{paper.paper_id}_edited.pdf"
+        if pdf.exists():
+            console.print(f"  [bold green]{pdf.name}[/bold green] — compiled PDF")
+        else:
+            console.print(f"  [bold red]PDF compilation failed[/bold red] — see BUILD-FAIL finding")
+
+    if open_browser and index.exists():
+        import webbrowser
+        webbrowser.open(index.as_uri())
 
 
 @app.command("prescreen-all")
 def prescreen_all(
     submissions_dir: Path = typer.Argument(..., help="Directory containing all submission folders."),
     llm: bool = typer.Option(False, "--llm/--no-llm", help="Enable LLM suggestions."),
+    compile_pdf: bool = typer.Option(False, "--compile/--no-compile", help="Compile edited .tex to PDF."),
     workers: int = typer.Option(1, "--workers", "-j", help="Parallel workers."),
 ) -> None:
     """Batch pre-screen all submission folders under a directory."""
@@ -86,23 +114,27 @@ def prescreen_all(
 
     console.print(f"Found [bold]{len(folders)}[/bold] submission(s).")
 
-    from src.workflow.prescreen import prescreen as _prescreen
+    from src.workflow.prescreen import prescreen as _prescreen, WordSubmissionError
 
     if workers > 1:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_prescreen, f, llm=llm): f for f in folders}
+            futures = {pool.submit(_prescreen, f, llm=llm, compile=compile_pdf): f for f in folders}
             for future, folder in futures.items():
                 try:
                     paper = future.result()
                     _print_one_line(paper)
+                except WordSubmissionError as exc:
+                    console.print(f"[yellow]⏭  {folder.name}[/yellow]: {exc}")
                 except Exception as exc:
                     console.print(f"[red]{folder.name}[/red]: {exc}")
     else:
         for folder in folders:
             try:
-                paper = _prescreen(folder, llm=llm)
+                paper = _prescreen(folder, llm=llm, compile=compile_pdf)
                 _print_one_line(paper)
+            except WordSubmissionError as exc:
+                console.print(f"[yellow]⏭  {folder.name}[/yellow]: {exc}")
             except Exception as exc:
                 console.print(f"[red]{folder.name}[/red]: {exc}")
 

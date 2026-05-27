@@ -52,9 +52,13 @@ def check_number_unit_format(paper: Paper) -> None:
 
 
 def run_all(paper: Paper) -> None:
-    """Run every formatting check against *paper*, appending findings in-place."""
-    check_title_format(paper)
-    check_author_format(paper)
-    check_figure_format(paper)
-    check_table_format(paper)
-    check_number_unit_format(paper)
+    """Run every formatting check against *paper*, appending findings in-place.
+
+    Phase 1: all checks are stubs — no-ops until Phase 2 implementation.
+    """
+    pass  # Phase 2: uncomment individual checks below
+    # check_title_format(paper)
+    # check_author_format(paper)
+    # check_figure_format(paper)
+    # check_table_format(paper)
+    # check_number_unit_format(paper)

@@ -31,3 +31,11 @@ htmlcov/
 
 # AI agent outputs
 **/aiagent_prescreen/
+
+# Paper examples (local test data — not part of the package)
+paper_examples/
+
+# JACoW class files (downloaded at runtime — see assets/jacow/)
+assets/jacow/*.cls
+assets/jacow/*.bbx
+assets/jacow/*.cbx
