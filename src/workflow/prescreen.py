@@ -55,7 +55,7 @@ def _find_bib(folder: Path) -> Path | None:
     return bibs[0] if bibs else None
 
 
-def prescreen(folder: Path, *, llm: bool = False, compile: bool = False) -> Paper:
+def prescreen(folder: Path, *, llm: bool = False, compile: bool = True) -> Paper:
     """Pre-screen a single submission *folder*.
 
     Writes the following into ``<folder>/aiagent_prescreen/``:

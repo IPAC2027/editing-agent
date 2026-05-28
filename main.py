@@ -31,7 +31,7 @@ console = Console()
 def prescreen(
     paper_folder: Path = typer.Argument(..., help="Path to one submission folder."),
     llm: bool = typer.Option(False, "--llm/--no-llm", help="Enable LLM suggestions."),
-    compile_pdf: bool = typer.Option(False, "--compile/--no-compile", help="Compile edited .tex to PDF."),
+    compile_pdf: bool = typer.Option(True, "--compile/--no-compile", help="Compile edited .tex to PDF."),
     model: str = typer.Option(None, envvar="LLM_MODEL", help="LLM model name."),
     base_url: str = typer.Option(None, envvar="LLM_BASE_URL", help="LLM base URL."),
     open_browser: bool = typer.Option(False, "--open", help="Open index.html in browser after run."),
@@ -84,12 +84,11 @@ def prescreen(
     console.print(f"  [bold]index.html[/bold]   — open in browser for full review")
     console.print(f"  [bold]changes.html[/bold] — side-by-side diff of auto-fixes")
     console.print(f"  [bold]report.md[/bold]    — editor-friendly findings")
-    if compile_pdf:
-        pdf = out_dir / f"{paper.paper_id}_edited.pdf"
-        if pdf.exists():
-            console.print(f"  [bold green]{pdf.name}[/bold green] — compiled PDF")
-        else:
-            console.print(f"  [bold red]PDF compilation failed[/bold red] — see BUILD-FAIL finding")
+    pdf = out_dir / f"{paper.paper_id}_edited.pdf"
+    if pdf.exists():
+        console.print(f"  [bold green]{pdf.name}[/bold green] — compiled PDF")
+    elif compile_pdf:
+        console.print(f"  [bold red]PDF compilation failed[/bold red] — see BUILD-FAIL finding")
 
     if open_browser and index.exists():
         import webbrowser
@@ -100,7 +99,7 @@ def prescreen(
 def prescreen_all(
     submissions_dir: Path = typer.Argument(..., help="Directory containing all submission folders."),
     llm: bool = typer.Option(False, "--llm/--no-llm", help="Enable LLM suggestions."),
-    compile_pdf: bool = typer.Option(False, "--compile/--no-compile", help="Compile edited .tex to PDF."),
+    compile_pdf: bool = typer.Option(True, "--compile/--no-compile", help="Compile edited .tex to PDF."),
     workers: int = typer.Option(1, "--workers", "-j", help="Parallel workers."),
 ) -> None:
     """Batch pre-screen all submission folders under a directory."""

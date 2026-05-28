@@ -163,6 +163,122 @@ def check_reference_numbering(paper: Paper) -> None:
 
 
 # ---------------------------------------------------------------------------
+# URL-AS-DOI-01 — URL provided where a DOI should be used
+# ---------------------------------------------------------------------------
+
+def check_url_instead_of_doi(paper: Paper) -> None:
+    """URL-AS-DOI-01: reference uses a URL/arXiv notation where a DOI should appear.
+
+    Priority order for DOI resolution:
+    1. arXiv:XXXX.YYYY raw notation → formula-based, no network
+    2. arXiv/doi.org/jacow.org/accelconf URL → formula-based, no network
+    3. refs.jacow.org HTML search (for JACoW proceedings with text-only refs)
+    4. Crossref bibliographic search (fallback for journal articles)
+    """
+    jacow_cache: dict[str, str | None] = {}
+    crossref_cache: dict[str, str | None] = {}
+
+    for ref in paper.references:
+        if ref.doi:
+            continue  # already has DOI — DOI-FMT checks handle any formatting issues
+
+        # ── 1. arXiv:XXXX.YYYY notation in raw text ──────────────────────────
+        arxiv_m = _ARXIV_RAW_RE.search(ref.raw_text or "")
+        if arxiv_m:
+            arxiv_id = arxiv_m.group(1)
+            suggested = f"10.48550/arXiv.{arxiv_id}"
+            _add(
+                paper,
+                "URL-AS-DOI-01",
+                Severity.WARNING,
+                f"Reference {{{ref.key}}}: arXiv preprint should use "
+                f"doi:10.48550/arXiv.{arxiv_id} instead of arXiv notation. "
+                "See https://ipac-docs.jacow.org/Paper/Writing/general/#dois-for-arxiv",
+                original=arxiv_m.group(0),
+                suggested=f"doi:{suggested}",
+            )
+            continue  # one finding per ref is enough
+
+        urls = _extract_urls_from_ref(ref)
+        if not urls:
+            continue  # no URL at all — handled by check_missing_doi
+
+        if not _is_paper_ref(ref):
+            continue  # not a paper; URL may be intentional (e.g. software repo)
+
+        # ── 2. Direct URL → DOI derivation (no network) ──────────────────────
+        suggested_doi: str | None = None
+        source_url: str | None = None
+        for url in urls:
+            d = _url_to_doi_direct(url)
+            if d:
+                suggested_doi = d
+                source_url = url
+                break
+
+        # ── 3. refs.jacow.org search (for proceedings without recognisable URL) ─
+        if not suggested_doi:
+            q_key = (ref.title or "") + "|" + "|".join(ref.authors[:1])
+            if q_key in jacow_cache:
+                suggested_doi = jacow_cache[q_key]
+            else:
+                suggested_doi = _search_refs_jacow(ref)
+                jacow_cache[q_key] = suggested_doi
+            if suggested_doi:
+                source_url = source_url or (urls[0] if urls else None)
+
+        # ── 4. Crossref fallback (journal articles only) ───────────────────────
+        if not suggested_doi and _likely_requires_doi(ref):
+            cq = _crossref_query(ref)
+            if cq:
+                if cq in crossref_cache:
+                    suggested_doi = crossref_cache[cq]
+                else:
+                    suggested_doi = _lookup_doi_crossref(ref)
+                    crossref_cache[cq] = suggested_doi
+                if suggested_doi:
+                    source_url = source_url or (urls[0] if urls else None)
+
+        if suggested_doi:
+            # If the URL itself was a doi: or doi.org reference, it just needs
+            # to be moved to the doi field — produce a clear message.
+            url_is_doi = any(
+                re.match(r'doi:\s*10\.', u, re.IGNORECASE) or
+                _DOI_ORG_URL_RE.match(u)
+                for u in urls
+            )
+            if url_is_doi:
+                _add(
+                    paper,
+                    "URL-AS-DOI-01",
+                    Severity.WARNING,
+                    f"Reference {{{ref.key}}}: DOI stored in url field "
+                    f"instead of doi field. Move to doi = {{{suggested_doi}}}",
+                    original=source_url or urls[0],
+                    suggested=f"doi:{suggested_doi}",
+                )
+            else:
+                _add(
+                    paper,
+                    "URL-AS-DOI-01",
+                    Severity.WARNING,
+                    f"Reference {{{ref.key}}}: URL used instead of DOI. "
+                    f"Replace {(source_url or urls[0])!r} with doi:{suggested_doi}",
+                    original=source_url or urls[0],
+                    suggested=f"doi:{suggested_doi}",
+                )
+        else:
+            _add(
+                paper,
+                "URL-AS-DOI-01",
+                Severity.WARNING,
+                f"Reference {{{ref.key}}}: URL found but no DOI could be determined. "
+                f"URL: {urls[0]!r}. Please add the correct doi: field manually.",
+                original=urls[0],
+            )
+
+
+# ---------------------------------------------------------------------------
 # DOI-FMT-01 — doi: prefix normalisation (for manual \bibitem entries)
 # ---------------------------------------------------------------------------
 
@@ -209,6 +325,135 @@ def check_doi_format(paper: Paper) -> None:
 # ---------------------------------------------------------------------------
 # DOI-MISSING-01 — likely journal/article references should include DOI
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# URL-AS-DOI-01 — compiled patterns
+# ---------------------------------------------------------------------------
+
+_ARXIV_URL_RE = re.compile(
+    r'https?://arxiv\.org/(?:abs|pdf)/([\w./-]+?)(?:v\d+)?(?:\.pdf)?$',
+    re.IGNORECASE,
+)
+_ARXIV_RAW_RE = re.compile(
+    r'\barXiv:([A-Za-z\-]+/\d+|\d{4}\.\d{4,5})(?:v\d+)?\b',
+    re.IGNORECASE,
+)
+_DOI_ORG_URL_RE = re.compile(
+    r'https?://(?:dx\.)?doi\.org/(10\.[^/\s\]{}]+)',
+    re.IGNORECASE,
+)
+_JACOW_URL_RE = re.compile(
+    r'https?://(?:www\.)?jacow\.org/([^/]+)/papers/([^/.?#]+)(?:\.pdf)?',
+    re.IGNORECASE,
+)
+_ACCELCONF_URL_RE = re.compile(
+    r'https?://accelconf\.web\.cern\.ch/([^/]+)/papers/([^/.?#]+)(?:\.pdf)?',
+    re.IGNORECASE,
+)
+# Matches a doi.org link inside refs.jacow.org HTML response
+_JACOW_HTML_DOI_RE = re.compile(r'href="https?://doi\.org/(10\.[^"]+)"')
+
+
+def _url_to_doi_direct(url: str) -> str | None:
+    """Derive a DOI from a URL without network requests, where possible."""
+    url = url.strip().rstrip('.,;)]}')
+
+    # doi: prefix notation stored directly in the url field
+    m = re.match(r'doi:\s*(10\.\S+)', url, re.IGNORECASE)
+    if m:
+        return m.group(1).rstrip('.,;')
+
+    m = _DOI_ORG_URL_RE.match(url)
+    if m:
+        return m.group(1).rstrip('.,;')
+
+    m = _ARXIV_URL_RE.match(url)
+    if m:
+        return f"10.48550/arXiv.{m.group(1).rstrip('/')}"
+
+    m = _JACOW_URL_RE.match(url)
+    if m:
+        return f"10.18429/JACoW-{m.group(1)}-{m.group(2).upper()}"
+
+    m = _ACCELCONF_URL_RE.match(url)
+    if m:
+        return f"10.18429/JACoW-{m.group(1)}-{m.group(2).upper()}"
+
+    return None
+
+
+def _extract_urls_from_ref(ref: Reference) -> list[str]:
+    """Collect all URLs from a reference (url field + \\url{} + bare URLs)."""
+    seen: set[str] = set()
+    result: list[str] = []
+
+    def _keep(u: str) -> None:
+        u = u.strip().rstrip('.,;)]}')
+        if u and u not in seen:
+            seen.add(u)
+            result.append(u)
+
+    if ref.url:
+        _keep(ref.url)
+    raw = ref.raw_text or ""
+    for m in re.finditer(r'\\url\{([^}]+)\}', raw):
+        _keep(m.group(1))
+    # bare https:// URLs not already captured
+    no_url_cmd = re.sub(r'\\url\{[^}]+\}', '', raw)
+    for m in re.finditer(r'https?://\S+', no_url_cmd):
+        _keep(m.group(0))
+    return result
+
+
+def _is_paper_ref(ref: Reference) -> bool:
+    """Return True if ref looks like a scholarly paper that should have a DOI."""
+    rt = (ref.ref_type or "").lower()
+    if rt in {"journal", "proceedings", "arxiv"}:
+        return True
+    raw = (ref.raw_text or "").lower()
+    return bool(re.search(
+        r'\b(phys\.|journal|j\. phys|proc\.|in proc\.|conference|'
+        r'arxiv|preprint|ieee trans|nucl\.)\b',
+        raw,
+    ))
+
+
+def _search_refs_jacow(ref: Reference) -> str | None:
+    """Search refs.jacow.org for a DOI matching *ref*; returns first hit or None."""
+    # Build a concise query: prefer title + first author
+    parts: list[str] = []
+    if ref.title:
+        parts.append(ref.title)
+    if ref.authors:
+        parts.append(ref.authors[0])
+    if ref.container_title:
+        parts.append(ref.container_title)
+    if ref.date:
+        parts.append(str(ref.date))
+    if not parts and ref.raw_text:
+        # For manual \bibitem refs, use the raw text
+        parts.append(ref.raw_text[:200])
+    q = " ".join(p for p in parts if p).strip()
+    if not q:
+        return None
+    headers = {
+        "User-Agent": "aiagent-prescreen/0.1",
+        "Accept": "text/html",
+    }
+    try:
+        resp = httpx.get(
+            "https://refs.jacow.org/",
+            params={"query": q, "formatType": "text"},
+            headers=headers,
+            timeout=10.0,
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+        dois = _JACOW_HTML_DOI_RE.findall(resp.text)
+        return dois[0].strip() if dois else None
+    except Exception:
+        return None
+
 
 def _likely_requires_doi(ref: Reference) -> bool:
     """Return True if *ref* looks like a scholarly article that should have DOI."""
@@ -291,6 +536,9 @@ def check_missing_doi(paper: Paper) -> None:
 
     for ref in paper.references:
         if ref.doi:
+            continue
+        # Refs with URLs are handled by check_url_instead_of_doi
+        if _extract_urls_from_ref(ref):
             continue
         if not _likely_requires_doi(ref):
             continue
@@ -454,6 +702,7 @@ def run_all(paper: Paper) -> None:
     check_citation_order(paper)
     check_citation_links(paper)
     check_reference_numbering(paper)
+    check_url_instead_of_doi(paper)
     check_missing_doi(paper)
     check_doi_format(paper)
     check_citation_bracket_format(paper)
