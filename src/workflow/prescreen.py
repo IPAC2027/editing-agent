@@ -71,18 +71,9 @@ def prescreen(folder: Path, *, llm: bool = False, compile: bool = True) -> Paper
     """
     fmt = detect_source_format(folder)
     if fmt == "word":
-        src = next(
-            (f for d in (folder / "Source_Files", folder)
-             if d.is_dir()
-             for f in d.iterdir()
-             if f.suffix.lower() in _WORD_EXTS),
-            None,
-        )
-        fname = src.name if src else "Word document"
-        raise WordSubmissionError(
-            f"{folder.name} is a Word submission ({fname}) — skipped. "
-            "Convert to LaTeX with Pandoc to enable pre-screening."
-        )
+        from src.workflow.word_prescreen import prescreen_word
+
+        return prescreen_word(folder)  # type: ignore[return-value]
 
     tex_path = _find_tex(folder)
     bib_path = _find_bib(folder)

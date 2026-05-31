@@ -26,6 +26,7 @@ def apply_safe_fixes(source: str) -> tuple[str, list[Finding]]:
         original_line = line
         line, lf = _fix_doi_prefix(line, lineno, findings)
         line, lf = _fix_url_doi(line, lineno, findings)
+        line, lf = _fix_arxiv_to_doi(line, lineno, findings)
         line, lf = _fix_adjacent_cite_brackets(line, lineno, findings)
         line, lf = _fix_cite_spaces(line, lineno, findings)
         line, lf = _fix_cite_comma_spaces(line, lineno, findings)
@@ -181,6 +182,62 @@ def _fix_etal(line: str, lineno: int, findings: list[Finding]) -> tuple[str, boo
     return new_line, bool(n) and new_line != line
 
 
+def _fix_arxiv_to_doi(line: str, lineno: int, findings: list[Finding]) -> tuple[str, bool]:
+    r"""Convert arXiv notation/URLs to JACoW DOI format for references."""
+    from src.checks.reference_checks import _validate_doi_online
+
+    changed = False
+
+    raw_pat = re.compile(
+        r'\barXiv:([A-Za-z\-]+/\d+|\d{4}\.\d{4,5})(?:v\d+)?\b',
+        re.IGNORECASE,
+    )
+
+    def _raw_repl(m: re.Match) -> str:
+        nonlocal changed
+        doi_val = f"10.48550/arXiv.{m.group(1)}"
+        if _validate_doi_online(doi_val):
+            changed = True
+            return f"doi:{doi_val}"
+        return m.group(0)
+
+    new_line = raw_pat.sub(_raw_repl, line)
+
+    url_pat = re.compile(
+        r'https?://arxiv\.org/(?:abs|pdf)/([\w./-]+?)(?:v\d+)?(?:\.pdf)?(?=[\s,.;)\]}]|$)',
+        re.IGNORECASE,
+    )
+
+    def _url_repl(m: re.Match) -> str:
+        nonlocal changed
+        doi_val = f"10.48550/arXiv.{m.group(1).rstrip('/')}"
+        if _validate_doi_online(doi_val):
+            changed = True
+            return f"doi:{doi_val}"
+        return m.group(0)
+
+    new_line = url_pat.sub(_url_repl, new_line)
+
+    # If a \\url{...} now wraps a DOI value, normalise to \\doi{...}
+    new_line = re.sub(
+        r'\\url\{doi:\s*(10\.[^}]+)\}',
+        lambda m: f"\\doi{{{m.group(1).strip()}}}",
+        new_line,
+    )
+
+    if changed:
+        findings.append(Finding(
+            check_id="URL-AS-DOI-01",
+            severity=Severity.INFO,
+            line=lineno,
+            original=line.rstrip('\n'),
+            suggested=new_line.rstrip('\n'),
+            message="Converted arXiv notation/URL to JACoW DOI format.",
+            auto_fixed=True,
+        ))
+    return new_line, changed
+
+
 # ===========================================================================
 # Paper-aware fixes (require the parsed Paper model)
 # ===========================================================================
@@ -193,6 +250,8 @@ def apply_paper_fixes(source: str, paper: "Paper") -> tuple[str, list[Finding]]:
     """
     findings: list[Finding] = []
     source, f = _reorder_bibitems(source, paper)
+    findings.extend(f)
+    source, f = _apply_arxiv_doi_suggestions(source, paper)
     findings.extend(f)
     return source, findings
 
@@ -273,3 +332,55 @@ def _reorder_bibitems(source: str, paper: "Paper") -> tuple[str, list[Finding]]:
         auto_fixed=True,
     ))
     return new_source, findings
+
+
+def _apply_arxiv_doi_suggestions(source: str, paper: "Paper") -> tuple[str, list[Finding]]:
+    """Append validated arXiv DOI suggestions into matching \bibitem entries.
+
+    We only apply suggestions already produced by reference checks, so online
+    verification and type classification have already happened upstream.
+    """
+    findings: list[Finding] = []
+
+    suggestions: dict[str, str] = {}
+    for f in paper.findings:
+        if f.check_id != "URL-AS-DOI-01" or not f.suggested:
+            continue
+        m_key = re.search(r"Reference \{([^}]+)\}", f.message)
+        m_doi = re.search(r"doi:(10\.\S+)", f.suggested, re.IGNORECASE)
+        if not (m_key and m_doi):
+            continue
+        key = m_key.group(1)
+        doi = m_doi.group(1).rstrip('.,;)]}')
+        suggestions[key] = doi
+
+    if not suggestions:
+        return source, findings
+
+    for key, doi in suggestions.items():
+        pat = re.compile(
+            r'(\\bibitem\s*(?:\[[^\]]*\])?\s*\{' + re.escape(key) + r'\}'
+            r'.*?)(?=(?:\n\\bibitem|\\end\{thebibliography\}))',
+            re.DOTALL,
+        )
+        m = pat.search(source)
+        if not m:
+            continue
+
+        block = m.group(1)
+        if re.search(r'\bdoi\s*:\s*10\.|\\doi\{10\.', block, re.IGNORECASE):
+            continue
+
+        new_block = block.rstrip() + f" doi:{doi}\n"
+        source = source[:m.start(1)] + new_block + source[m.end(1):]
+
+        findings.append(Finding(
+            check_id="URL-AS-DOI-01",
+            severity=Severity.INFO,
+            original=block.strip()[:220],
+            suggested=new_block.strip()[:240],
+            message=f"Applied arXiv DOI suggestion to \\bibitem{{{key}}}.",
+            auto_fixed=True,
+        ))
+
+    return source, findings

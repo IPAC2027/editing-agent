@@ -63,36 +63,55 @@ def prescreen(
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1)
 
-    errors    = sum(1 for f in paper.findings if f.severity.value == "error"   and not f.auto_fixed)
-    warnings  = sum(1 for f in paper.findings if f.severity.value == "warning" and not f.auto_fixed)
-    auto_fixed = sum(1 for f in paper.findings if f.auto_fixed)
+    is_word_result = hasattr(paper, "total_refs") and not hasattr(paper, "source_path")
+
+    if hasattr(paper, "findings"):
+        errors    = sum(1 for f in paper.findings if f.severity.value == "error"   and not f.auto_fixed)
+        warnings  = sum(1 for f in paper.findings if f.severity.value == "warning" and not f.auto_fixed)
+        auto_fixed = sum(1 for f in paper.findings if f.auto_fixed)
+    else:
+        errors = 0
+        warnings = 0
+        auto_fixed = 0
 
     traffic = "[red]🔴 Needs fixes[/red]" if errors else (
               "[yellow]🟡 Review suggested[/yellow]" if (warnings or auto_fixed) else
               "[green]🟢 Pass[/green]")
 
     t = Table(title=f"Results — {paper.paper_id}  {traffic}")
-    t.add_column("Errors",     style="red")
-    t.add_column("Warnings",   style="yellow")
-    t.add_column("Auto-fixed", style="green")
-    t.add_row(str(errors), str(warnings), str(auto_fixed))
-    console.print(t)
+    if hasattr(paper, "findings") and not is_word_result:
+        t.add_column("Errors",     style="red")
+        t.add_column("Warnings",   style="yellow")
+        t.add_column("Auto-fixed", style="green")
+        t.add_row(str(errors), str(warnings), str(auto_fixed))
+        console.print(t)
+    else:
+        t.add_column("References", style="cyan")
+        t.add_column("Output", style="green")
+        t.add_row(str(getattr(paper, "total_refs", 0)), "word_references.html")
+        console.print(t)
 
     out_dir = paper_folder / "aiagent_prescreen"
     index   = out_dir / "index.html"
     console.print(f"\nOutputs written to [cyan]{out_dir}[/cyan]")
-    console.print(f"  [bold]index.html[/bold]   — open in browser for full review")
-    console.print(f"  [bold]changes.html[/bold] — side-by-side diff of auto-fixes")
-    console.print(f"  [bold]report.md[/bold]    — editor-friendly findings")
-    pdf = out_dir / f"{paper.paper_id}_edited.pdf"
-    if pdf.exists():
-        console.print(f"  [bold green]{pdf.name}[/bold green] — compiled PDF")
-    elif compile_pdf:
-        console.print(f"  [bold red]PDF compilation failed[/bold red] — see BUILD-FAIL finding")
+    if hasattr(paper, "findings") and not is_word_result:
+        console.print(f"  [bold]index.html[/bold]   — open in browser for full review")
+        console.print(f"  [bold]changes.html[/bold] — side-by-side diff of auto-fixes")
+        console.print(f"  [bold]report.md[/bold]    — editor-friendly findings")
+        pdf = out_dir / f"{paper.paper_id}_edited.pdf"
+        if pdf.exists():
+            console.print(f"  [bold green]{pdf.name}[/bold green] — compiled PDF")
+        elif compile_pdf:
+            console.print(f"  [bold red]PDF compilation failed[/bold red] — see BUILD-FAIL finding")
+    else:
+        console.print(f"  [bold]word_references.html[/bold] — reference extraction, checks, and before/after corrections")
 
-    if open_browser and index.exists():
+    if open_browser and index.exists() and not is_word_result:
         import webbrowser
         webbrowser.open(index.as_uri())
+    elif open_browser and is_word_result:
+        import webbrowser
+        webbrowser.open((out_dir / "word_references.html").as_uri())
 
 
 @app.command("prescreen-all")
@@ -139,12 +158,32 @@ def prescreen_all(
 
 
 def _print_one_line(paper) -> None:
-    errors = sum(1 for f in paper.findings if f.severity.value == "error")
-    warnings = sum(1 for f in paper.findings if f.severity.value == "warning")
-    icon = "🔴" if errors else ("🟡" if warnings else "🟢")
+    is_word_result = hasattr(paper, "total_refs") and not hasattr(paper, "source_path")
+
+    if hasattr(paper, "findings") and not is_word_result:
+        errors = sum(1 for f in paper.findings if f.severity.value == "error")
+        warnings = sum(1 for f in paper.findings if f.severity.value == "warning")
+        icon = "🔴" if errors else ("🟡" if warnings else "🟢")
+        console.print(
+            f"{icon}  [bold]{paper.paper_id}[/bold]  "
+            f"errors={errors}  warnings={warnings}"
+        )
+        return
+
+    if hasattr(paper, "findings") and is_word_result:
+        errors = sum(1 for f in paper.findings if f.severity.value == "error" and not f.auto_fixed)
+        warnings = sum(1 for f in paper.findings if f.severity.value == "warning" and not f.auto_fixed)
+        auto_fixed = sum(1 for f in paper.findings if f.auto_fixed)
+        icon = "🔴" if errors else ("🟡" if warnings or auto_fixed else "🟢")
+        console.print(
+            f"{icon}  [bold]{paper.paper_id}[/bold]  "
+            f"errors={errors}  warnings={warnings}  auto_fixed={auto_fixed}  output=word_references.html"
+        )
+        return
+
     console.print(
-        f"{icon}  [bold]{paper.paper_id}[/bold]  "
-        f"errors={errors}  warnings={warnings}"
+        f"🟦  [bold]{paper.paper_id}[/bold]  "
+        f"references={getattr(paper, 'total_refs', 0)}  output=word_references.html"
     )
 
 

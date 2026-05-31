@@ -187,16 +187,26 @@ def check_url_instead_of_doi(paper: Paper) -> None:
         if arxiv_m:
             arxiv_id = arxiv_m.group(1)
             suggested = f"10.48550/arXiv.{arxiv_id}"
-            _add(
-                paper,
-                "URL-AS-DOI-01",
-                Severity.WARNING,
-                f"Reference {{{ref.key}}}: arXiv preprint should use "
-                f"doi:10.48550/arXiv.{arxiv_id} instead of arXiv notation. "
-                "See https://ipac-docs.jacow.org/Paper/Writing/general/#dois-for-arxiv",
-                original=arxiv_m.group(0),
-                suggested=f"doi:{suggested}",
-            )
+            if _validate_doi_online(suggested):
+                _add(
+                    paper,
+                    "URL-AS-DOI-01",
+                    Severity.WARNING,
+                    f"Reference {{{ref.key}}}: arXiv preprint should use "
+                    f"doi:10.48550/arXiv.{arxiv_id} instead of arXiv notation. "
+                    "See https://ipac-docs.jacow.org/Paper/Writing/general/#dois-for-arxiv",
+                    original=arxiv_m.group(0),
+                    suggested=f"doi:{suggested}",
+                )
+            else:
+                _add(
+                    paper,
+                    "URL-AS-DOI-01",
+                    Severity.WARNING,
+                    f"Reference {{{ref.key}}}: arXiv notation detected but "
+                    f"derived DOI doi:{suggested} could not be verified online.",
+                    original=arxiv_m.group(0),
+                )
             continue  # one finding per ref is enough
 
         urls = _extract_urls_from_ref(ref)
@@ -212,6 +222,8 @@ def check_url_instead_of_doi(paper: Paper) -> None:
         for url in urls:
             d = _url_to_doi_direct(url)
             if d:
+                if d.lower().startswith("10.48550/arxiv.") and not _validate_doi_online(d):
+                    continue
                 suggested_doi = d
                 source_url = url
                 break
@@ -352,6 +364,153 @@ _ACCELCONF_URL_RE = re.compile(
 )
 # Matches a doi.org link inside refs.jacow.org HTML response
 _JACOW_HTML_DOI_RE = re.compile(r'href="https?://doi\.org/(10\.[^"]+)"')
+_TITLE_STOPWORDS = {
+    'a', 'an', 'and', 'at', 'by', 'for', 'from', 'in', 'of', 'on', 'or',
+    'the', 'to', 'with', 'using', 'via', 'into', 'over', 'under', 'paper',
+}
+
+
+def _fetch_crossref_work(doi: str) -> dict | None:
+    """Fetch Crossref metadata for *doi* and return the message payload."""
+    doi = doi.strip().removeprefix("doi:").strip().rstrip('.,;)]}')
+    if not doi:
+        return None
+
+    headers = {"User-Agent": "aiagent-prescreen/0.1"}
+    email = os.getenv("CROSSREF_EMAIL", "").strip()
+    if email:
+        headers["User-Agent"] = f"aiagent-prescreen/0.1 (mailto:{email})"
+
+    try:
+        resp = httpx.get(
+            f"https://api.crossref.org/works/{doi}",
+            headers=headers,
+            timeout=8.0,
+        )
+        if resp.status_code != 200:
+            return None
+        return resp.json().get("message", {})
+    except Exception:
+        return None
+
+
+def _title_tokens(text: str) -> set[str]:
+    cleaned = re.sub(r'[^a-z0-9]+', ' ', text.lower())
+    return {
+        tok for tok in cleaned.split()
+        if len(tok) >= 4 and tok not in _TITLE_STOPWORDS
+    }
+
+
+def _extract_ref_year(ref: Reference) -> int | None:
+    if ref.date:
+        m = re.search(r'\b(19|20)\d{2}\b', str(ref.date))
+        if m:
+            return int(m.group(0))
+    m = re.search(r'\b(19|20)\d{2}\b', ref.raw_text or '')
+    return int(m.group(0)) if m else None
+
+
+def _extract_crossref_year(message: dict) -> int | None:
+    for key in ("published-print", "published-online", "issued", "created"):
+        parts = message.get(key, {}).get("date-parts", [])
+        if parts and parts[0]:
+            try:
+                return int(parts[0][0])
+            except Exception:
+                continue
+    return None
+
+
+def _ref_author_surname(ref: Reference) -> str | None:
+    if not ref.authors:
+        return None
+    author = ref.authors[0].strip()
+    tokens = re.findall(r"[A-Za-z][A-Za-z'\-]+", author)
+    return tokens[-1].lower() if tokens else None
+
+
+def _crossref_author_surnames(message: dict) -> set[str]:
+    surnames: set[str] = set()
+    for author in message.get("author", []) or []:
+        family = str(author.get("family", "")).strip().lower()
+        if family:
+            surnames.add(family)
+    return surnames
+
+
+def _doi_matches_reference(ref: Reference, doi: str, message: dict | None = None) -> bool:
+    """Return True when DOI metadata is a plausible match for *ref*."""
+    message = message or _fetch_crossref_work(doi)
+    if not message:
+        return _validate_doi_online(doi)
+
+    if ref.title:
+        ref_title = ref.title.strip()
+        candidate_title = " ".join(message.get("title", []) or []).strip()
+        if not candidate_title:
+            return False
+
+        ratio = difflib.SequenceMatcher(
+            None,
+            re.sub(r'\s+', ' ', ref_title.lower()),
+            re.sub(r'\s+', ' ', candidate_title.lower()),
+        ).ratio()
+        overlap = 0.0
+        ref_tokens = _title_tokens(ref_title)
+        cand_tokens = _title_tokens(candidate_title)
+        if ref_tokens and cand_tokens:
+            overlap = len(ref_tokens & cand_tokens) / max(1, len(ref_tokens))
+
+        if ratio < 0.55 and overlap < 0.45:
+            return False
+
+    ref_year = _extract_ref_year(ref)
+    cand_year = _extract_crossref_year(message)
+    if ref_year and cand_year and ref_year != cand_year:
+        return False
+
+    ref_surname = _ref_author_surname(ref)
+    cand_surnames = _crossref_author_surnames(message)
+    if ref_surname and cand_surnames and ref_surname not in cand_surnames:
+        return False
+
+    return True
+
+
+def _validate_doi_online(doi: str) -> bool:
+    """Return True when *doi* resolves in a trusted online source.
+
+    Validation tries Crossref first because it is structured and cheap, then
+    falls back to doi.org resolution. Any network failure or 4xx/5xx result is
+    treated as an unverified DOI.
+    """
+    doi = doi.strip().removeprefix("doi:").strip().rstrip('.,;)]}')
+    if not doi:
+        return False
+
+    message = _fetch_crossref_work(doi)
+    if message:
+        return True
+
+    headers = {"User-Agent": "aiagent-prescreen/0.1"}
+    email = os.getenv("CROSSREF_EMAIL", "").strip()
+    if email:
+        headers["User-Agent"] = f"aiagent-prescreen/0.1 (mailto:{email})"
+
+    try:
+        resp = httpx.head(
+            f"https://doi.org/{doi}",
+            headers={
+                "User-Agent": headers["User-Agent"],
+                "Accept": "text/html,application/xhtml+xml",
+            },
+            timeout=8.0,
+            follow_redirects=True,
+        )
+        return resp.status_code < 400
+    except Exception:
+        return False
 
 
 def _url_to_doi_direct(url: str) -> str | None:
@@ -450,7 +609,11 @@ def _search_refs_jacow(ref: Reference) -> str | None:
         )
         resp.raise_for_status()
         dois = _JACOW_HTML_DOI_RE.findall(resp.text)
-        return dois[0].strip() if dois else None
+        for doi in dois:
+            candidate = doi.strip()
+            if _doi_matches_reference(ref, candidate):
+                return candidate
+        return None
     except Exception:
         return None
 
@@ -526,7 +689,9 @@ def _lookup_doi_crossref(ref: Reference) -> str | None:
     for item in items:
         doi = item.get("DOI")
         if doi:
-            return str(doi).strip()
+            candidate = str(doi).strip()
+            if _doi_matches_reference(ref, candidate, message=item):
+                return candidate
     return None
 
 
