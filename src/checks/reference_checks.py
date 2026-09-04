@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import difflib
 import os
+from enum import Enum
 import re
 from pathlib import Path
 
 import httpx
 
+from src.lookup_status import STATUS, label
 from src.models import Finding, Paper, Reference, Severity
 from src.parser.latex_parser import ParsedTex
 
@@ -75,15 +77,20 @@ def check_citation_order(paper: Paper) -> None:
 # ---------------------------------------------------------------------------
 
 def check_citation_links(paper: Paper) -> None:
-    """CITE-LINK-01/02: cross-check in-text cites against reference list."""
+    r"""CITE-LINK-01: every ``\cite{key}`` must resolve to a reference entry.
+
+    When the cause is a *missing bibliography file*, this reports the cause
+    once instead of the symptom many times.  On the sample corpus MOZN01
+    declares ``\addbibresource{MOZN01.bib}`` while the submission actually
+    contains ``MOZN01_bib.bib``; the previous version emitted 19 separate
+    ERRORs, one per citation, which tells the editor 19 times about one typo.
+    """
     pt = _pt(paper)
     if not pt:
         return
 
-    # Reference keys from the reference list
     ref_keys: set[str] = {r.key for r in paper.references}
 
-    # Keys cited in text
     cited_keys: set[str] = set()
     cite_key_to_line: dict[str, int] = {}
     for occ in pt.cite_occurrences:
@@ -91,16 +98,30 @@ def check_citation_links(paper: Paper) -> None:
             cite_key_to_line[occ.key] = occ.line
         cited_keys.add(occ.key)
 
-    # For biblatex papers we might not have ref_keys from bibitems — skip CITE-LINK
     if not ref_keys and pt.uses_biblatex:
         return  # ref_keys come from .bib, populated before this check is called
 
-    # CITE-LINK-01: every \cite{key} must have a matching reference entry
-    for key in sorted(cited_keys - ref_keys):
-        line = cite_key_to_line.get(key)
+    unresolved = sorted(cited_keys - ref_keys)
+    if not unresolved:
+        return
+
+    # If a declared .bib file is missing, that single fact explains all of it.
+    missing_bib = [
+        f.original for f in paper.findings if f.check_id == "BIB-MISSING-01" and f.original
+    ]
+    if missing_bib and len(unresolved) > 2:
+        _add(paper, "CITE-LINK-01", Severity.ERROR,
+             f"{len(unresolved)} citations cannot be resolved because a declared "
+             f"bibliography file is missing ({', '.join(missing_bib)}). Fix the "
+             f"file name and these resolve themselves. Unresolved keys: "
+             f"{', '.join(unresolved[:8])}"
+             + (f", and {len(unresolved) - 8} more" if len(unresolved) > 8 else ""))
+        return
+
+    for key in unresolved:
         _add(paper, "CITE-LINK-01", Severity.ERROR,
              f"\\cite{{{key}}} has no corresponding reference entry.",
-             line=line,
+             line=cite_key_to_line.get(key),
              original=f"\\cite{{{key}}}")
 
     # CITE-LINK-02: skipped — .bib files often contain more entries than used
@@ -187,7 +208,19 @@ def check_url_instead_of_doi(paper: Paper) -> None:
         if arxiv_m:
             arxiv_id = arxiv_m.group(1)
             suggested = f"10.48550/arXiv.{arxiv_id}"
-            if _validate_doi_online(suggested):
+            arxiv_verdict = verify_doi(suggested)
+            if arxiv_verdict is DoiVerdict.UNVERIFIED:
+                _add(
+                    paper,
+                    "URL-AS-DOI-01",
+                    Severity.INFO,
+                    f"Reference {{{ref.key}}}: NOT CHECKED — arXiv notation found, but "
+                    f"doi:{suggested} could not be verified because no DOI authority "
+                    "was reachable on this run.",
+                    original=arxiv_m.group(0),
+                )
+                continue
+            if arxiv_verdict is DoiVerdict.VERIFIED:
                 _add(
                     paper,
                     "URL-AS-DOI-01",
@@ -203,8 +236,8 @@ def check_url_instead_of_doi(paper: Paper) -> None:
                     paper,
                     "URL-AS-DOI-01",
                     Severity.WARNING,
-                    f"Reference {{{ref.key}}}: arXiv notation detected but "
-                    f"derived DOI doi:{suggested} could not be verified online.",
+                    f"Reference {{{ref.key}}}: arXiv notation detected, and the derived "
+                    f"DOI doi:{suggested} does not resolve. Check the arXiv identifier.",
                     original=arxiv_m.group(0),
                 )
             continue  # one finding per ref is enough
@@ -216,17 +249,26 @@ def check_url_instead_of_doi(paper: Paper) -> None:
         if not _is_paper_ref(ref):
             continue  # not a paper; URL may be intentional (e.g. software repo)
 
-        # ── 2. Direct URL → DOI derivation (no network) ──────────────────────
+        # ── 2. Direct URL → DOI derivation ───────────────────────────────────
+        # A DOI carried *inside* the URL is authoritative and needs no check.
+        # A DOI *constructed* from a URL pattern is a guess and must resolve
+        # before it is ever put in front of an editor.
         suggested_doi: str | None = None
         source_url: str | None = None
+        unverifiable: list[str] = []
         for url in urls:
-            d = _url_to_doi_direct(url)
-            if d:
-                if d.lower().startswith("10.48550/arxiv.") and not _validate_doi_online(d):
-                    continue
-                suggested_doi = d
-                source_url = url
+            candidate, authoritative = _url_to_doi_direct(url)
+            if not candidate:
+                continue
+            if authoritative:
+                suggested_doi, source_url = candidate, url
                 break
+            verdict = verify_doi(candidate)
+            if verdict is DoiVerdict.VERIFIED:
+                suggested_doi, source_url = candidate, url
+                break
+            if verdict is DoiVerdict.UNVERIFIED:
+                unverifiable.append(candidate)
 
         # ── 3. refs.jacow.org search (for proceedings without recognisable URL) ─
         if not suggested_doi:
@@ -279,13 +321,30 @@ def check_url_instead_of_doi(paper: Paper) -> None:
                     original=source_url or urls[0],
                     suggested=f"doi:{suggested_doi}",
                 )
+        elif unverifiable or not (
+            STATUS.reachable("crossref") or STATUS.reachable("doi.org")
+            or STATUS.reachable("jacow-refdb")
+        ):
+            # We could not reach any authority. Say exactly that, and do not
+            # imply anything about the reference itself.
+            offline = ", ".join(label(name) for name in STATUS.offline_services()) or "the DOI authorities"
+            _add(
+                paper,
+                "URL-AS-DOI-01",
+                Severity.INFO,
+                f"Reference {{{ref.key}}}: NOT CHECKED — could not reach {offline}, "
+                f"so no DOI lookup was performed for {urls[0]!r}.",
+                original=urls[0],
+            )
         else:
             _add(
                 paper,
                 "URL-AS-DOI-01",
                 Severity.WARNING,
-                f"Reference {{{ref.key}}}: URL found but no DOI could be determined. "
-                f"URL: {urls[0]!r}. Please add the correct doi: field manually.",
+                f"Reference {{{ref.key}}}: a URL is given where JACoW expects a DOI, and "
+                f"no DOI was found for it in Crossref or refs.jacow.org. "
+                f"URL: {urls[0]!r}. Add the correct doi: field, or keep the URL if the "
+                f"item genuinely has no DOI.",
                 original=urls[0],
             )
 
@@ -381,17 +440,25 @@ def _fetch_crossref_work(doi: str) -> dict | None:
     if email:
         headers["User-Agent"] = f"aiagent-prescreen/0.1 (mailto:{email})"
 
-    try:
-        resp = httpx.get(
-            f"https://api.crossref.org/works/{doi}",
-            headers=headers,
-            timeout=8.0,
-        )
-        if resp.status_code != 200:
+    with STATUS.attempt("crossref") as outcome:
+        try:
+            resp = httpx.get(
+                f"https://api.crossref.org/works/{doi}",
+                headers=headers,
+                timeout=8.0,
+            )
+        except Exception as exc:  # noqa: BLE001 — network failure, not a data answer
+            outcome.failed(f"{type(exc).__name__}: {exc}")
             return None
+        if resp.status_code == 404:
+            # A real answer: Crossref does not know this DOI.
+            outcome.succeeded()
+            return None
+        if resp.status_code != 200:
+            outcome.failed(f"HTTP {resp.status_code}")
+            return None
+        outcome.succeeded()
         return resp.json().get("message", {})
-    except Exception:
-        return None
 
 
 def _title_tokens(text: str) -> set[str]:
@@ -478,67 +545,126 @@ def _doi_matches_reference(ref: Reference, doi: str, message: dict | None = None
     return True
 
 
-def _validate_doi_online(doi: str) -> bool:
-    """Return True when *doi* resolves in a trusted online source.
+class DoiVerdict(str, Enum):
+    """Outcome of trying to verify a DOI against an authority."""
 
-    Validation tries Crossref first because it is structured and cheap, then
-    falls back to doi.org resolution. Any network failure or 4xx/5xx result is
-    treated as an unverified DOI.
+    VERIFIED = "verified"        # an authority confirmed it resolves
+    NOT_FOUND = "not_found"      # an authority answered and does not know it
+    UNVERIFIED = "unverified"    # no authority could be reached — says nothing
+
+    def __bool__(self) -> bool:  # keeps `if _validate_doi_online(x):` honest
+        return self is DoiVerdict.VERIFIED
+
+
+def verify_doi(doi: str) -> DoiVerdict:
+    """Verify *doi* against Crossref, then the doi.org resolver.
+
+    Returns three states, not two.  This is the fix for the single most
+    misleading behaviour of the previous version: every lookup swallowed its
+    exception and returned ``False``, so "this DOI does not exist" and "we had
+    no network" produced the same output.  On a run with blocked egress the
+    agent emitted 25 confident "a DOI could not be found automatically"
+    warnings, several of them for references with well-known DOIs.
+
+    Callers must treat :attr:`UNVERIFIED` as *no information* — never as a
+    problem with the reference, and never as licence to suggest the DOI.
     """
     doi = doi.strip().removeprefix("doi:").strip().rstrip('.,;)]}')
     if not doi:
-        return False
+        return DoiVerdict.NOT_FOUND
 
-    message = _fetch_crossref_work(doi)
-    if message:
-        return True
+    if _fetch_crossref_work(doi):
+        return DoiVerdict.VERIFIED
 
     headers = {"User-Agent": "aiagent-prescreen/0.1"}
     email = os.getenv("CROSSREF_EMAIL", "").strip()
     if email:
         headers["User-Agent"] = f"aiagent-prescreen/0.1 (mailto:{email})"
 
-    try:
-        resp = httpx.head(
-            f"https://doi.org/{doi}",
-            headers={
-                "User-Agent": headers["User-Agent"],
-                "Accept": "text/html,application/xhtml+xml",
-            },
-            timeout=8.0,
-            follow_redirects=True,
-        )
-        return resp.status_code < 400
-    except Exception:
-        return False
+    with STATUS.attempt("doi.org") as outcome:
+        try:
+            resp = httpx.head(
+                f"https://doi.org/{doi}",
+                headers={
+                    "User-Agent": headers["User-Agent"],
+                    "Accept": "text/html,application/xhtml+xml",
+                },
+                timeout=8.0,
+                follow_redirects=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            outcome.failed(f"{type(exc).__name__}: {exc}")
+            return _no_authority_reached()
+        outcome.succeeded()
+        if resp.status_code < 400:
+            return DoiVerdict.VERIFIED
+        if resp.status_code in (404, 410):
+            return DoiVerdict.NOT_FOUND
+        return DoiVerdict.UNVERIFIED
 
 
-def _url_to_doi_direct(url: str) -> str | None:
-    """Derive a DOI from a URL without network requests, where possible."""
+def _no_authority_reached() -> DoiVerdict:
+    if STATUS.reachable("crossref") or STATUS.reachable("doi.org"):
+        return DoiVerdict.NOT_FOUND
+    return DoiVerdict.UNVERIFIED
+
+
+def _validate_doi_online(doi: str) -> bool:
+    """Backwards-compatible boolean wrapper — True only when verified."""
+    return verify_doi(doi) is DoiVerdict.VERIFIED
+
+
+# JACoW DOIs are minted as 10.18429/JACoW-<CONF><YEAR>-<PAPERID>, e.g.
+# 10.18429/JACoW-IPAC2023-TUPL139.  A proceedings URL directory sometimes
+# carries exactly that ("ipac2023") and sometimes carries a legacy code that is
+# NOT part of any DOI ("p05" for PAC 2005, "e04", "l02").  Only the first form
+# may be turned into a DOI candidate, and even then it must be verified before
+# it is shown: an earlier version derived "10.18429/JACoW-p05-FPAT077" from
+# https://jacow.org/p05/papers/FPAT077.pdf and offered it unchecked, which is a
+# dead DOI in the published proceedings if an editor accepts it.
+_CONF_DIR_RE = re.compile(r"^([A-Za-z]{2,10})(\d{4})$")
+
+
+def _jacow_conference_tag(directory: str) -> str | None:
+    """Return the DOI conference tag for a proceedings URL directory, or None."""
+    match = _CONF_DIR_RE.match(directory.strip())
+    if not match:
+        return None  # legacy code such as "p05" — no DOI can be derived
+    return f"{match.group(1).upper()}{match.group(2)}"
+
+
+def _url_to_doi_direct(url: str) -> tuple[str | None, bool]:
+    """Derive a DOI from a URL without network requests, where possible.
+
+    Returns ``(doi, is_authoritative)``.  ``is_authoritative`` is True only when
+    the URL *contains* the DOI (a doi.org link or a ``doi:`` token), so no
+    verification is needed.  A DOI merely *constructed* from a URL pattern is
+    returned with False and must be verified by the caller before being shown.
+    """
     url = url.strip().rstrip('.,;)]}')
 
     # doi: prefix notation stored directly in the url field
     m = re.match(r'doi:\s*(10\.\S+)', url, re.IGNORECASE)
     if m:
-        return m.group(1).rstrip('.,;')
+        return m.group(1).rstrip('.,;'), True
 
     m = _DOI_ORG_URL_RE.match(url)
     if m:
-        return m.group(1).rstrip('.,;')
+        return m.group(1).rstrip('.,;'), True
 
     m = _ARXIV_URL_RE.match(url)
     if m:
-        return f"10.48550/arXiv.{m.group(1).rstrip('/')}"
+        return f"10.48550/arXiv.{m.group(1).rstrip('/')}", False
 
-    m = _JACOW_URL_RE.match(url)
-    if m:
-        return f"10.18429/JACoW-{m.group(1)}-{m.group(2).upper()}"
+    for pattern in (_JACOW_URL_RE, _ACCELCONF_URL_RE):
+        m = pattern.match(url)
+        if m:
+            tag = _jacow_conference_tag(m.group(1))
+            if not tag:
+                return None, False
+            return f"10.18429/JACoW-{tag}-{m.group(2).upper()}", False
 
-    m = _ACCELCONF_URL_RE.match(url)
-    if m:
-        return f"10.18429/JACoW-{m.group(1)}-{m.group(2).upper()}"
-
-    return None
+    return None, False
 
 
 def _extract_urls_from_ref(ref: Reference) -> list[str]:
@@ -599,22 +725,24 @@ def _search_refs_jacow(ref: Reference) -> str | None:
         "User-Agent": "aiagent-prescreen/0.1",
         "Accept": "text/html",
     }
-    try:
-        resp = httpx.get(
-            "https://refs.jacow.org/",
-            params={"query": q, "formatType": "text"},
-            headers=headers,
-            timeout=10.0,
-            follow_redirects=True,
-        )
-        resp.raise_for_status()
-        dois = _JACOW_HTML_DOI_RE.findall(resp.text)
-        for doi in dois:
+    with STATUS.attempt("jacow-refdb") as outcome:
+        try:
+            resp = httpx.get(
+                "https://refs.jacow.org/",
+                params={"query": q, "formatType": "text"},
+                headers=headers,
+                timeout=10.0,
+                follow_redirects=True,
+            )
+            resp.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            outcome.failed(f"{type(exc).__name__}: {exc}")
+            return None
+        outcome.succeeded()
+        for doi in _JACOW_HTML_DOI_RE.findall(resp.text):
             candidate = doi.strip()
             if _doi_matches_reference(ref, candidate):
                 return candidate
-        return None
-    except Exception:
         return None
 
 
@@ -696,8 +824,35 @@ def _lookup_doi_crossref(ref: Reference) -> str | None:
 
 
 def check_missing_doi(paper: Paper) -> None:
-    """DOI-MISSING-01: likely article references should include DOI."""
+    """DOI-MISSING-01: likely article references should include a DOI.
+
+    This check is *only* meaningful when Crossref answers.  Without it the
+    finding degenerates into "we did not look", which on the sample corpus
+    produced 25 warnings carrying no information and no suggestion.  So the
+    first lookup decides whether the check runs at all: if Crossref cannot be
+    reached, the paper gets one INFO line saying the check did not run, and no
+    per-reference warnings.
+    """
     cache: dict[str, str | None] = {}
+    candidates = [
+        ref for ref in paper.references
+        if not ref.doi and not _extract_urls_from_ref(ref) and _likely_requires_doi(ref)
+    ]
+    if not candidates:
+        return
+
+    # Probe once with the first candidate, then decide.
+    _lookup_doi_crossref(candidates[0])
+    if not STATUS.reachable("crossref"):
+        _add(
+            paper,
+            "DOI-MISSING-01",
+            Severity.INFO,
+            f"NOT CHECKED — {len(candidates)} reference(s) have no DOI, but "
+            f"{label('crossref')} could not be reached on this run, so no DOI lookup "
+            "was performed. Re-run with network access to check them.",
+        )
+        return
 
     for ref in paper.references:
         if ref.doi:
@@ -730,8 +885,9 @@ def check_missing_doi(paper: Paper) -> None:
                 paper,
                 "DOI-MISSING-01",
                 Severity.WARNING,
-                f"Reference {{{ref.key}}} appears to be a journal/article entry "
-                "without DOI, and a DOI could not be found automatically.",
+                f"Reference {{{ref.key}}} looks like a journal article with no DOI. "
+                f"{label('crossref')} was searched and returned no confident match, so "
+                "the DOI needs to be added by hand (or the entry is not an article).",
                 original=ref.raw_text or ref.key,
             )
 
@@ -813,46 +969,115 @@ def check_bib_resources(paper: Paper) -> None:
 _IMG_EXTS = {".png", ".jpg", ".jpeg", ".pdf", ".eps", ".svg", ".gif"}
 
 
+def _images_in_archives(folder: Path) -> dict[str, Path]:
+    """Image names found inside .zip / .tar archives in the submission.
+
+    JACoW authors routinely upload their figures as a single archive
+    (``MOP030_fig.zip``).  Walking the filesystem alone therefore reported six
+    hard ERRORs against a complete submission.  Looking inside costs
+    milliseconds and removes a whole class of false positive.
+    """
+    found: dict[str, Path] = {}
+    for archive in folder.rglob("*"):
+        if not archive.is_file():
+            continue
+        suffix = archive.suffix.lower()
+        try:
+            if suffix == ".zip":
+                import zipfile
+
+                with zipfile.ZipFile(archive) as zf:
+                    names = zf.namelist()
+            elif suffix in (".tar", ".tgz", ".gz", ".bz2", ".xz"):
+                import tarfile
+
+                if not tarfile.is_tarfile(archive):
+                    continue
+                with tarfile.open(archive) as tf:
+                    names = tf.getnames()
+            else:
+                continue
+        except Exception:  # noqa: BLE001 — a corrupt archive is not our problem here
+            continue
+        for name in names:
+            entry = Path(name)
+            if entry.suffix.lower() in _IMG_EXTS:
+                found[entry.name] = archive
+                found[entry.stem] = archive
+    return found
+
+
 def check_figure_files(paper: Paper) -> None:
-    """FIG-MISSING-01: every \\includegraphics{f} must resolve to a file."""
+    r"""FIG-MISSING-01: every ``\includegraphics{f}`` should resolve to a file.
+
+    Severity is deliberately graded.  A figure that is nowhere in the
+    submission is an ERROR the editor must chase.  A figure that exists but only
+    inside an archive is a WARNING addressed to the *submission*, not the
+    source: the paper will build once the archive is unpacked.
+    """
     pt = _pt(paper)
     if not pt or not paper.source_path:
         return
 
     folder = paper.source_path.parent.parent  # submission root
-    # All image files anywhere in the submission (name only, for fast lookup)
     available_images: dict[str, Path] = {}
     for f in folder.rglob("*"):
         if f.is_file() and f.suffix.lower() in _IMG_EXTS:
             available_images[f.name] = f
-            available_images[f.stem] = f   # also index without extension
+            available_images[f.stem] = f
+
+    archived_images = _images_in_archives(folder)
 
     inc_pat = re.compile(r'\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}')
+    reported_in_archive: set[str] = set()
+
     for lineno, line in enumerate(pt.source_lines, start=1):
         clean = re.sub(r'(?<!\\)%.*', '', line)
         for m in inc_pat.finditer(clean):
             ref = m.group(1).strip()
-            # Strip leading path component (e.g. "figures/fig1" -> "fig1")
             ref_stem = Path(ref).stem
             ref_name = Path(ref).name
 
-            # Found if: exact name match, stem match, or name with any image ext
-            found = (
-                ref_name in available_images
-                or ref_stem in available_images
-                or any((ref_name + ext) in available_images for ext in _IMG_EXTS)
-            )
-            if not found:
-                close = difflib.get_close_matches(
-                    ref_stem, list(available_images.keys()), n=1, cutoff=0.6
+            def _present(pool: dict[str, Path]) -> bool:
+                return (
+                    ref_name in pool
+                    or ref_stem in pool
+                    or any((ref_name + ext) in pool for ext in _IMG_EXTS)
                 )
-                suggestion = f" Did you mean '{close[0]}'?" if close else ""
-                _add(paper, "FIG-MISSING-01", Severity.ERROR,
-                     f"\\includegraphics{{{ref}}}: image file not found in "
-                     f"the submission.{suggestion}",
-                     line=lineno,
-                     original=m.group(0),
-                     suggested=f"\\includegraphics{{{close[0]}}}" if close else None)
+
+            if _present(available_images):
+                continue
+
+            if _present(archived_images):
+                archive = (
+                    archived_images.get(ref_name)
+                    or archived_images.get(ref_stem)
+                    or next(
+                        (archived_images[ref_name + ext] for ext in _IMG_EXTS
+                         if (ref_name + ext) in archived_images),
+                        None,
+                    )
+                )
+                archive_name = archive.name if archive else "an archive"
+                if archive_name in reported_in_archive:
+                    continue
+                reported_in_archive.add(archive_name)
+                _add(paper, "FIG-ARCHIVE-01", Severity.WARNING,
+                     f"Figures are packed inside {archive_name} rather than supplied as "
+                     f"individual files. Unpack it before building; the source itself is fine.",
+                     line=lineno)
+                continue
+
+            close = difflib.get_close_matches(
+                ref_stem, list(available_images.keys()), n=1, cutoff=0.6
+            )
+            suggestion = f" Did you mean '{close[0]}'?" if close else ""
+            _add(paper, "FIG-MISSING-01", Severity.ERROR,
+                 f"\\includegraphics{{{ref}}}: image file not found in "
+                 f"the submission.{suggestion}",
+                 line=lineno,
+                 original=m.group(0),
+                 suggested=f"\\includegraphics{{{close[0]}}}" if close else None)
 
 
 # ---------------------------------------------------------------------------
@@ -862,8 +1087,8 @@ def check_figure_files(paper: Paper) -> None:
 def run_all(paper: Paper) -> None:
     """Run every Phase-1 reference check against *paper*."""
     check_reference_section(paper)
-    check_bib_resources(paper)
-    check_figure_files(paper)
+    check_bib_resources(paper)   # must precede check_citation_links: a missing
+    check_figure_files(paper)     # .bib explains every unresolved \cite at once
     check_citation_order(paper)
     check_citation_links(paper)
     check_reference_numbering(paper)

@@ -36,6 +36,17 @@ class WordReference:
     doi: str = ""
     url: str = ""
     ref_type: str = "unknown"       # proceedings|journal|arxiv|book|misc|...
+    # Where this entry lives in the document.  Needed to write Word tracked
+    # changes, which are expressed against paragraph content: an entry that
+    # spills over more than one paragraph cannot be revised as a single
+    # paragraph rewrite, and is reported instead of guessed at.
+    paragraph_index: int = -1
+    paragraph_count: int = 1
+    # The paragraph's text exactly as python-docx reports it, tabs and all.
+    # ``raw_text`` is cleaned (tabs collapsed, non-breaking spaces normalised),
+    # which is right for parsing and wrong for writing revisions: a tracked
+    # change must be expressed against the document's real characters.
+    paragraph_text: str = ""
 
 
 @dataclass
@@ -152,6 +163,7 @@ def parse_word(doc_path: Path) -> ParsedWord:
         return result  # no references section found
 
     raw_ref_lines: list[tuple[int, str]] = []  # (para_idx, text)
+    para_counts: list[int] = []                # paragraphs merged into each entry
     for i in range(ref_section_idx + 1, len(paragraphs)):
         para = paragraphs[i]
         txt = para.text.strip()
@@ -166,18 +178,23 @@ def parse_word(doc_path: Path) -> ParsedWord:
 
         if _is_ref_paragraph(style, txt):
             raw_ref_lines.append((i, txt))
+            para_counts.append(1)
             result.ref_paragraphs.append((i, txt))
         elif raw_ref_lines:
             # Continuation of previous reference (no [n] prefix, same section)
             # Only if the last item doesn't end with period or we're still in refs
             prev_idx, prev_txt = raw_ref_lines[-1]
             raw_ref_lines[-1] = (prev_idx, prev_txt + " " + txt)
+            para_counts[-1] += 1
             result.ref_paragraphs[-1] = (prev_idx, prev_txt + " " + txt)
 
     # --- Pass 4: parse each reference entry ---
-    for para_idx, raw in raw_ref_lines:
+    for (para_idx, raw), count in zip(raw_ref_lines, para_counts):
         ref = _parse_reference_entry(raw)
         if ref is not None:
+            ref.paragraph_index = para_idx
+            ref.paragraph_count = count
+            ref.paragraph_text = paragraphs[para_idx].text
             result.references.append(ref)
 
     return result

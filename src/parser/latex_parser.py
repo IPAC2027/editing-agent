@@ -40,12 +40,67 @@ class ParsedTex:
     bibliography_env: str = ""           # "thebibliography", "bibtex", or "biblatex"
     figure_labels: list[str] = field(default_factory=list)
     table_labels: list[str] = field(default_factory=list)
+    # Character spans of the \title{} / \author{} arguments in the raw source.
+    # Edit generators need these so author- and title-level rules can never
+    # touch body text.
+    title_span: tuple[int, int] | None = None
+    author_span: tuple[int, int] | None = None
+    # Narrower spans covering only the *text* an edit may touch: the title
+    # without its \thanks tail, and the author names without affiliations,
+    # emails or footnotes.  Edit generators use these, never the full argument.
+    title_text_span: tuple[int, int] | None = None
+    author_names_span: tuple[int, int] | None = None
+    affiliations: list[str] = field(default_factory=list)
+
+
+# JACoW author blocks put affiliations either after a "\\" break or inline,
+# after the last name.  These tokens mark the start of an affiliation.
+_AFFILIATION_CUE_RE = re.compile(
+    r"\b(?:University|Universit[a-zé]+|Institute|Institut|Laborator(?:y|ies)|Lab|"
+    r"National|Center|Centre|College|School|Department|Dept|Division|Facility|"
+    r"Academy|Academia|Research|Technolog(?:y|ies)|Corporation|Company|Ltd|Inc|GmbH|"
+    r"CERN|DESY|KEK|SLAC|Fermilab|CEA|CNRS|INFN|JINR|PSI|ESRF|ESS|ORNL|BNL|ANL|LBNL|"
+    r"LANL|JLab|TRIUMF|RIKEN|IHEP|MAX\s*IV|Diamond|Elettra|ALBA|SOLEIL|Sirius)\b",
+    re.IGNORECASE,
+)
+
+# "Initials Surname" — the JACoW convention.  Allows compound and particled
+# surnames ("van der Meer", "Le Duff", "O'Shea", "Garcia-Lopez").
+# "Initials Surname", where the surname may itself contain nobiliary or
+# patronymic particles anywhere in the sequence — "van der Meer",
+# "Hoffstaetter de Torquat", "Le Duff", "O'Shea", "Garcia-Lopez".
+_NAME_PARTICLE = (
+    r"(?:de|del|den|der|di|du|da|das|dos|la|las|le|les|van|von|vander|ter|ten|"
+    r"el|al|bin|ibn|abu|mac|mc|st|of|y|e|i)"
+)
+_JACOW_NAME_RE = re.compile(
+    r"^(?:[A-Z]\.[\s\-]*)+"
+    r"(?:" + _NAME_PARTICLE + r"[\s\-])*"
+    r"[A-Z][\w'\u2019\-]*"
+    r"(?:[\s\-](?:" + _NAME_PARTICLE + r"|[A-Z][\w'\u2019\-]*))*$",
+    re.UNICODE,
+)
 
 
 def _strip_comment(line: str) -> str:
     """Remove trailing LaTeX comment from a single line (respects \\%)."""
     result = re.sub(r'(?<!\\)%.*', '', line)
     return result
+
+
+def _blank_comment(line: str) -> str:
+    """Blank a LaTeX comment **without changing the line's length**.
+
+    Offsets matter: :attr:`ParsedTex.title_span` and
+    :attr:`ParsedTex.author_span` are handed to the edit generators, which use
+    them to index into the *raw* source.  Deleting comment text shifts every
+    later character, which silently pointed the title and author spans at
+    unrelated bytes (the ``\\documentclass`` option block, in practice).
+    """
+    def _pad(match: re.Match) -> str:
+        return " " * len(match.group(0))
+
+    return re.sub(r'(?<!\\)%.*', _pad, line)
 
 
 def _extract_braced(text: str, pos: int) -> tuple[str, int]:
@@ -79,6 +134,53 @@ def _extract_braced(text: str, pos: int) -> tuple[str, int]:
             buf.append(ch)
         i += 1
     return ''.join(buf), i
+
+
+def _trim_span(source: str, span: tuple[int, int], markers: tuple[str, ...]) -> tuple[int, int]:
+    """Shorten *span* to stop before the first of *markers*."""
+    start, end = span
+    region = source[start:end]
+    cut = len(region)
+    for marker in markers:
+        found = re.search(marker, region)
+        if found:
+            cut = min(cut, found.start())
+    return (start, start + cut)
+
+
+def _blank_groups(text: str, commands: tuple[str, ...]) -> str:
+    """Replace ``\\cmd{...}`` groups with spaces, preserving every offset."""
+    result = text
+    for command in commands:
+        pattern = re.compile(r"\\" + command + r"\s*\{[^{}]*\}")
+        result = pattern.sub(lambda m: " " * len(m.group(0)), result)
+    return result
+
+
+def _author_names_span(source: str, span: tuple[int, int]) -> tuple[int, int]:
+    r"""Span covering only the author *names* inside an ``\author{}`` argument.
+
+    Stops at the first ``\\`` line break and at the first affiliation cue, so a
+    name-level edit can never reach "Los Alamos National Laboratory" (which the
+    initials rule would otherwise offer to shorten to "L. Alamos") or an email
+    address inside ``\thanks{}``.
+    """
+    start, end = span
+    region = source[start:end]
+    cut = len(region)
+    brk = region.find("\\\\")
+    if brk >= 0:
+        cut = min(cut, brk)
+    # Blank footnote/thanks groups (length-preserving) before looking for an
+    # affiliation cue: an email like "kaemingk@lanl.gov" contains "LANL", which
+    # would otherwise truncate the author list after the first name.
+    searchable = _blank_groups(region[:cut], ("thanks", "footnote", "email", "orcid"))
+    cue = _AFFILIATION_CUE_RE.search(searchable)
+    if cue:
+        # Back up to the separator before the cue so a trailing ", " is excluded.
+        boundary = region.rfind(",", 0, cue.start())
+        cut = boundary if boundary > 0 else cue.start()
+    return (start, start + cut)
 
 
 def _find_command_arg(text: str, cmd: str) -> str:
@@ -131,20 +233,28 @@ def parse_latex(tex_path: Path) -> Paper:
     # ------------------------------------------------------------------
     # 3. Title and author (search in uncommented source)
     # ------------------------------------------------------------------
+    # Length-preserving so that character offsets in `stripped` are also valid
+    # offsets in `source`.
+    stripped = '\n'.join(_blank_comment(ln) for ln in lines)
     stripped_lines = [_strip_comment(ln) for ln in lines]
-    stripped = '\n'.join(stripped_lines)
 
     title_m = re.search(r'\\title\s*(\{)', stripped, re.DOTALL)
     if title_m:
-        content, _ = _extract_braced(stripped, title_m.start(1))
+        content, title_end = _extract_braced(stripped, title_m.start(1))
+        # Span of the argument itself (inside the braces), in raw-source
+        # coordinates.  `stripped` only blanks comments, so offsets match.
+        pt.title_span = (title_m.start(1) + 1, title_end - 1)
+        pt.title_text_span = _trim_span(stripped, pt.title_span, (r"\\thanks", r"\\footnote"))
         # Remove \thanks{...} for the clean title
         clean = re.sub(r'\\thanks\s*\{[^}]*\}', '', content)
         pt.title_raw = re.sub(r'\s+', ' ', clean).strip()
 
     author_m = re.search(r'\\author\s*(\{)', stripped, re.DOTALL)
     if author_m:
-        content, _ = _extract_braced(stripped, author_m.start(1))
+        content, author_end = _extract_braced(stripped, author_m.start(1))
         pt.author_raw = re.sub(r'\s+', ' ', content).strip()
+        pt.author_span = (author_m.start(1) + 1, author_end - 1)
+        pt.author_names_span = _author_names_span(stripped, pt.author_span)
 
     # ------------------------------------------------------------------
     # 4. \cite occurrences — walk all lines tracking line numbers
@@ -235,7 +345,7 @@ def parse_latex(tex_path: Path) -> Paper:
         ))
 
     # Parse author list from \author{} block
-    authors = _parse_author_block(pt.author_raw)
+    authors, pt.affiliations = parse_author_block(pt.author_raw)
 
     paper = Paper(
         paper_id=pt.paper_id,
@@ -274,17 +384,93 @@ def _infer_bibitem_type(raw: str) -> str:
     return "unknown"
 
 
-def _parse_author_block(author_raw: str) -> list[str]:
-    """Extract a flat list of author name strings from the \\author{} content."""
+def _strip_author_decorations(text: str) -> str:
+    r"""Remove affiliation markers and footnotes from an \author{} block.
+
+    Runs **before** any splitting.  This is the fix for the single largest
+    source of false positives in the previous version: the block was split on
+    commas first, so ``S. Kongtawong\textsuperscript{1,2}`` became the two
+    "authors" ``S. Kongtawong\textsuperscript{1`` and ``2}``, and every real
+    name that carried a superscript failed the name pattern because
+    ``K. Ha\textsuperscript{1}`` flattened to ``K. Ha1``.
+    """
+    # Superscript affiliation markers, in every spelling JACoW templates use.
+    text = re.sub(r"\\textsuperscript\s*\{[^{}]*\}", "", text)
+    text = re.sub(r"\\textsuperscript\s*\\?[\w*\u2020\u2021]", "", text)
+    text = re.sub(r"\$\s*\^?\s*\{[^{}]*\}\s*\$", "", text)   # $^{1,2}$
+    text = re.sub(r"\^\s*\{[^{}]*\}", "", text)               # ^{1,2}
+    text = re.sub(r"\^\s*\\?[\w*\u2020\u2021]", "", text)     # ^1  ^\dagger
+    # Footnotes / thanks / emails.
+    for cmd in ("thanks", "footnote", "footnotemark", "email", "orcid", "altaffilmark"):
+        text = re.sub(r"\\" + cmd + r"\s*\{[^{}]*\}", "", text)
+        text = re.sub(r"\\" + cmd + r"\b", "", text)
+    # Footnote symbols left bare.
+    text = re.sub(r"[*\u2020\u2021\u00a7\u00b6#]+", "", text)
+    # A LaTeX non-breaking space between initials and surname is correct JACoW
+    # style ("E.~Hamwi"), so it must read as a space rather than as markup.
+    text = text.replace("~", " ")
+    # Residual empty groups and stray markup.
+    text = re.sub(r"\{\s*\}", "", text)
+    text = re.sub(r"\\[a-zA-Z]+\s*", " ", text)
+    text = text.replace("{", " ").replace("}", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _split_author_names(text: str) -> list[str]:
+    """Split a decorated-and-cleaned author string into individual names."""
+    # "A, B and C" / "A, B, and C" / "A and B"
+    text = re.sub(r"\s*,?\s+and\s+", ", ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*;\s*", ", ", text)
+    parts = [part.strip(" ,;.") for part in text.split(",")]
+    return [part for part in parts if part]
+
+
+def parse_author_block(author_raw: str) -> tuple[list[str], list[str]]:
+    r"""Split an ``\author{}`` block into ``(author_names, affiliations)``.
+
+    Everything from the first affiliation cue onwards is treated as
+    affiliation text, whether it followed a ``\\`` break or not.  That keeps
+    ``Brookhaven National Laboratory``, ``Upton``, ``NY`` and ``USA`` out of the
+    author list — 11 of the 38 author findings in the sample corpus were
+    address fragments reported as badly formatted names.
+    """
     if not author_raw:
-        return []
-    # Remove \thanks{...}, affiliation lines separated by \\
-    text = re.sub(r'\\thanks\s*\{[^}]*\}', '', author_raw)
-    # Split on \\ (line break) — second part is usually affiliations
-    parts = re.split(r'\\\\', text)
-    if not parts:
-        return []
-    name_part = parts[0].strip()
-    # Names separated by commas; last may have affiliation appended after the list
-    names = [n.strip() for n in re.split(r',', name_part) if n.strip()]
-    return names
+        return [], []
+
+    cleaned = _strip_author_decorations(author_raw)
+    # A "\\" break separates names from affiliations in the JACoW template;
+    # _strip_author_decorations has already collapsed the command, so split on
+    # the marker we insert first.
+    segments = re.split(r"\\\\", author_raw)
+    name_text = _strip_author_decorations(segments[0]) if segments else cleaned
+    affiliation_text = " ".join(
+        _strip_author_decorations(segment) for segment in segments[1:]
+    )
+
+    names: list[str] = []
+    affiliations: list[str] = []
+    for candidate in _split_author_names(name_text):
+        if _AFFILIATION_CUE_RE.search(candidate) or affiliations:
+            # Once affiliation text starts, everything after it on the same
+            # segment is address, not names.
+            affiliations.append(candidate)
+            continue
+        names.append(candidate)
+
+    if affiliation_text:
+        affiliations.extend(_split_author_names(affiliation_text))
+
+    return names, affiliations
+
+
+def is_jacow_author_name(name: str) -> bool:
+    """True when *name* already follows the ``Initials Surname`` convention."""
+    cleaned = _strip_author_decorations(name)
+    if not cleaned:
+        return True  # nothing to judge — do not report
+    return bool(_JACOW_NAME_RE.match(cleaned))
+
+
+def _parse_author_block(author_raw: str) -> list[str]:
+    """Backwards-compatible wrapper returning author names only."""
+    return parse_author_block(author_raw)[0]

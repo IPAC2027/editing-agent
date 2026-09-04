@@ -34,14 +34,21 @@ def check_jacow_class_version(paper: Paper) -> None:
         return
     ver = pt.template_version
     if not ver:
-        _add(paper, "JACOW-CLS-01", Severity.WARNING,
+        _add(paper, "JACOW-CLS-01", Severity.INFO,
              f"Could not detect the JACoW class version from template comments. "
              f"Latest version is v{JACOW_LATEST_VERSION} ({JACOW_LATEST_DATE}). "
              f"Download from https://jacow.org/Authors/Templates")
     elif ver != JACOW_LATEST_VERSION:
-        _add(paper, "JACOW-CLS-01", Severity.WARNING,
-             f"Template version v{ver} detected. Latest is v{JACOW_LATEST_VERSION} "
-             f"({JACOW_LATEST_DATE}). Update from https://jacow.org/Authors/Templates",
+        # INFO, not WARNING: the template version is the same for every paper in
+        # a conference, it is not something an editor fixes per submission, and
+        # the "latest" value here is a hardcoded constant this tool does not
+        # verify against jacow.org.  Reporting it as a warning on all 34 sample
+        # papers was the single largest source of repeated noise.
+        _add(paper, "JACOW-CLS-01", Severity.INFO,
+             f"Template version v{ver}; this build of the agent knows about "
+             f"v{JACOW_LATEST_VERSION} ({JACOW_LATEST_DATE}) — not verified against "
+             f"jacow.org. Newer templates fix rendering bugs: "
+             f"https://jacow.org/Authors/Templates",
              original=f"% v {ver}",
              suggested=f"% v {JACOW_LATEST_VERSION}  {JACOW_LATEST_DATE}")
 
@@ -58,17 +65,20 @@ def check_bibliography_style(paper: Paper) -> None:
     if not pt:
         return
     if pt.bibliography_env == "thebibliography" and not pt.uses_biblatex:
-        _add(paper, "JACOW-CLS-02", Severity.WARNING,
-             "Manual \\thebibliography / \\bibitem detected. "
-             "JACoW class ≥ v2.10 supports BibLaTeX which is strongly preferred "
-             "for consistent reference formatting. Consider switching.",
+        # A preference, not a defect, and reported under its own id so it does
+        # not share a heading with the classic-BibTeX problem below — which is
+        # a real defect, and which an editor must be able to tell apart at a
+        # glance.
+        _add(paper, "JACOW-CLS-03", Severity.INFO,
+             "The reference list is written out by hand. That is valid, but "
+             "BibLaTeX gives more consistent formatting and the JACoW template "
+             "has supported it since v2.10.",
              suggested="Use \\documentclass[biblatex,...]{jacow} + \\addbibresource{<paper>.bib}")
     elif pt.bibliography_env == "bibtex" and not pt.uses_biblatex:
         _add(paper, "JACOW-CLS-02", Severity.ERROR,
-             "Classic BibTeX (\\bibliographystyle + \\bibliography) detected. "
-             "Most traditional styles (e.g. ieeetr) do not render the 'doi' field, "
-             "so DOIs stored in your .bib will not appear in the PDF. "
-             "Switch to BibLaTeX for correct DOI rendering.",
+             "The paper uses classic BibTeX with a traditional style. Styles like "
+             "ieeetr do not print the 'doi' field at all, so every DOI in the "
+             ".bib file will be missing from the published PDF.",
              suggested="Use \\documentclass[biblatex,...]{jacow} + \\addbibresource{<paper>.bib}")
 
 
