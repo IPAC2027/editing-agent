@@ -85,6 +85,11 @@ def test_every_check_the_agent_emits_has_plain_english():
         "BUILD-OK", "BUILD-FAIL", "BUILD-SKIP", "PAGE-LIMIT-01",
         "EDIT-OVERLAP-01", "LLM-REVIEW-01", "LLM-SUPPRESS-01",
         "WORD-TRACK-00", "WORD-TRACK-01", "WORD-TRACK-02",
+        # Word-only ids. These were missing from this list, so five checks
+        # reached the desk with no explanation and fell through to the
+        # "Needs a look" fallback without any test noticing.
+        "CITE-ORDER-01", "CITE-TEXT-02", "TITLE-01", "AUTH-01", "DOI-REQ-01",
+        "PROC-REQ-01", "PROC-REQ-02", "PROC-REQ-03",
     }
     missing = sorted(emitted - set(plain.EXPLANATIONS))
     assert not missing, f"no plain-English explanation for: {missing}"

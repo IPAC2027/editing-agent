@@ -208,6 +208,69 @@ EXPLANATIONS: dict[str, Explanation] = {
         owner=EDITOR,
     ),
 
+    "AUTH-01": Explanation(
+        "Comma before the last author",
+        "With three or more authors JACoW puts a comma before the final "
+        "'and' — 'A, B, and C'.",
+        owner=TOOL,
+        fixed="the comma before the last author in a reference",
+    ),
+    "TITLE-01": Explanation(
+        "Reference title in Title Case",
+        "The title looks title-cased. JACoW reference titles are sentence "
+        "case: only the first word and proper nouns keep capitals.",
+        owner=EDITOR,
+    ),
+    "PROC-REQ-01": Explanation(
+        "Proceedings reference has no venue",
+        "A proceedings reference names the conference — 'in Proc. IPAC'23' — "
+        "so a reader can find the volume.",
+        owner=AUTHOR,
+        ask=(
+            "Please write proceedings references in the JACoW form: "
+            "in Proc. CONF'YY, City, Country, Month Year, pp. N-M."
+        ),
+    ),
+    "PROC-REQ-02": Explanation(
+        "Proceedings reference has no year",
+        "A proceedings reference needs the year of the conference.",
+        owner=AUTHOR,
+        ask="Please add the conference year to this proceedings reference.",
+    ),
+    "PROC-REQ-03": Explanation(
+        "Proceedings reference has no pages or DOI",
+        "A proceedings reference needs either page numbers or a DOI, so the "
+        "paper can actually be located.",
+        owner=AUTHOR,
+        ask=(
+            "Please add page numbers (pp. N-M) or a DOI to this proceedings "
+            "reference."
+        ),
+    ),
+    "CITE-ORDER-01": Explanation(
+        "Citations out of order in the text",
+        "Reference numbers must count up in the order the text first cites "
+        "them. Reordering the reference list usually fixes it.",
+        owner=EDITOR,
+    ),
+    "CITE-TEXT-02": Explanation(
+        "Citations out of order in the text",
+        "Reference numbers must count up in the order the text first cites "
+        "them. In a Word document the numbers are typed by hand, so this has "
+        "to be corrected in the text and the list together.",
+        owner=AUTHOR,
+        ask=(
+            "Please renumber the citations and the reference list so the "
+            "numbers count up in the order the text first cites them."
+        ),
+    ),
+    "DOI-REQ-01": Explanation(
+        "Reference has no DOI",
+        "JACoW asks for a DOI on papers that have one. Where a DOI was found "
+        "for you it is shown; otherwise it needs looking up.",
+        owner=EDITOR,
+    ),
+
     # ---- things only the author can fix --------------------------------
     "FIG-MISSING-01": Explanation(
         "A figure file is missing",
