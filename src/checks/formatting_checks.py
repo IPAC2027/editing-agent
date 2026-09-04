@@ -5,8 +5,11 @@ from __future__ import annotations
 import re
 
 from src.models import Finding, Paper, Severity
+from src.parser.latex_parser import is_jacow_author_name
 
 
+# Unit tables moved to src.autofix.latex_edits, where the ambiguity handling
+# lives.  Re-exported here for backwards compatibility only.
 _CANONICAL_UNITS = {
     "eV", "keV", "MeV", "GeV", "TeV", "Hz", "kHz", "MHz", "GHz", "THz",
     "m", "cm", "mm", "um", "nm", "s", "ms", "us", "ns", "ps", "A", "mA",
@@ -68,11 +71,11 @@ def _add(
 
 
 def check_title_format(paper: Paper) -> None:
-    """FMT-TITLE-02: title must not end with punctuation.
+    r"""FMT-TITLE-02: the title must not end with punctuation.
 
-    ``jacow.cls`` uppercases title text at rendering time. Intentional lowercase
-    tokens are handled by ``\\NoCaseChange{...}``, so source-case alone is not a
-    deterministic error.
+    ``jacow.cls`` uppercases title text at rendering time, so intentional
+    lowercase is expressed with ``\NoCaseChange{...}`` and source case alone is
+    not a deterministic error.
     """
     title = paper.title.strip()
     if not title:
@@ -94,64 +97,60 @@ def check_title_format(paper: Paper) -> None:
 
 
 def check_author_format(paper: Paper) -> None:
-    """FMT-AUTH-01: author names must use the ``Initials Surname`` convention."""
+    """FMT-AUTH-01: author names must use the ``Initials Surname`` convention.
+
+    Reported as **one finding for the paper**, listing every name that needs
+    changing, rather than one finding per name.  The previous version emitted
+    one warning per author with the same message and the same line number: on
+    the sample corpus that was 38 warnings, of which 32 were affiliation
+    fragments or parser debris and the remaining 6 said the same thing seven
+    times over.
+
+    Affiliation text is no longer part of ``paper.authors`` at all — see
+    :func:`src.parser.latex_parser.parse_author_block` — so this check now sees
+    names only.
+    """
     if not paper.authors:
         return
 
     source = _source_text(paper)
     line = _line_for(source, r"\author")
-    for author in paper.authors:
-        visible_author = _plain_tex(author)
-        if not visible_author or _AUTHOR_RE.fullmatch(visible_author):
-            continue
-        _add(
-            paper,
-            "FMT-AUTH-01",
-            Severity.WARNING,
-            "Author names should use initials followed by surname, for example 'A. B. Surname'.",
-            line=line,
-            original=author,
-        )
+
+    offenders = [
+        author for author in paper.authors
+        if not is_jacow_author_name(author)
+    ]
+    if not offenders:
+        return
+
+    listed = ", ".join(f"'{name}'" for name in offenders[:8])
+    if len(offenders) > 8:
+        listed += f", and {len(offenders) - 8} more"
+    _add(
+        paper,
+        "FMT-AUTH-01",
+        Severity.WARNING,
+        f"{len(offenders)} of {len(paper.authors)} author names are not in JACoW "
+        f"'Initials Surname' form: {listed}. Abbreviate given names to initials.",
+        line=line,
+        original=", ".join(offenders),
+    )
 
 
 def check_number_unit_format(paper: Paper) -> None:
-    """FMT-UNIT-01/02: enforce non-breaking spacing and recognised SI-unit case."""
-    source = _source_text(paper)
-    for lineno, source_line in enumerate(source.splitlines(), start=1):
-        line = re.sub(r"(?<!\\)%.*", "", source_line)
-        for match in _NUMBER_UNIT_RE.finditer(line):
-            unit = match.group("unit")
-            canonical_unit = _UNIT_BY_LOWER.get(unit.lower())
-            if not canonical_unit:
-                continue
+    """Deprecated: number/unit spacing and case are now *edits*, not findings.
 
-            number = match.group("number")
-            separator = match.group("separator")
-            replacement = f"{number}~{canonical_unit}"
-            if separator not in {"~", r"\,"}:
-                _add(
-                    paper,
-                    "FMT-UNIT-01",
-                    Severity.WARNING,
-                    "Use a non-breaking space between a number and its unit.",
-                    line=lineno,
-                    original=match.group(0),
-                    suggested=replacement,
-                )
-            if unit != canonical_unit:
-                _add(
-                    paper,
-                    "FMT-UNIT-02",
-                    Severity.WARNING,
-                    "Use the standard case for the SI unit abbreviation.",
-                    line=lineno,
-                    original=match.group(0),
-                    suggested=replacement,
-                )
+    JACoW number-unit spacing is the highest-volume nit in the corpus (231
+    instances across 34 papers) and it is completely safe to apply, so it is
+    handled by :func:`src.autofix.latex_edits.unit_edits` at
+    :attr:`~src.edits.Tier.AUTO` instead of being reported 231 times for the
+    editor to fix by hand.  This function is kept as a no-op so existing
+    callers and tests keep working.
+    """
+    return None
 
 
 def run_all(paper: Paper) -> None:
-    """Run deterministic title, author, and number-unit checks in-place."""
+    """Run deterministic title and author checks in-place."""
     check_title_format(paper)
     check_author_format(paper)
-    check_number_unit_format(paper)

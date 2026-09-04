@@ -1,4 +1,24 @@
-"""End-to-end reference extraction and checking workflow for Word submissions."""
+"""Reference checking for Word submissions, delivered as Word tracked changes.
+
+Word is the format most JACoW submissions arrive in, and it used to be the
+format this tool did least for: it produced an HTML page of before/after cards
+and no corrected document, so an editor's only option was to read a suggestion
+in a browser and retype it into Word.
+
+The output now leads with ``<name>_tracked.docx`` — the author's own document
+with each correction as a Word revision.  The editor opens it, and Review →
+Accept / Reject works per change, in the tool they already use.  The HTML page
+is still written, because it is the only place the *reasons* fit.
+
+Two guards decide what gets into that document:
+
+* every line-level fix is a narrow, deterministic substitution;
+* every whole-reference reformat must pass :func:`src.refs.verify.check_rewrite`,
+  which compares the rewrite to the original and rejects it if a number, DOI,
+  word or capital went missing.  That check is what stops the two defects seen
+  on the sample corpus — ``Poincaré`` lowercased to ``poincaré`` and a doubled
+  comma at ``pp. 611-632,,`` — from ever reaching an editor.
+"""
 
 from __future__ import annotations
 
@@ -7,69 +27,205 @@ from pathlib import Path
 
 from src.autofix.word_fixes import fix_reference
 from src.checks.word_reference_checks import run_all
+from src.lookup_status import STATUS
+from src.models import Finding, Severity
 from src.output.word_report import write_word_reference_report
 from src.parser.word_parser import parse_word
+from src.refs.verify import check_rewrite, proper_noun_risk
 
 
 class WordPrescreenResult:
-    """Lightweight result object for Word reference checking."""
+    """Result of screening a Word submission."""
 
-    def __init__(self, paper_id: str, out_dir: Path, report_path: Path,
-                 total_refs: int, findings: list) -> None:
+    def __init__(
+        self,
+        paper_id: str,
+        out_dir: Path,
+        report_path: Path,
+        total_refs: int,
+        findings: list,
+        tracked_docx: str | None = None,
+        revisions: int = 0,
+        skipped: int = 0,
+    ) -> None:
         self.paper_id = paper_id
         self.out_dir = out_dir
         self.report_path = report_path
         self.total_refs = total_refs
         self.findings = findings
+        self.tracked_docx = tracked_docx
+        self.revisions = revisions
+        self.skipped = skipped
 
 
 def prescreen_word(folder: Path) -> WordPrescreenResult:
-    """Extract references from a Word submission, check them, and emit HTML output.
+    """Screen a Word submission and write tracked changes plus a report."""
+    STATUS.reset()
 
-    Writes ``word_references.html`` into ``<folder>/aiagent_prescreen/``.
-    """
     doc_path = _find_word_doc(folder)
     parsed = parse_word(doc_path)
-
     findings = run_all(parsed)
 
-    # Apply safe fixes reference-by-reference and collect per-ref findings
+    out_dir = folder / "aiagent_prescreen"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     refs_before: list[tuple[int, str]] = []
     refs_after: list[tuple[int, str]] = []
     findings_by_ref: dict[int, list] = {}
+    rewrites: list = []
+    rejected_rewrites = 0
+
+    from src.output.docx_tracked import ParagraphRewrite
 
     for ref in parsed.references:
-        refs_before.append((ref.n, ref.raw_text))
         ref_findings = [f for f in findings if f.line == ref.n]
         suggested_doi = next(
-            (
-                f.suggested for f in ref_findings
-                if f.check_id == "DOI-REQ-01" and f.suggested
-            ),
+            (f.suggested for f in ref_findings
+             if f.check_id == "DOI-REQ-01" and f.suggested),
             None,
         )
+
         corrected, fix_findings = fix_reference(
-            ref.n,
-            ref.raw_text,
-            suggested_doi=suggested_doi,
+            ref.n, ref.raw_text, suggested_doi=suggested_doi,
         )
-        # Final pass: reformat the line-level-corrected text via the
-        # Tier-1 JACoW formatter so the per-ref before/after card in
-        # word_references.html shows the canonical JACoW rewrite.
-        formatted, fmt_finding = _format_word_reference(ref, corrected, ref_n=ref.n)
-        if formatted and formatted.strip() != corrected.strip():
+
+        formatted, format_finding, rejection = _verified_reformat(ref, corrected)
+        if formatted is not None:
             corrected = formatted
-            fix_findings.append(fmt_finding)
+            if format_finding:
+                fix_findings.append(format_finding)
+        elif rejection is not None:
+            fix_findings.append(rejection)
+            rejected_rewrites += 1
+
+        refs_before.append((ref.n, ref.raw_text))
         refs_after.append((ref.n, corrected))
         findings_by_ref.setdefault(ref.n, [])
         findings_by_ref[ref.n].extend(ref_findings)
         findings_by_ref[ref.n].extend(fix_findings)
 
-    global_findings = [f for f in findings if f.line is None or f.line <= 0]
-    all_findings = global_findings + [f for fl in findings_by_ref.values() for f in fl]
+        if corrected.strip() == ref.raw_text.strip():
+            continue
 
-    out_dir = folder / "aiagent_prescreen"
-    out_dir.mkdir(exist_ok=True)
+        if ref.paragraph_index < 0 or ref.paragraph_count != 1 or not ref.paragraph_text:
+            findings_by_ref[ref.n].append(Finding(
+                check_id="WORD-TRACK-01",
+                severity=Severity.WARNING,
+                line=ref.n,
+                message=(
+                    f"Reference [{ref.n}] spans {ref.paragraph_count} paragraphs, so it "
+                    "could not be written as a single Word revision. The correction is "
+                    "in word_references.html; apply it by hand."
+                ),
+                original=ref.raw_text[:200],
+                suggested=corrected[:200],
+            ))
+            continue
+
+        # Express the change against the paragraph's *real* characters, not
+        # against the cleaned raw_text: the entry usually begins "[1]\t", and a
+        # revision computed against collapsed whitespace would not match the
+        # document and would be silently skipped.
+        paragraph_after = _rebuild_paragraph(ref.paragraph_text, ref.raw_text, corrected)
+        if paragraph_after is None or paragraph_after == ref.paragraph_text:
+            findings_by_ref[ref.n].append(Finding(
+                check_id="WORD-TRACK-01",
+                severity=Severity.WARNING,
+                line=ref.n,
+                message=(
+                    f"Reference [{ref.n}] could not be matched back to its paragraph, so "
+                    "no tracked change was written. The correction is in "
+                    "word_references.html."
+                ),
+                original=ref.raw_text[:200],
+                suggested=corrected[:200],
+            ))
+            continue
+
+        checks = sorted({f.check_id for f in fix_findings}) or ["FMT-REF-01"]
+        rewrites.append(ParagraphRewrite(
+            paragraph_index=ref.paragraph_index,
+            before=ref.paragraph_text,
+            after=paragraph_after,
+            author=f"JACoW prescreen ({', '.join(checks)})",
+            note="; ".join(f.message for f in fix_findings),
+        ))
+
+    # --- Word tracked changes ------------------------------------------
+    tracked_name: str | None = None
+    revisions = 0
+    skipped: list = []
+    if rewrites:
+        from src.output.docx_tracked import write_tracked_docx
+
+        tracked_path = out_dir / f"{doc_path.stem}_tracked.docx"
+        try:
+            _path, revision_blocks, skipped = write_tracked_docx(
+                doc_path, tracked_path, rewrites,
+            )
+            # Report *corrections*, not revision blocks: one correction can be
+            # several w:ins/w:del pairs, and an editor counts references.
+            revisions = len(rewrites) - len(skipped)
+            tracked_name = tracked_path.name
+        except Exception as exc:  # noqa: BLE001 — never lose the report over this
+            findings.append(Finding(
+                check_id="WORD-TRACK-02",
+                severity=Severity.WARNING,
+                message=(
+                    f"Could not write tracked changes ({type(exc).__name__}: {exc}). "
+                    "The corrections are still listed in word_references.html."
+                ),
+            ))
+
+    global_findings = [f for f in findings if f.line is None or f.line <= 0]
+    if tracked_name:
+        global_findings.insert(0, Finding(
+            check_id="WORD-TRACK-00",
+            severity=Severity.INFO,
+            message=(
+                f"{revisions} reference(s) corrected as tracked changes in "
+                f"{tracked_name}. Open it in "
+                "Word and use Review → Accept or Reject on each one; rejecting restores "
+                "the author's text exactly."
+            ),
+        ))
+    if skipped:
+        global_findings.append(Finding(
+            check_id="WORD-TRACK-01",
+            severity=Severity.WARNING,
+            message=(
+                f"{len(skipped)} correction(s) could not be written as revisions because "
+                "the paragraph text had changed; see word_references.html."
+            ),
+        ))
+    if rejected_rewrites:
+        global_findings.append(Finding(
+            check_id="FMT-REF-01",
+            severity=Severity.INFO,
+            message=(
+                f"{rejected_rewrites} reference(s) were left exactly as submitted because "
+                "the JACoW-style rewrite would have lost or altered information. Each one "
+                "says what it would have damaged."
+            ),
+        ))
+
+    # A check and the correction that resolves it are two views of one problem;
+    # reporting both is how the LaTeX side came to list DOI-FMT-02 twice per
+    # occurrence.  Keep the finding only when nothing was corrected for it.
+    corrected_refs = {rewrite.paragraph_index for rewrite in rewrites}
+    index_by_ref = {ref.n: ref.paragraph_index for ref in parsed.references}
+    for ref_n, group in findings_by_ref.items():
+        if index_by_ref.get(ref_n) not in corrected_refs:
+            continue
+        fixed_checks = {f.check_id for f in group if f.auto_fixed}
+        findings_by_ref[ref_n] = [
+            f for f in group
+            if f.auto_fixed or f.check_id not in fixed_checks
+        ]
+
+    all_findings = global_findings + [
+        f for group in findings_by_ref.values() for f in group
+    ]
 
     report_path = write_word_reference_report(
         parsed.paper_id,
@@ -79,6 +235,15 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
         global_findings,
         out_dir,
     )
+    _write_word_report_md(
+        out_dir / "report.md",
+        parsed.paper_id,
+        doc_path.name,
+        tracked_name,
+        revisions,
+        refs_before,
+        all_findings,
+    )
 
     return WordPrescreenResult(
         paper_id=parsed.paper_id,
@@ -86,22 +251,46 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
         report_path=report_path,
         total_refs=len(parsed.references),
         findings=all_findings,
+        tracked_docx=tracked_name,
+        revisions=revisions,
+        skipped=len(skipped),
     )
+
+
+def _rebuild_paragraph(paragraph_text: str, raw_body: str, corrected_body: str) -> str | None:
+    r"""Put *corrected_body* back into *paragraph_text*, keeping its prefix.
+
+    A reference paragraph looks like ``[1]\tAuthors, "Title", ...``.  The parser
+    hands the checks a cleaned body without the ``[1]`` label; this puts the
+    corrected body back after whatever prefix the document actually uses, so the
+    tracked change matches the document byte for byte.
+    """
+    match = re.match(r"^(\s*\[\d+\][\s\t\u00a0]*)(.*)$", paragraph_text, re.DOTALL)
+    if match:
+        return match.group(1) + corrected_body
+    # No bracket label: fall back to a whitespace-insensitive comparison.
+    if _squash(paragraph_text) == _squash(raw_body):
+        return corrected_body
+    return None
+
+
+def _squash(text: str) -> str:
+    return " ".join(text.replace("\t", " ").replace("\u00a0", " ").split())
 
 
 def _find_word_doc(folder: Path) -> Path:
     """Find the primary Word document in a submission folder."""
     candidates: list[Path] = []
-    for d in (folder / "Source_Files", folder):
-        if not d.is_dir():
+    for directory in (folder / "Source_Files", folder):
+        if not directory.is_dir():
             continue
-        for path in d.iterdir():
+        for path in directory.iterdir():
             if path.is_file() and path.suffix.lower() in {".docx", ".doc"}:
+                if "_tracked" in path.stem:
+                    continue  # our own previous output
                 candidates.append(path)
     if not candidates:
         raise FileNotFoundError(f"No Word document found under {folder}")
-
-    # Prefer .docx in Source_Files, then any .docx, then .doc
     candidates.sort(key=lambda p: (
         p.suffix.lower() != ".docx",
         p.parent.name != "Source_Files",
@@ -110,255 +299,182 @@ def _find_word_doc(folder: Path) -> Path:
     return candidates[0]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Tier-1 integration: final-pass JACoW reformat for the Word pipeline.
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Verified whole-reference reformat
+# ---------------------------------------------------------------------------
 
-def _format_word_reference(
-    ref,
-    line_corrected: str,
-    *,
-    ref_n: int,
-) -> tuple[str, "Finding | None"]:
-    """Run :func:`src.refs.format_ref` over the line-level-corrected text.
+def _verified_reformat(ref, line_corrected: str):
+    """Reformat one reference to JACoW style, but only if it verifies.
 
-    The :class:`WordReference` parser already extracts authors, title, year,
-    DOI and ref_type heuristically; we use those structured fields to build
-    a ``rec`` dict and call the JACoW formatter.  When the formatter emits a
-    text that differs from *line_corrected*, the per-ref before/after card in
-    ``word_references.html`` shows the JACoW rewrite as the diff.
-
-    Returns ``(formatted_text, finding)``.  When the formatter cannot produce
-    a different text (e.g. required fields missing), returns
-    ``(line_corrected, None)`` and the caller's line-level fixes are kept
-    untouched.
+    Returns ``(formatted_or_None, accept_finding, rejection_finding)``.
     """
-    from src.models import Finding, Severity
-    from src.refs import JacoWConnector, format_ref, normalize_journal
-    from src.refs.extract import _extract_conference
+    formatted, finding = _format_word_reference(ref, line_corrected, ref_n=ref.n)
+    if not formatted or formatted.strip() == line_corrected.strip():
+        return None, None, None
 
-    # Need at least a title to format anything.  Authors and year are
-    # required by the formatters too, so skip when missing.
+    verdict = check_rewrite(line_corrected, formatted, allow_case_change=False)
+    if verdict.ok:
+        return formatted, finding, None
+
+    risky = proper_noun_risk(line_corrected, formatted)
+    detail = verdict.reason
+    if risky:
+        detail += f" (words at risk: {', '.join(risky[:4])})"
+    return None, None, Finding(
+        check_id="FMT-REF-01",
+        severity=Severity.INFO,
+        line=ref.n,
+        message=(
+            f"Reference [{ref.n}]: a JACoW-style rewrite was computed but rejected "
+            f"because it would have {detail}. The reference is unchanged."
+        ),
+        original=line_corrected[:220],
+    )
+
+
+def _format_word_reference(ref, line_corrected: str, *, ref_n: int):
+    """Run the JACoW formatter over the line-corrected reference text.
+
+    Unchanged in intent from the previous version — it is the *verification*
+    around it that changed. The formatter still fills conference metadata from
+    the offline JACoW table and normalises the journal title, and still never
+    invents a value it was not given.
+    """
+    from src.refs import JacoWConnector, format_ref, normalize_journal
+
     if not (ref.title and ref.authors):
         return line_corrected, None
 
-    rec: dict = {
+    record: dict = {
         "authors_raw": " and ".join(ref.authors),
         "title": ref.title,
     }
 
-    year_m = None
-    if ref.raw_text:
-        year_m = re.search(r"\b(19|20)\d{2}\b", ref.raw_text)
-    if year_m:
-        rec["year"] = year_m.group(0)
-    else:
+    year = re.search(r"\b(19|20)\d{2}\b", ref.raw_text or "")
+    if not year:
         return line_corrected, None
+    record["year"] = year.group(0)
 
     if ref.ref_type:
-        rec["ref_type"] = ref.ref_type
+        record["ref_type"] = ref.ref_type
     if ref.doi:
-        rec["doi"] = ref.doi
+        record["doi"] = ref.doi
     if ref.url:
-        rec["url"] = ref.url
+        record["url"] = ref.url
 
-    # Conference hints from the raw text (best-effort, no DB lookup).
     raw = ref.raw_text or ""
-    if not rec.get("conference"):
-        m = re.search(r"\bin\s+Proc\.\s*([A-Za-z][A-Za-z0-9'’\-]+)", raw)
-        if m:
-            rec["conference"] = m.group(1)
-    # arXiv id for arXiv refs
+    conference = re.search(r"\bin\s+Proc\.\s*([A-Za-z][A-Za-z0-9'’\-]+)", raw)
+    if conference:
+        record["conference"] = conference.group(1)
     if (ref.ref_type or "").lower() == "arxiv":
-        m = re.search(r"arXiv:\s*([\w.\-]+/?\d+|\d{4}\.\d{4,5})", raw, re.IGNORECASE)
-        if m:
-            rec["arxiv_id"] = m.group(1)
+        arxiv = re.search(r"arXiv:\s*([\w.\-]+/?\d+|\d{4}\.\d{4,5})", raw, re.IGNORECASE)
+        if arxiv:
+            record["arxiv_id"] = arxiv.group(1)
 
-    # Tier-1.5: best-effort lift of conference / location / month / pages
-    # / DOI from the raw text.  The Word parser doesn't put these in
-    # the structured WordReference model, so without this the formatter
-    # would emit a paper with no "in Proc.", no city, no month, no
-    # pages — silently regressing the reference.  We only fill in
-    # fields that aren't already set, so we never overwrite a value
-    # that came from somewhere more authoritative.
     from src.refs.extract import extract_from_raw
+
     extracted = extract_from_raw(raw)
-    for k in ("city", "country", "month", "pages", "paper_id",
-              "doi", "journal", "volume", "issue"):
-        if extracted.get(k) and not rec.get(k):
-            rec[k] = extracted[k]
-    if not rec.get("conference") and extracted.get("conference"):
-        rec["conference"] = extracted["conference"]
-    if not rec.get("year") and extracted.get("year"):
-        rec["year"] = extracted["year"]
+    for key in ("city", "country", "month", "pages", "paper_id",
+                "doi", "journal", "volume", "issue", "conference", "year"):
+        if extracted.get(key) and not record.get(key):
+            record[key] = extracted[key]
 
-    # Tier-1: fill conference metadata when both acronym and year are known
-    # AND the acronym resolves in the JACoW hardcoded table.  Strip any
-    # trailing 'YY or 'YYYY suffix from the acronym so IPAC'23 → IPAC and
-    # the connector's _norm_acr can match.
-    if rec.get("conference"):
-        rec["conference"] = re.sub(r"['’]\d{2,4}$", "", rec["conference"])
-    if rec.get("conference") and rec.get("year"):
-        connector = JacoWConnector(allow_network=False)
-        log: list = []
-        rec = connector.complete_record(rec, log)
-
-    # Best-effort extraction of journal name and volume from raw_text.  The
-    # Word parser doesn't put these in structured fields, so without this
-    # the formatter would emit a paper with no journal and no vol/no/pp.
-    if (rec.get("ref_type", "").lower() in (
-        "journal", "journal_accepted", "journal_submitted",
-    )) and not rec.get("journal"):
-        rec["journal"], rec["volume"], rec["issue"], rec["pages"] = (
-            _extract_journal_meta_from_raw(raw)
-        )
-
-    # Tier-1: journal abbreviation cascade (L1 hand-curated table).  Now
-    # that the journal name is known, normalise it to the JACoW ANNEX C
-    # abbreviation (e.g. "Physical Review Letters" → "Phys. Rev. Lett.").
-    if (
-        rec.get("ref_type", "").lower() in (
-            "journal", "journal_accepted", "journal_submitted",
-        )
-        and rec.get("journal")
-    ):
-        normalised = normalize_journal(rec["journal"])
-        if normalised and normalised != rec["journal"]:
-            rec["journal"] = normalised
+    if record.get("conference"):
+        record["conference"] = re.sub(r"['’]\d{2,4}$", "", record["conference"])
+        if record.get("year"):
+            record = JacoWConnector(allow_network=False).complete_record(record, [])
+    if record.get("journal"):
+        normalised = normalize_journal(record["journal"])
+        if normalised:
+            record["journal"] = normalised
 
     try:
-        formatted = format_ref(rec, rec.get("ref_type", "journal"))
-    except Exception as exc:  # noqa: BLE001 — formatting is best-effort
-        # Log-and-continue: the line-level fixes already produced a usable
-        # text. The formatter is the icing; failure shouldn't abort the run.
-        import logging
-
-        logging.getLogger(__name__).debug(
-            "format_ref failed for ref [%d]: %s", ref_n, exc,
-        )
+        formatted = format_ref(record, record.get("ref_type", "journal"))
+    except Exception:  # noqa: BLE001
         return line_corrected, None
 
-    formatted_clean = (formatted or "").strip()
-    corrected_clean = (line_corrected or "").strip()
-    if not formatted_clean or formatted_clean == corrected_clean:
+    formatted = (formatted or "").strip()
+    if not formatted or formatted == line_corrected.strip():
+        # No-op: the caller keeps its own text and no finding is emitted.  An
+        # "improvement" that changes nothing must never be reported.
         return line_corrected, None
 
-    # Conservative guard: only emit FMT-REF-01 if the formatter output
-    # preserves the key information markers carried by the line-level
-    # corrected text.  This prevents the failure mode where the formatter
-    # drops information the original had — e.g. "in Proc. ..." line,
-    # "pp. N-M" pages, "Oct." month — and would silently regress the
-    # reference instead of improving it.
-    if _drops_information(corrected_clean, formatted_clean):
-        import logging
-        logging.getLogger(__name__).debug(
-            "FMT-REF-01 skipped for ref [%d]: formatted text drops "
-            "information present in the line-corrected text", ref_n,
-        )
-        return line_corrected, None
-
-    finding = Finding(
+    return formatted, Finding(
         check_id="FMT-REF-01",
         severity=Severity.INFO,
         line=ref_n,
-        original=corrected_clean[:240],
-        suggested=formatted_clean[:240],
+        original=line_corrected[:240],
+        suggested=formatted[:240],
         message=(
-            f"Reformatted reference [{ref_n}] per JACoW style "
-            f"(via src.refs: format_ref + JacoWConnector + normalize_journal)."
+            f"Reference [{ref_n}] reformatted to JACoW Annex B style; verified to "
+            "preserve every number, DOI, word and capital in the original."
         ),
         auto_fixed=True,
     )
-    return formatted, finding
 
 
-def _drops_information(original: str, formatted: str) -> bool:
-    """Return True if *formatted* is missing key information markers from
-    *original*.
+# ---------------------------------------------------------------------------
+# report.md for Word submissions
+# ---------------------------------------------------------------------------
 
-    Used by :func:`_format_word_reference` to skip the FMT-REF-01 emission
-    when the formatter would silently regress the reference.  The marker
-    set is intentionally narrow — just the fields whose loss would be a
-    clear regression for a JACoW-style reference:
+def _write_word_report_md(
+    path: Path,
+    paper_id: str,
+    doc_name: str,
+    tracked_name: str | None,
+    revisions: int,
+    refs_before: list[tuple[int, str]],
+    findings: list,
+) -> None:
+    from datetime import datetime, timezone
 
-    - ``in Proc.`` / ``presented at`` lines for conference refs
-    - ``pp.`` / ``p.`` page ranges
-    - ``vol.`` / ``no.`` volume / issue markers
-    - 3-letter month abbreviations (Jan./Feb./...)
-    - 4-digit conference years in the venue/location segment
-    - DOI (when the original has one, the formatted must too)
-    """
-    markers = [
-        r"\bin\s+Proc\.\b",
-        r"\bpresented\s+at\b",
-        r"\bpp?\.\s*\d",
-        r"\bvol\.\s*\w",
-        r"\bno\.\s*\w",
-        r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.\s",
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    errors = [f for f in findings if f.severity is Severity.ERROR]
+    warnings = [f for f in findings if f.severity is Severity.WARNING]
+    notes = [f for f in findings if f.severity is Severity.INFO]
+
+    lines = [
+        f"# Pre-screen — {paper_id} (Word)",
+        "",
+        f"**{'NEEDS WORK' if errors else ('REVIEW' if revisions or warnings else 'CLEAN')}** "
+        f"· {generated} · source `{doc_name}`",
+        "",
+        f"- **{revisions}** tracked change(s) written",
+        f"- **{len(refs_before)}** reference(s) checked",
+        f"- **{len(errors)}** problem(s) needing a human, "
+        f"**{len(warnings)}** warning(s), **{len(notes)}** note(s)",
+        "",
+        "## What to do",
+        "",
     ]
-    for pat in markers:
-        if re.search(pat, original, re.IGNORECASE) and not re.search(
-            pat, formatted, re.IGNORECASE,
-        ):
-            return True
-    # DOI: if the original has a 10.xxxx/... DOI, the formatted must too.
-    doi_re = re.compile(r"\b10\.\d{4,9}/\S+", re.IGNORECASE)
-    if doi_re.search(original) and not doi_re.search(formatted):
-        return True
-    return False
-
-
-def _extract_journal_meta_from_raw(
-    raw: str,
-) -> tuple[str | None, str | None, str | None, str | None]:
-    """Best-effort journal-name / volume / issue / pages extraction from raw text.
-
-    Used by :func:`_format_word_reference` to fill fields the Word parser
-    does not currently put in the ``WordReference`` structured model.
-    Returns ``(journal, volume, issue, pages)``; any field that cannot be
-    determined is ``None``.
-    """
-    if not raw:
-        return None, None, None, None
-
-    # Locate the first 4-digit year in the raw text — it almost always
-    # marks the boundary between the citation body and the year field.
-    ym = re.search(r"\b(19|20)\d{2}\b", raw)
-    if not ym:
-        return None, None, None, None
-    body, year_end = raw[: ym.start()].rstrip(", "), ym.end()
-
-    # Strip the authors+title prefix: the first quoted text or first comma
-    # cluster after a leading initial pattern is the title boundary.
-    title_m = re.search(r'["“](.*?)["”]', raw)
-    if title_m:
-        after_title = raw[title_m.end():]
+    if tracked_name:
+        lines += [
+            f"1. Open **`{tracked_name}`** in Word.",
+            "2. Review → Accept or Reject each change. Rejecting restores the author's "
+            "text exactly; the revision author names the rule behind each change, so "
+            "you can accept a whole rule at once.",
+            "3. **`word_references.html`** has the reason for every change side by side.",
+            "",
+        ]
     else:
-        # No quoted title — assume the journal starts after the first comma
-        # that is followed by a capitalised word (rough heuristic).
-        after_title = raw
+        lines += [
+            "No corrections were needed, so no tracked-changes document was written.",
+            "See **`word_references.html`** for the checks that ran.",
+            "",
+        ]
 
-    # From the post-title text, peel off the journal name (up to the next
-    # "vol.", "no.", "p.", or 4-digit-year).
-    journal_m = re.match(
-        r"^\s*[,\s]*\s*([A-Z][^,\n]+?)\s*,\s*"
-        r"(?:vol\.|no\.|pp?\.|p\.\s*\d|(?:19|20)\d{2})",
-        after_title,
-        re.IGNORECASE,
-    )
-    if not journal_m:
-        return None, None, None, None
+    for group, heading in (
+        (errors, "Problems that need a human"),
+        (warnings, "Warnings"),
+        (notes, "Notes"),
+    ):
+        if not group:
+            continue
+        lines += [f"## {heading} ({len(group)})", ""]
+        for finding in group:
+            where = f" (reference [{finding.line}])" if finding.line else ""
+            lines.append(f"- **`{finding.check_id}`**{where} — {finding.message}")
+        lines.append("")
 
-    journal = journal_m.group(1).strip().rstrip(",").strip()
-    if journal.lower() in {"proc", "in proc", "proceedings", "thesis", "phd thesis"}:
-        return None, None, None, None
-
-    # Now from the segment between the journal name and the year, pull
-    # vol/no/pp.
-    tail = after_title[journal_m.end(1):]
-    vol = (re.search(r"vol\.\s*([\w\-\./]+)", tail, re.IGNORECASE) or [None, None])[1]
-    iss = (re.search(r"no\.\s*([\w\-\./]+)", tail, re.IGNORECASE) or [None, None])[1]
-    pp_m = re.search(r"pp?\.\s*([\w\-\.,–]+)", tail, re.IGNORECASE)
-    pp = pp_m.group(1).strip() if pp_m else None
-
-    return journal, vol, iss, pp
+    lines += ["## External authorities", "", STATUS.summary_line(), ""]
+    path.write_text("\n".join(lines), encoding="utf-8")

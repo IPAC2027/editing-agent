@@ -1,4 +1,9 @@
-"""Structured, evidence-backed repair plans for editor review."""
+"""Superseded — ``repair_plan.json`` is now written by :mod:`src.output.report`.
+
+The plan is generated from the :class:`~src.edits.EditSet` rather than from a
+per-finding ``auto_fixed`` flag, so it can no longer disagree with the diff, the
+patches or the file on disk.  Kept for its tests; not used by the pipeline.
+"""
 
 from __future__ import annotations
 

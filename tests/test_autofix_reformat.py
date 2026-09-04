@@ -437,85 +437,117 @@ def test_word_format_emits_when_formatter_preserves_markers():
     assert "2020" in text
 
 
-def test_drops_information_detects_missing_in_proc():
-    from src.workflow.word_prescreen import _drops_information
+# ---------------------------------------------------------------------------
+# Rewrite verification
+#
+# The old guard was `_drops_information`, which looked for a handful of missing
+# markers.  It has been replaced by `src.refs.verify.check_rewrite`, which
+# compares the rewrite to the original directly.  These tests keep the original
+# marker cases and add the two defects the marker guard let through.
+# ---------------------------------------------------------------------------
+
+from src.refs.verify import check_rewrite, proper_noun_risk
+
+
+def _drops_information(original: str, rewritten: str) -> bool:
+    """The old predicate, expressed in terms of the new verifier."""
+    return not check_rewrite(original, rewritten, allow_case_change=True).ok
+
+
+def test_rewrite_check_detects_missing_in_proc():
     original = (
         'A. Smith, "T", in Proc. NAPAC\'16, Chicago, IL, USA, Oct. 2016, '
         'pp. 1-3. doi:10.1/x'
     )
-    # The original carries in Proc., Oct., pp., and a DOI
-    missing_in_proc = 'A. Smith, "T", 2016. doi:10.1/x'
-    assert _drops_information(original, missing_in_proc) is True
+    assert _drops_information(original, 'A. Smith, "T", 2016. doi:10.1/x') is True
 
 
-def test_drops_information_detects_missing_doi():
-    from src.workflow.word_prescreen import _drops_information
+def test_rewrite_check_detects_missing_doi():
     original = 'A. Smith, "T", Nature, 2020. doi:10.1038/test'
-    missing_doi = 'A. Smith, "T", Nature, 2020.'
-    assert _drops_information(original, missing_doi) is True
+    assert _drops_information(original, 'A. Smith, "T", Nature, 2020.') is True
 
 
-def test_drops_information_returns_false_when_markers_preserved():
-    from src.workflow.word_prescreen import _drops_information
+def test_rewrite_check_passes_when_nothing_is_lost():
     original = (
-        'A. Smith, "T", in Proc. NAPAC\'16, Chicago, IL, USA, '
+        'A. Smith, "Title", in Proc. NAPAC\'16, Chicago, IL, USA, '
         'Oct. 2016, pp. 1-3. doi:10.1/x'
     )
-    # Identical text → no markers missing
     assert _drops_information(original, original) is False
-    # Same markers, different case in title (sentence-case) is fine
-    reformatted = (
-        'A. Smith, "t", in Proc. NAPAC\'16, Chicago, IL, USA, '
+    # A pure sentence-case change is allowed when the caller permits case
+    # changes, and rejected when it does not — which is how a lowercased
+    # proper noun gets caught.
+    recased = (
+        'A. Smith, "title", in Proc. NAPAC\'16, Chicago, IL, USA, '
         'Oct. 2016, pp. 1-3. doi:10.1/x'
     )
-    assert _drops_information(original, reformatted) is False
+    assert _drops_information(original, recased) is False
+    assert check_rewrite(original, recased, allow_case_change=False).ok is False
 
 
-def test_drops_information_detects_missing_pages():
-    from src.workflow.word_prescreen import _drops_information
+def test_rewrite_check_detects_missing_pages():
     original = 'A. Smith, "T", Nature, vol. 1, pp. 1-5, 2020.'
-    no_pages = 'A. Smith, "T", Nature, vol. 1, 2020.'
-    assert _drops_information(original, no_pages) is True
+    assert _drops_information(original, 'A. Smith, "T", Nature, vol. 1, 2020.') is True
 
 
-def test_drops_information_detects_missing_vol():
-    from src.workflow.word_prescreen import _drops_information
+def test_rewrite_check_detects_missing_vol():
     original = 'A. Smith, "T", Nature, vol. 1, 2020.'
-    no_vol = 'A. Smith, "T", Nature, 2020.'
-    assert _drops_information(original, no_vol) is True
+    assert _drops_information(original, 'A. Smith, "T", Nature, 2020.') is True
 
 
-def test_drops_information_detects_missing_month():
-    from src.workflow.word_prescreen import _drops_information
+def test_rewrite_check_detects_missing_month():
     original = 'A. Smith, "T", Nature, Oct. 2020.'
-    no_month = 'A. Smith, "T", Nature, 2020.'
-    assert _drops_information(original, no_month) is True
+    assert _drops_information(original, 'A. Smith, "T", Nature, 2020.') is True
 
 
-def test_drops_information_detects_missing_presented_at():
-    from src.workflow.word_prescreen import _drops_information
+def test_rewrite_check_detects_missing_presented_at():
     original = (
         'A. Smith, "T", presented at IPAC\'23, Venice, Italy, May 2023, '
         'unpublished.'
     )
-    no_presented = 'A. Smith, "T", IPAC\'23, 2023.'
-    assert _drops_information(original, no_presented) is True
+    assert _drops_information(original, 'A. Smith, "T", IPAC\'23, 2023.') is True
+
+
+def test_rewrite_check_catches_the_doubled_comma_defect():
+    """Observed on TUP033: the template emitted 'pp. 611-632,,'."""
+    original = (
+        'M. Ruth and D. Bindel, "Level set learning", SIAM J. Appl. Dyn. Syst., '
+        'vol. 24, no. 1, pp. 611-632, Feb. 2025. doi:10.1137/23m1622179'
+    )
+    damaged = original.replace('pp. 611-632,', 'pp. 611-632,,')
+    verdict = check_rewrite(original, damaged)
+    assert verdict.ok is False
+    assert "doubled punctuation" in verdict.reason
+
+
+def test_rewrite_check_catches_the_lowercased_proper_noun_defect():
+    """Observed on TUP033: 'Poincaré' was lowercased to 'poincaré'."""
+    original = (
+        'M. Ruth and D. Bindel, "Level set learning for Poincare plots", '
+        'SIAM J. Appl. Dyn. Syst., vol. 24, pp. 611-632, 2025.'
+    )
+    damaged = original.replace("Poincare", "poincare")
+    verdict = check_rewrite(original, damaged, allow_case_change=False)
+    assert verdict.ok is False
+    assert "capitalisation" in verdict.reason
+    assert proper_noun_risk(original, damaged) == ["Poincare"]
+
+
+def test_rewrite_check_catches_a_dropped_digit():
+    original = 'A. Smith, "T", Nature, vol. 12, pp. 100-104, 2020.'
+    damaged = 'A. Smith, "T", Nature, vol. 12, pp. 100-14, 2020.'
+    verdict = check_rewrite(original, damaged)
+    assert verdict.ok is False
+    assert "104" in verdict.reason
 
 
 def test_word_format_returns_caller_text_when_unchanged():
-    """When the formatter produces identical text, the caller keeps the
-    line-level-corrected text and no FMT-REF-01 finding is emitted."""
-    # The simplest case: a one-author journal entry that is already in
-    # JACoW form. The formatter may or may not produce a string that exactly
-    # matches; we just verify the no-op path.
+    """When the formatter produces identical text the caller keeps its input."""
     ref = _make_word_ref(
         n=4,
         raw_text='A. Smith, "T", Nature, vol. 1, 2020.',
         authors=["A. Smith"], title="T", ref_type="journal",
     )
     text, finding = _format_word_reference(ref, ref.raw_text, ref_n=4)
-    # If finding is None, text is the line-corrected input.
-    # If finding is not None, text must differ.
     if finding is None:
         assert text == ref.raw_text
     else:

@@ -1,4 +1,27 @@
-"""Safe, deterministic auto-fixes applied directly to LaTeX source text."""
+"""Superseded — kept for the migrated reference-reformat helpers only.
+
+The line-by-line fix pass in this module has been replaced by
+:mod:`src.autofix.latex_edits`, which generates span-anchored
+:class:`~src.edits.Edit` objects against the unmodified source instead of
+mutating it in place.  The rewrite fixed three classes of bug that are
+structural to the approach here and cannot be patched out of it:
+
+* a fix reported itself as applied by testing the regex substitution *count*
+  rather than whether the text changed, so an already-correct ``doi:10.x``
+  produced a phantom "auto-fix";
+* ``original`` and ``suggested`` were recorded at different granularities (a
+  snippet against a whole line), which made the before/after unreadable and
+  the diff's reason-attribution unreliable;
+* two fixes could clobber each other's results, because each ran on the output
+  of the last.
+
+Nothing in the pipeline imports from here any more.  The module remains because
+``reformat_bibitem_bodies`` and its helpers are still referenced by tests, and
+because deleting working code in the same change as replacing it makes the
+change harder to review.  Do not wire it back in: use
+:func:`src.autofix.latex_edits.all_source_edits` and
+:func:`src.autofix.reference_edits.bibitem_rewrite_edits`.
+"""
 
 from __future__ import annotations
 
@@ -84,7 +107,7 @@ def _fix_doi_prefix(line: str, lineno: int, findings: list[Finding]) -> tuple[st
         return f"doi:{m.group(2)}"
 
     new_line, n = pat.subn(_repl, line)
-    if n:
+    if n and new_line != line:
         findings.append(Finding(
             check_id="DOI-FMT-01",
             severity=Severity.INFO,

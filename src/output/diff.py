@@ -1,4 +1,17 @@
-"""Diff writers: unified patch and annotated side-by-side HTML."""
+"""Superseded — see :mod:`src.output.review`.
+
+This wrote ``changes.html``, whose Accept and Reject buttons recorded decisions
+into ``localStorage`` and downloaded a ``review_decisions.json`` that no code
+read — so the editor's only real choice was the whole of ``<ID>_edited.tex`` or
+none of it.  Its hover reasons were also unreliable: repairs were matched to
+lines by substring search, and because ``original`` and ``suggested`` were
+recorded at different granularities the search often failed and the repair was
+attached to *every* changed row.
+
+``src.output.review`` replaces it with per-edit patches, a git history and a
+``review.html`` whose decisions ``aiagent apply`` actually consumes.  Kept for
+its tests and for reference; not used by the pipeline.
+"""
 
 from __future__ import annotations
 

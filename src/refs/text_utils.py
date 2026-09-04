@@ -18,7 +18,13 @@ file has been dropped where the helper is genuinely part of the surface):
 
 from __future__ import annotations
 
+import logging
 import re
+import unicodedata
+from pathlib import Path
+from typing import NamedTuple
+
+logger = logging.getLogger(__name__)
 
 # ── Month name constants (used by date formatting + LTWA / Crossref parsing) ──
 
@@ -328,62 +334,312 @@ def _is_mixed_case_name(tok: str) -> bool:
     return False
 
 
-def _sent_case_token(tok: str, is_first: bool, strict: bool = False) -> str:
-    """Sentence-case a single token (no hyphens)."""
+# ─────────────────────────────────────────────────────────────────────────────
+# Safe-to-lowercase lexicon
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# JACoW wants reference titles in sentence case, which means lowercasing
+# ordinary words while leaving proper nouns alone.  Doing that with a
+# hand-maintained whitelist of proper nouns cannot work: the set of surnames,
+# facilities, codes and instruments in accelerator physics is open-ended, and
+# an earlier version of this module lowercased "Poincaré", "Tevatron", "Twiss"
+# and "Landau" because they were not on a 60-item list.
+#
+# The polarity is now inverted.  A Title-Case word is lowercased only when it
+# is *positively known* to be an ordinary word; otherwise the function abstains,
+# leaves the word exactly as the author wrote it, and reports it so the caller
+# can ask a human (or a model — see src/llm/classify.py) instead of guessing.
+#
+# The shipped lexicon is built from two sources, both of which key on evidence
+# rather than opinion:
+#
+#   1. An English dictionary, restricted to words that have **no** capitalised
+#      homograph.  This is what protects Watt, May, March, Kelvin and Newton:
+#      each is both a common word and a name, so neither is in the lexicon.
+#   2. Words that accelerator-physics authors themselves write in lowercase
+#      mid-sentence, mined from the JACoW corpus.  An author never writes a
+#      real proper noun in lowercase, so a word seen lowercase in two or more
+#      papers is an ordinary word ("emittance", "quadrupole", "symplectic").
+#
+# Callers may extend it per paper via ``evidence=`` — see
+# :func:`lowercase_evidence`, which harvests the same signal from the body text
+# of the paper being screened.
+
+_LEXICON_PATH = Path(__file__).with_name("data") / "common_words.txt.gz"
+_LEXICON: frozenset | None = None
+
+
+def safe_to_lowercase_lexicon() -> frozenset:
+    """The shipped set of words that may be lowercased in a title."""
+    global _LEXICON
+    if _LEXICON is None:
+        try:
+            import gzip
+
+            with gzip.open(_LEXICON_PATH, "rt", encoding="utf-8") as handle:
+                _LEXICON = frozenset(line.strip() for line in handle if line.strip())
+        except OSError:
+            logger.warning(
+                "sentence-case lexicon missing at %s; every ambiguous word will be "
+                "reported as unsure rather than lowercased", _LEXICON_PATH,
+            )
+            _LEXICON = frozenset()
+    return _LEXICON
+
+
+_WORD_RE = re.compile(r"(?<![\w./@-])([a-z][a-z\-]{2,})(?![\w./@-])")
+
+# Always safe to lowercase mid-title; never an acronym.
+_FUNCTION_WORDS = frozenset({
+    "a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "into", "nor",
+    "of", "on", "onto", "or", "over", "per", "the", "to", "up", "upon", "via",
+    "with", "within", "without", "is", "are", "was", "were", "be", "been", "its",
+    "it", "that", "this", "these", "those", "than", "then", "when", "where",
+})
+
+
+def lowercase_evidence(body_text: str) -> set[str]:
+    r"""Words the paper's own prose writes in lowercase.
+
+    Used to extend the shipped lexicon with this paper's vocabulary. If the
+    author writes "cryomodule" lowercase in a sentence, it is an ordinary word
+    in this field even if no dictionary knows it.
+    """
+    text = re.sub(r"(?<!\\)%[^\n]*", " ", body_text)
+    text = re.sub(r"\$[^$]*\$", " ", text)
+    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"\S+@\S+", " ", text)
+    text = re.sub(r"\\[a-zA-Z@]+\*?(?:\[[^\]]*\])?", " ", text)
+    text = re.sub(r"[{}]", " ", text)
+    return {match.group(1) for match in _WORD_RE.finditer(text)}
+
+
+# Multi-word proper nouns made entirely of ordinary words.  Word-by-word
+# classification cannot possibly catch these — every token in "Large Hadron
+# Collider" is an ordinary English word — but the set of accelerator facilities
+# and projects is *bounded*, unlike the set of surnames, so a phrase list is
+# the right tool here.  Anything not listed and not classifiable is still
+# reported as unsure rather than guessed.
+_PROPER_PHRASES: tuple[str, ...] = (
+    "large hadron collider", "high luminosity large hadron collider",
+    "electron ion collider", "electron-ion collider",
+    "future circular collider", "compact linear collider",
+    "international linear collider", "muon collider",
+    "relativistic heavy ion collider", "advanced photon source",
+    "national synchrotron light source", "diamond light source",
+    "european spallation source", "spallation neutron source",
+    "linac coherent light source", "european x-ray free electron laser",
+    "swiss light source", "canadian light source", "australian synchrotron",
+    "advanced light source", "stanford linear accelerator center",
+    "thomas jefferson national accelerator facility",
+    "continuous electron beam accelerator facility",
+    "facility for rare isotope beams", "rare isotope science project",
+    "heavy ion research facility", "china spallation neutron source",
+    "shanghai synchrotron radiation facility", "taiwan photon source",
+    "taiwan light source", "korea multi-purpose accelerator complex",
+    "japan proton accelerator research complex",
+    "super proton synchrotron", "proton synchrotron booster",
+    "alternating gradient synchrotron", "cornell electron storage ring",
+    "argonne wakefield accelerator", "brookhaven national laboratory",
+    "los alamos national laboratory", "lawrence berkeley national laboratory",
+    "oak ridge national laboratory", "argonne national laboratory",
+    "fermi national accelerator laboratory", "paul scherrer institute",
+    "helmholtz zentrum berlin", "institute of high energy physics",
+    "national institute of standards and technology",
+    "department of energy", "national science foundation",
+    "european organization for nuclear research",
+    "conceptual design report", "technical design report",
+    "final design report", "preliminary design report",
+    "united states", "united kingdom", "people's republic of china",
+    "light source", "free electron laser",
+)
+_PROPER_PHRASE_TOKENS: tuple[tuple[str, ...], ...] = tuple(
+    tuple(phrase.split()) for phrase in
+    sorted(_PROPER_PHRASES, key=lambda phrase: -len(phrase.split()))
+)
+
+
+def _protected_indices(tokens: list[str]) -> set[int]:
+    """Token positions covered by a known multi-word proper noun."""
+    folded = [_fold(token.strip("\u201c\u201d\"'()[],.;:!?")) for token in tokens]
+    protected: set[int] = set()
+    for phrase in _PROPER_PHRASE_TOKENS:
+        length = len(phrase)
+        if length < 2:
+            continue
+        for start in range(len(folded) - length + 1):
+            if tuple(folded[start:start + length]) == phrase:
+                protected.update(range(start, start + length))
+    return protected
+
+
+class TitleCasing(NamedTuple):
+    """Result of a sentence-case pass, including what it refused to decide."""
+
+    text: str
+    unsure: tuple[str, ...]
+    changed: bool
+    protected: tuple[str, ...] = ()
+
+    @property
+    def confident(self) -> bool:
+        return not self.unsure
+
+
+# Bibliographic abbreviations whose full stop does NOT end a sentence.  Without
+# this, "Proc. IPAC'24" reads as two sentences and IPAC'24 gets recapitalised to
+# "Ipac'24" — a real regression caught on the sample .bib files.
+_ABBREVIATIONS = frozenset({
+    "proc", "procs", "rev", "phys", "nucl", "instrum", "meth", "methods",
+    "j", "jour", "vol", "no", "nos", "pp", "p", "ed", "eds", "et", "al",
+    "univ", "inst", "lab", "labs", "conf", "trans", "sci", "technol", "tech",
+    "appl", "opt", "express", "lett", "commun", "eng", "res", "int", "natl",
+    "am", "eur", "chin", "jpn", "sect", "sec", "ser", "suppl", "abstr",
+    "rep", "dept", "div", "fig", "figs", "tab", "eq", "eqs", "ref", "refs",
+    "chap", "ch", "app", "st", "nd", "rd", "th", "mr", "ms", "dr", "prof",
+    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct",
+    "nov", "dec", "cf", "eg", "ie", "etc", "viz", "ibid", "op", "cit",
+})
+
+
+def _is_sentence_start(tokens: list[str], index: int) -> bool:
+    """True when the token at *index* begins a sentence.
+
+    A colon always starts one.  A full stop only does when the token it
+    terminates is a real word rather than an abbreviation or an initial:
+    "magnetic field. Part 1" is two sentences, "Proc. IPAC'24" is not, and
+    "M. Ruth" certainly is not.
+    """
+    if index == 0:
+        return True
+    previous = tokens[index - 1].rstrip()
+    if previous.endswith((":", "?", "!")):
+        return True
+    if not previous.endswith("."):
+        return False
+
+    stem = previous.rstrip(".").strip("\u201c\u201d\"'()[]")
+    if len(stem) <= 1:
+        return False                          # an initial, e.g. "M."
+    folded = _fold(stem)
+    if folded in _ABBREVIATIONS:
+        return False
+    if stem.isupper():
+        return False                          # an acronym followed by a stop
+    # Only a word we positively recognise ends a sentence.  Anything unknown is
+    # treated as an abbreviation, which errs towards leaving capitals alone.
+    return folded in safe_to_lowercase_lexicon() and len(stem) >= 3
+
+
+def _sent_case_token(
+    tok: str,
+    is_first: bool,
+    strict: bool = False,
+    lexicon: frozenset | set = frozenset(),
+    unsure: list[str] | None = None,
+) -> str:
+    """Sentence-case a single token, abstaining when it cannot be classified."""
+    # Function words are never acronyms, even in an ALL-CAPS title where the
+    # strict acronym test would otherwise keep "IN" and "OF" shouting.
+    if not is_first and _fold(tok.strip('.,;:!?()[]')) in _FUNCTION_WORDS:
+        return tok.lower()
     if _is_acronym(tok, strict=strict):
         return tok
     if _is_mixed_case_name(tok):
         return tok
     if is_first:
         return tok[0].upper() + tok[1:].lower() if tok else tok
-    core = tok.rstrip(".,;:!?)")
-    if (
-        len(core) > 1
-        and core[0].isupper()
-        and core[1:].islower()
-        and core.lower() in _PROPER_NOUNS_LOWER
-    ):
-        return tok  # known proper noun — preserve
-    return tok.lower()
+
+    core = tok.strip("\u201c\u201d\"'()[]").rstrip(".,;:!?)")
+    if not core or not core[0].isupper():
+        return tok.lower() if core.islower() or not core else tok
+
+    key = _fold(core)
+    if key in lexicon:
+        return tok.lower()
+
+    # Not positively known to be an ordinary word — leave it exactly as the
+    # author wrote it and tell the caller.
+    if unsure is not None and core not in unsure:
+        unsure.append(core)
+    return tok
 
 
-def sent_case(s: str) -> str:
-    """Convert *s* to JACoW sentence case.
+def _fold(word: str) -> str:
+    """Lowercase and strip diacritics so 'Poincaré' can be looked up."""
+    lowered = word.lower()
+    return "".join(
+        ch for ch in unicodedata.normalize("NFD", lowered)
+        if unicodedata.category(ch) != "Mn"
+    )
 
-    Rules (applied in order):
-      - First word, and first word after a colon: capitalise.
-      - All-cap acronyms (LHC, BERT, LLMs): preserved.
-      - Mixed-case tokens (BIGbench, DeepSeek, GeV): preserved.
-      - Known proper nouns in :data:`_PROPER_NOUNS_LOWER`: preserved.
-      - Hyphenated compounds: each segment processed independently.
-      - Everything else: lower-cased.
-      - All-caps titles (≥80% uppercase tokens): stricter acronym test
-        (only 2-3 char tokens qualify).
+
+def sent_case_report(s: str, *, evidence: set[str] | None = None) -> TitleCasing:
+    """Convert *s* to JACoW sentence case, reporting anything it would not decide.
+
+    Rules, in order:
+
+    - The first word, and the first word after a colon or full stop, is
+      capitalised.
+    - All-caps acronyms (LHC, BERT) and intentionally mixed-case tokens
+      (GeV, SwissFEL, DeepSeek) are preserved.
+    - A word positively known to be ordinary — in the shipped lexicon or in
+      *evidence* — is lowercased.
+    - **Anything else is left untouched and listed in**
+      :attr:`TitleCasing.unsure`.  A title with any unsure token must not be
+      rewritten automatically.
+    - Hyphenated compounds are handled segment by segment.
     """
     if not s:
-        return s
+        return TitleCasing(s, (), False)
+
+    lexicon = safe_to_lowercase_lexicon()
+    if evidence:
+        lexicon = lexicon | {_fold(word) for word in evidence}
+
     tokens = s.split()
-    alpha_cores = [re.sub(r"[^A-Za-z]", "", t) for t in tokens]
-    n_alpha = sum(1 for c in alpha_cores if c)
-    n_upper = sum(1 for c in alpha_cores if c and c.isupper())
+    alpha_cores = [re.sub(r"[^A-Za-z]", "", token) for token in tokens]
+    n_alpha = sum(1 for core in alpha_cores if core)
+    n_upper = sum(1 for core in alpha_cores if core and core.isupper())
     strict = n_alpha > 0 and n_upper / n_alpha >= 0.8
+
+    unsure: list[str] = []
     out: list[str] = []
-    for i, tok in enumerate(tokens):
-        is_first = (i == 0) or (i > 0 and tokens[i - 1].rstrip().endswith(":"))
-        if "-" in tok and not tok.startswith("-"):
-            parts = tok.split("-")
-            result_parts: list[str] = []
-            for j, part in enumerate(parts):
+    protected_positions = _protected_indices(tokens)
+    protected: list[str] = []
+    for index, token in enumerate(tokens):
+        if index in protected_positions:
+            out.append(token)
+            if token not in protected:
+                protected.append(token)
+            continue
+        is_first = _is_sentence_start(tokens, index)
+        if "-" in token and not token.startswith("-"):
+            parts = token.split("-")
+            rebuilt: list[str] = []
+            for position, part in enumerate(parts):
                 if part:
-                    result_parts.append(
-                        _sent_case_token(part, is_first and j == 0, strict=strict)
-                    )
+                    rebuilt.append(_sent_case_token(
+                        part, is_first and position == 0, strict, lexicon, unsure,
+                    ))
                 else:
-                    result_parts.append(part)
-            out.append("-".join(result_parts))
+                    rebuilt.append(part)
+            out.append("-".join(rebuilt))
         else:
-            out.append(_sent_case_token(tok, is_first, strict=strict))
-    return " ".join(out)
+            out.append(_sent_case_token(token, is_first, strict, lexicon, unsure))
+
+    text = " ".join(out)
+    return TitleCasing(text, tuple(unsure), text != s, tuple(protected))
+
+
+def sent_case(s: str, *, evidence: set[str] | None = None) -> str:
+    """Sentence-case *s*, abstaining on words that cannot be classified.
+
+    Prefer :func:`sent_case_report` in new code: it tells you which words were
+    left alone, which is the difference between a safe rewrite and a silent
+    one.
+    """
+    return sent_case_report(s, evidence=evidence).text
 
 
 # ─────────────────────────────────────────────────────────────────────────────

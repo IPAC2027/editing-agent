@@ -1,15 +1,21 @@
-"""JACoW Conference Paper AI Agent — CLI entry point.
+"""JACoW conference-paper pre-screening agent — command line.
 
-Usage examples
---------------
-  uv run python main.py prescreen paper_examples/MOP019-revision-27544_author
-  uv run python main.py prescreen-all paper_examples/ --workers 4
-  uv run python main.py prescreen paper_examples/MOP019-revision-27544_author --llm
+    prescreen      screen one submission folder
+    prescreen-all  screen every submission under a directory
+    apply          apply the edits an editor accepted
+    review         open review.html for a screened folder
+    rules          inspect the versioned JACoW rule pack
+
+The workflow this is built around:
+
+    aiagent prescreen <folder>     # safe changes applied, decisions prepared
+    aiagent review <folder>        # accept/reject each remaining change
+    aiagent apply <folder> --decisions review_decisions.json
 """
 
 from __future__ import annotations
 
-import sys
+import os
 from pathlib import Path
 
 import typer
@@ -21,21 +27,358 @@ load_dotenv()
 
 app = typer.Typer(
     name="aiagent",
-    help="Agentic pre-screening tool for JACoW/IPAC conference paper submissions.",
+    help="Pre-screening agent for JACoW/IPAC conference paper submissions.",
     add_completion=False,
 )
 console = Console()
 
 
+# ---------------------------------------------------------------------------
+# Shared presentation
+# ---------------------------------------------------------------------------
+
+def _configure_llm(llm: bool, model: str | None, base_url: str | None) -> None:
+    if model:
+        os.environ["LLM_MODEL"] = model
+    if base_url:
+        os.environ["LLM_BASE_URL"] = base_url
+    if llm:
+        os.environ["LLM_ENABLED"] = "true"
+
+
+def _counts(paper) -> tuple[int, int, int, int]:
+    """``(errors, warnings, auto_applied, decisions_pending)``.
+
+    Read from the EditSet, never from a per-finding flag: that is what keeps
+    the console, the report and the file on disk in agreement.
+    """
+    findings = getattr(paper, "findings", [])
+    errors = sum(1 for f in findings if f.severity.value == "error")
+    warnings = sum(1 for f in findings if f.severity.value == "warning")
+    editset = paper.__dict__.get("editset")
+    auto = len(editset.auto) if editset else paper.__dict__.get("auto_applied", 0)
+    pending = len(editset.suggested) if editset else paper.__dict__.get(
+        "decisions_pending", 0
+    )
+    structural = paper.__dict__.get("structural")
+    if structural is not None:
+        pending += len(structural.decisions)
+    return errors, warnings, auto, pending
+
+
+def _verdict(errors: int, warnings: int, pending: int) -> str:
+    if errors:
+        return "[red]needs work[/red]"
+    if pending:
+        return "[yellow]decisions waiting[/yellow]"
+    if warnings:
+        return "[yellow]review[/yellow]"
+    return "[green]clean[/green]"
+
+
+def _one_line(paper) -> None:
+    errors, warnings, auto, pending = _counts(paper)
+    icon = "🔴" if errors else ("🟡" if (pending or warnings) else "🟢")
+    console.print(
+        f"{icon} [bold]{paper.paper_id:8}[/bold] "
+        f"auto={auto:<3} decisions={pending:<3} "
+        f"problems={errors:<3} style={warnings}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# prescreen
+# ---------------------------------------------------------------------------
+
+@app.command()
+def prescreen(
+    paper_folder: Path = typer.Argument(..., help="Path to one submission folder."),
+    llm: bool = typer.Option(False, "--llm/--no-llm", help="Add an advisory model review."),
+    compile_pdf: bool = typer.Option(True, "--compile/--no-compile",
+                                     help="Compile the edited source as proof it builds."),
+    git: bool = typer.Option(True, "--git/--no-git",
+                             help="Write a git history with one commit per edit."),
+    model: str = typer.Option(None, envvar="LLM_MODEL", help="Model name."),
+    base_url: str = typer.Option(None, envvar="LLM_BASE_URL", help="Model base URL."),
+    open_browser: bool = typer.Option(False, "--open", help="Open review.html when done."),
+) -> None:
+    """Pre-screen a single submission folder."""
+    _configure_llm(llm, model, base_url)
+
+    if not paper_folder.is_dir():
+        console.print(f"[red]Not a directory:[/red] {paper_folder}")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]Pre-screening[/bold] {paper_folder.name}")
+
+    from src.workflow.prescreen import WordSubmissionError
+    from src.workflow.prescreen import prescreen as run
+
+    try:
+        paper = run(paper_folder, llm=llm, compile=compile_pdf, git=git)
+    except WordSubmissionError as exc:
+        console.print(f"[yellow]Skipped (Word):[/yellow] {exc}")
+        raise typer.Exit(0)
+    except FileNotFoundError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1)
+
+    out_dir = paper_folder / "aiagent_prescreen"
+    is_word = hasattr(paper, "total_refs") and not hasattr(paper, "source_path")
+
+    if is_word:
+        _report_word(paper, out_dir, open_browser)
+        return
+
+    errors, warnings, auto, pending = _counts(paper)
+    table = Table(title=f"{paper.paper_id} — {_verdict(errors, warnings, pending)}",
+                  title_justify="left")
+    table.add_column("Applied automatically", style="cyan", justify="right")
+    table.add_column("Awaiting decision", style="yellow", justify="right")
+    table.add_column("Needs a human", style="red", justify="right")
+    table.add_column("Style points", style="magenta", justify="right")
+    table.add_row(str(auto), str(pending), str(errors), str(warnings))
+    console.print(table)
+
+    console.print(f"\nOutputs in [cyan]{out_dir}[/cyan]")
+    console.print(f"  [bold]review.html[/bold]        {pending} accept/reject decision(s)")
+    console.print(f"  [bold]{paper.paper_id}_edited.tex[/bold]  the {auto} automatic change(s), already applied")
+    console.print("  [bold]edits/[/bold]             one applicable patch per edit")
+    if (out_dir / "history").exists():
+        console.print("  [bold]history/[/bold]           git repo, one commit per edit")
+    console.print("  [bold]report.md[/bold]          findings, and which checks did not run")
+
+    if pending:
+        console.print(
+            f"\nNext: [bold]aiagent review {paper_folder}[/bold] then "
+            f"[bold]aiagent apply {paper_folder} --decisions review_decisions.json[/bold]"
+        )
+
+    if open_browser:
+        _open(out_dir / "review.html")
+
+
+def _report_word(paper, out_dir: Path, open_browser: bool) -> None:
+    tracked = getattr(paper, "tracked_docx", None)
+    revisions = getattr(paper, "revisions", 0)
+    table = Table(title=f"{paper.paper_id} — Word submission", title_justify="left")
+    table.add_column("References", justify="right")
+    table.add_column("Tracked changes", justify="right", style="cyan")
+    table.add_column("Needs a human", justify="right", style="red")
+    errors = sum(1 for f in getattr(paper, "findings", []) if f.severity.value == "error")
+    table.add_row(str(getattr(paper, "total_refs", 0)), str(revisions), str(errors))
+    console.print(table)
+    console.print(f"\nOutputs in [cyan]{out_dir}[/cyan]")
+    if tracked:
+        console.print(
+            f"  [bold green]{tracked}[/bold green]  open in Word and use "
+            "Review → Accept / Reject on each change"
+        )
+    console.print("  [bold]word_references.html[/bold]  the same changes as a web page")
+    console.print("  [bold]report.md[/bold]             findings")
+    if open_browser:
+        _open(out_dir / "word_references.html")
+
+
+# ---------------------------------------------------------------------------
+# prescreen-all
+# ---------------------------------------------------------------------------
+
+@app.command("prescreen-all")
+def prescreen_all(
+    submissions_dir: Path = typer.Argument(..., help="Directory of submission folders."),
+    llm: bool = typer.Option(False, "--llm/--no-llm"),
+    compile_pdf: bool = typer.Option(True, "--compile/--no-compile"),
+    git: bool = typer.Option(True, "--git/--no-git"),
+    workers: int = typer.Option(1, "--workers", "-j", help="Parallel workers."),
+    model: str = typer.Option(None, envvar="LLM_MODEL"),
+    base_url: str = typer.Option(None, envvar="LLM_BASE_URL"),
+) -> None:
+    """Pre-screen every submission folder under a directory."""
+    folders = sorted(
+        p for p in submissions_dir.iterdir()
+        if p.is_dir() and (p / "Source_Files").is_dir()
+    )
+    if not folders:
+        console.print(f"[red]No submission folders under {submissions_dir}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"Found [bold]{len(folders)}[/bold] submission(s).\n")
+    _configure_llm(llm, model, base_url)
+
+    from src.workflow.prescreen import WordSubmissionError
+    from src.workflow.prescreen import prescreen as run
+
+    totals = {"auto": 0, "pending": 0, "errors": 0, "papers": 0}
+
+    def _record(paper) -> None:
+        errors, _warnings, auto, pending = _counts(paper)
+        totals["auto"] += auto
+        totals["pending"] += pending
+        totals["errors"] += errors
+        totals["papers"] += 1
+        _one_line(paper)
+
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(run, folder, llm=llm, compile=compile_pdf, git=git): folder
+                for folder in folders
+            }
+            for future in as_completed(futures):
+                folder = futures[future]
+                try:
+                    _record(future.result())
+                except WordSubmissionError as exc:
+                    console.print(f"⏭  [yellow]{folder.name}[/yellow]: {exc}")
+                except Exception as exc:  # noqa: BLE001
+                    console.print(f"[red]{folder.name}[/red]: {exc}")
+    else:
+        for folder in folders:
+            try:
+                _record(run(folder, llm=llm, compile=compile_pdf, git=git))
+            except WordSubmissionError as exc:
+                console.print(f"⏭  [yellow]{folder.name}[/yellow]: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[red]{folder.name}[/red]: {exc}")
+
+    if totals["papers"]:
+        console.print(
+            f"\n[bold]{totals['papers']}[/bold] papers · "
+            f"[cyan]{totals['auto']}[/cyan] changes applied automatically · "
+            f"[yellow]{totals['pending']}[/yellow] decisions waiting · "
+            f"[red]{totals['errors']}[/red] problems needing a human "
+            f"({totals['pending'] / totals['papers']:.1f} decisions per paper)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# apply
+# ---------------------------------------------------------------------------
+
+@app.command()
+def apply(
+    paper_folder: Path = typer.Argument(..., help="A folder that has been pre-screened."),
+    accept: str = typer.Option("", "--accept", help="Comma-separated edit ids to accept."),
+    reject: str = typer.Option("", "--reject", help="Comma-separated edit ids to reject."),
+    decisions: Path = typer.Option(None, "--decisions",
+                                   help="review_decisions.json saved from review.html."),
+    in_place: bool = typer.Option(False, "--in-place",
+                                  help="Overwrite the author's .tex instead of writing a copy."),
+    compile_pdf: bool = typer.Option(True, "--compile/--no-compile"),
+) -> None:
+    """Apply the edits an editor accepted.
+
+    With no options this applies the AUTO tier only. ``--accept`` adds specific
+    edits, ``--reject`` removes them, and ``--decisions`` reads the file
+    ``review.html`` saves. Every edit is verified against the current source
+    before anything is written, so a source the author has revised in the
+    meantime produces a conflict rather than a scrambled file.
+    """
+    from src.edits import EditConflict
+    from src.workflow.prescreen import apply_decisions
+
+    def _ids(raw: str) -> list[str]:
+        return [part.strip().upper() for part in raw.split(",") if part.strip()]
+
+    try:
+        target, applied, unknown = apply_decisions(
+            paper_folder,
+            accept=_ids(accept),
+            reject=_ids(reject),
+            decisions_path=decisions,
+            write_to_source=in_place,
+            compile=compile_pdf,
+        )
+    except EditConflict as exc:
+        console.print(f"[red]Conflict:[/red] {exc}")
+        console.print("Re-run [bold]prescreen[/bold] on this folder to recompute the edits.")
+        raise typer.Exit(2)
+    except FileNotFoundError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1)
+
+    if unknown:
+        console.print(f"[yellow]Ignored unknown edit id(s):[/yellow] {', '.join(unknown)}")
+
+    console.print(
+        f"[green]Applied {len(applied)} edit(s)[/green] → [cyan]{target}[/cyan]"
+    )
+    if applied:
+        console.print("  " + ", ".join(applied))
+    if in_place:
+        console.print(
+            "[yellow]The author's source was overwritten.[/yellow] "
+            "The original is the first commit in aiagent_prescreen/history/."
+        )
+
+
+# ---------------------------------------------------------------------------
+# review
+# ---------------------------------------------------------------------------
+
+@app.command()
+def review(
+    paper_folder: Path = typer.Argument(..., help="A folder that has been pre-screened."),
+    show: bool = typer.Option(False, "--show", help="Print the decisions to the terminal."),
+) -> None:
+    """Open (or print) the accept/reject review for a screened folder."""
+    out_dir = paper_folder / "aiagent_prescreen"
+    review_path = out_dir / "review.html"
+    if not review_path.exists():
+        console.print(f"[red]No review at {review_path}.[/red] Run 'prescreen' first.")
+        raise typer.Exit(1)
+
+    if show:
+        from src.edits import EditSet
+
+        from src.autofix.structural import StructuralPlan
+
+        editset = EditSet.read(out_dir / "edits.json")
+        structural_path = out_dir / "structural.json"
+        plan = StructuralPlan.read(structural_path) if structural_path.exists() else None
+        table = Table(title=f"{paper_folder.name} — edits", title_justify="left")
+        table.add_column("Id")
+        table.add_column("Tier")
+        table.add_column("Check")
+        table.add_column("Line", justify="right")
+        table.add_column("Change")
+        for edit in editset.edits:
+            table.add_row(
+                edit.id,
+                ("[cyan]auto[/cyan]" if edit.tier.value == "auto"
+                 else "[yellow]decide[/yellow]"),
+                edit.check_id,
+                str(edit.line),
+                edit.short(58),
+            )
+        for decision in (plan.decisions if plan else []):
+            table.add_row(
+                decision.id, "[yellow]decide[/yellow]", decision.check_id, "—",
+                decision.message[:58],
+            )
+        console.print(table)
+        return
+
+    _open(review_path)
+    console.print(f"Opened [cyan]{review_path}[/cyan]")
+
+
+# ---------------------------------------------------------------------------
+# rules
+# ---------------------------------------------------------------------------
+
 @app.command("rules")
 def rules(
-    query: str = typer.Option("", "--query", "-q", help="Text to search across the rule pack."),
-    category: str = typer.Option(None, "--category", "-c", help="Filter by rule category."),
-    source_format: str = typer.Option(None, "--format", help="Filter by source format: latex or word."),
-    version: str = typer.Option(None, "--version", help="Rule-pack version; defaults to latest."),
+    query: str = typer.Option("", "--query", "-q", help="Text to search the rule pack."),
+    category: str = typer.Option(None, "--category", "-c", help="Filter by category."),
+    source_format: str = typer.Option(None, "--format", help="latex or word."),
+    version: str = typer.Option(None, "--version", help="Rule-pack version."),
     as_json: bool = typer.Option(False, "--json", help="Print matching rules as JSON."),
 ) -> None:
-    """Inspect versioned JACoW editorial rules used by the agent."""
+    """Inspect the versioned JACoW editorial rules the agent applies."""
     from src.knowledge import agent_context, search_rules
 
     categories = [category] if category else None
@@ -43,203 +386,33 @@ def rules(
         import json
 
         console.print_json(json.dumps(search_rules(
-            query,
-            categories=categories,
-            applies_to=source_format,
-            version=version,
+            query, categories=categories, applies_to=source_format, version=version,
         )))
         return
     console.print(agent_context(
-        query,
-        categories=categories,
-        applies_to=source_format,
-        version=version,
+        query, categories=categories, applies_to=source_format, version=version,
     ))
 
 
 @app.command()
-def prescreen(
-    paper_folder: Path = typer.Argument(..., help="Path to one submission folder."),
-    llm: bool = typer.Option(False, "--llm/--no-llm", help="Run local/OpenAI-compatible LLM review."),
-    compile_pdf: bool = typer.Option(True, "--compile/--no-compile", help="Compile edited .tex to PDF."),
-    model: str = typer.Option(None, envvar="LLM_MODEL", help="LLM model name."),
-    base_url: str = typer.Option(None, envvar="LLM_BASE_URL", help="LLM base URL."),
-    open_browser: bool = typer.Option(False, "--open", help="Open index.html in browser after run."),
-) -> None:
-    """Pre-screen a single submission folder."""
-    import os
-
-    if model:
-        os.environ["LLM_MODEL"] = model
-    if base_url:
-        os.environ["LLM_BASE_URL"] = base_url
-    if llm:
-        os.environ["LLM_ENABLED"] = "true"
-
-    if not paper_folder.is_dir():
-        console.print(f"[red]Error:[/red] {paper_folder} is not a directory.")
-        raise typer.Exit(1)
-
-    console.print(f"[bold]Pre-screening:[/bold] {paper_folder.name}")
-
-    from src.workflow.prescreen import prescreen as _prescreen, WordSubmissionError
-
-    try:
-        paper = _prescreen(paper_folder, llm=llm, compile=compile_pdf)
-    except WordSubmissionError as exc:
-        console.print(f"[yellow]⏭  Skipped (Word):[/yellow] {exc}")
-        raise typer.Exit(0)
-    except FileNotFoundError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1)
-
-    is_word_result = hasattr(paper, "total_refs") and not hasattr(paper, "source_path")
-
-    if hasattr(paper, "findings"):
-        errors    = sum(1 for f in paper.findings if f.severity.value == "error"   and not f.auto_fixed)
-        warnings  = sum(1 for f in paper.findings if f.severity.value == "warning" and not f.auto_fixed)
-        auto_fixed = sum(1 for f in paper.findings if f.auto_fixed)
-    else:
-        errors = 0
-        warnings = 0
-        auto_fixed = 0
-
-    traffic = "[red]🔴 Needs fixes[/red]" if errors else (
-              "[yellow]🟡 Review suggested[/yellow]" if (warnings or auto_fixed) else
-              "[green]🟢 Pass[/green]")
-
-    t = Table(title=f"Results — {paper.paper_id}  {traffic}")
-    if hasattr(paper, "findings") and not is_word_result:
-        t.add_column("Errors",     style="red")
-        t.add_column("Warnings",   style="yellow")
-        t.add_column("Auto-fixed", style="green")
-        t.add_row(str(errors), str(warnings), str(auto_fixed))
-        console.print(t)
-    else:
-        t.add_column("References", style="cyan")
-        t.add_column("Output", style="green")
-        t.add_row(str(getattr(paper, "total_refs", 0)), "word_references.html")
-        console.print(t)
-
-    out_dir = paper_folder / "aiagent_prescreen"
-    index   = out_dir / "index.html"
-    console.print(f"\nOutputs written to [cyan]{out_dir}[/cyan]")
-    if hasattr(paper, "findings") and not is_word_result:
-        console.print(f"  [bold]index.html[/bold]   — open in browser for full review")
-        console.print(f"  [bold]changes.html[/bold] — side-by-side diff of auto-fixes")
-        console.print(f"  [bold]report.md[/bold]    — editor-friendly findings")
-        console.print(f"  [bold]repair_plan.json[/bold] — structured repairs and build validation")
-        pdf = out_dir / f"{paper.paper_id}_edited.pdf"
-        if pdf.exists():
-            console.print(f"  [bold green]{pdf.name}[/bold green] — compiled PDF")
-        elif compile_pdf:
-            console.print(f"  [bold red]PDF compilation failed[/bold red] — see BUILD-FAIL finding")
-    else:
-        console.print(f"  [bold]word_references.html[/bold] — reference extraction, checks, and before/after corrections")
-
-    if open_browser and index.exists() and not is_word_result:
-        import webbrowser
-        webbrowser.open(index.as_uri())
-    elif open_browser and is_word_result:
-        import webbrowser
-        webbrowser.open((out_dir / "word_references.html").as_uri())
-
-
-@app.command("prescreen-all")
-def prescreen_all(
-    submissions_dir: Path = typer.Argument(..., help="Directory containing all submission folders."),
-    llm: bool = typer.Option(False, "--llm/--no-llm", help="Run local/OpenAI-compatible LLM review."),
-    compile_pdf: bool = typer.Option(True, "--compile/--no-compile", help="Compile edited .tex to PDF."),
-    workers: int = typer.Option(1, "--workers", "-j", help="Parallel workers."),
-    model: str = typer.Option(None, envvar="LLM_MODEL", help="LLM model name."),
-    base_url: str = typer.Option(None, envvar="LLM_BASE_URL", help="LLM base URL."),
-) -> None:
-    """Batch pre-screen all submission folders under a directory."""
-    folders = sorted(
-        p for p in submissions_dir.iterdir()
-        if p.is_dir() and (p / "Source_Files").is_dir()
-    )
-    if not folders:
-        console.print(f"[red]No submission folders found under {submissions_dir}[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"Found [bold]{len(folders)}[/bold] submission(s).")
-
-    import os
-
-    if model:
-        os.environ["LLM_MODEL"] = model
-    if base_url:
-        os.environ["LLM_BASE_URL"] = base_url
-    if llm:
-        os.environ["LLM_ENABLED"] = "true"
-
-    from src.workflow.prescreen import prescreen as _prescreen, WordSubmissionError
-
-    if workers > 1:
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_prescreen, f, llm=llm, compile=compile_pdf): f for f in folders}
-            for future, folder in futures.items():
-                try:
-                    paper = future.result()
-                    _print_one_line(paper)
-                except WordSubmissionError as exc:
-                    console.print(f"[yellow]⏭  {folder.name}[/yellow]: {exc}")
-                except Exception as exc:
-                    console.print(f"[red]{folder.name}[/red]: {exc}")
-    else:
-        for folder in folders:
-            try:
-                paper = _prescreen(folder, llm=llm, compile=compile_pdf)
-                _print_one_line(paper)
-            except WordSubmissionError as exc:
-                console.print(f"[yellow]⏭  {folder.name}[/yellow]: {exc}")
-            except Exception as exc:
-                console.print(f"[red]{folder.name}[/red]: {exc}")
-
-
-def _print_one_line(paper) -> None:
-    is_word_result = hasattr(paper, "total_refs") and not hasattr(paper, "source_path")
-
-    if hasattr(paper, "findings") and not is_word_result:
-        errors = sum(1 for f in paper.findings if f.severity.value == "error")
-        warnings = sum(1 for f in paper.findings if f.severity.value == "warning")
-        icon = "🔴" if errors else ("🟡" if warnings else "🟢")
-        console.print(
-            f"{icon}  [bold]{paper.paper_id}[/bold]  "
-            f"errors={errors}  warnings={warnings}"
-        )
-        return
-
-    if hasattr(paper, "findings") and is_word_result:
-        errors = sum(1 for f in paper.findings if f.severity.value == "error" and not f.auto_fixed)
-        warnings = sum(1 for f in paper.findings if f.severity.value == "warning" and not f.auto_fixed)
-        auto_fixed = sum(1 for f in paper.findings if f.auto_fixed)
-        icon = "🔴" if errors else ("🟡" if warnings or auto_fixed else "🟢")
-        console.print(
-            f"{icon}  [bold]{paper.paper_id}[/bold]  "
-            f"errors={errors}  warnings={warnings}  auto_fixed={auto_fixed}  output=word_references.html"
-        )
-        return
-
-    console.print(
-        f"🟦  [bold]{paper.paper_id}[/bold]  "
-        f"references={getattr(paper, 'total_refs', 0)}  output=word_references.html"
-    )
-
-
-@app.command()
 def report(
-    paper_folder: Path = typer.Argument(..., help="Submission folder with an existing prescreen run."),
+    paper_folder: Path = typer.Argument(..., help="A folder that has been pre-screened."),
 ) -> None:
-    """Re-render the report from an existing prescreen run."""
-    out_dir = paper_folder / "aiagent_prescreen"
-    report_path = out_dir / "report.md"
-    if not report_path.exists():
-        console.print(f"[red]No report found at {report_path}. Run 'prescreen' first.[/red]")
+    """Print report.md from an existing prescreen run."""
+    path = paper_folder / "aiagent_prescreen" / "report.md"
+    if not path.exists():
+        console.print(f"[red]No report at {path}.[/red] Run 'prescreen' first.")
         raise typer.Exit(1)
-    console.print(report_path.read_text(encoding="utf-8"))
+    console.print(path.read_text(encoding="utf-8"))
+
+
+def _open(path: Path) -> None:
+    if not path.exists():
+        console.print(f"[yellow]Nothing to open at {path}[/yellow]")
+        return
+    import webbrowser
+
+    webbrowser.open(path.resolve().as_uri())
 
 
 if __name__ == "__main__":

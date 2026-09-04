@@ -34,14 +34,21 @@ def check_jacow_class_version(paper: Paper) -> None:
         return
     ver = pt.template_version
     if not ver:
-        _add(paper, "JACOW-CLS-01", Severity.WARNING,
+        _add(paper, "JACOW-CLS-01", Severity.INFO,
              f"Could not detect the JACoW class version from template comments. "
              f"Latest version is v{JACOW_LATEST_VERSION} ({JACOW_LATEST_DATE}). "
              f"Download from https://jacow.org/Authors/Templates")
     elif ver != JACOW_LATEST_VERSION:
-        _add(paper, "JACOW-CLS-01", Severity.WARNING,
-             f"Template version v{ver} detected. Latest is v{JACOW_LATEST_VERSION} "
-             f"({JACOW_LATEST_DATE}). Update from https://jacow.org/Authors/Templates",
+        # INFO, not WARNING: the template version is the same for every paper in
+        # a conference, it is not something an editor fixes per submission, and
+        # the "latest" value here is a hardcoded constant this tool does not
+        # verify against jacow.org.  Reporting it as a warning on all 34 sample
+        # papers was the single largest source of repeated noise.
+        _add(paper, "JACOW-CLS-01", Severity.INFO,
+             f"Template version v{ver}; this build of the agent knows about "
+             f"v{JACOW_LATEST_VERSION} ({JACOW_LATEST_DATE}) — not verified against "
+             f"jacow.org. Newer templates fix rendering bugs: "
+             f"https://jacow.org/Authors/Templates",
              original=f"% v {ver}",
              suggested=f"% v {JACOW_LATEST_VERSION}  {JACOW_LATEST_DATE}")
 
@@ -58,7 +65,10 @@ def check_bibliography_style(paper: Paper) -> None:
     if not pt:
         return
     if pt.bibliography_env == "thebibliography" and not pt.uses_biblatex:
-        _add(paper, "JACOW-CLS-02", Severity.WARNING,
+        # A preference, not a defect: a hand-written reference list is valid
+        # JACoW, and telling every author who used one to restructure their
+        # paper is not something an editor acts on per submission.
+        _add(paper, "JACOW-CLS-02", Severity.INFO,
              "Manual \\thebibliography / \\bibitem detected. "
              "JACoW class ≥ v2.10 supports BibLaTeX which is strongly preferred "
              "for consistent reference formatting. Consider switching.",
