@@ -33,6 +33,11 @@ from src.output.word_report import write_word_reference_report
 from src.parser.word_parser import parse_word
 from src.refs.verify import check_rewrite, proper_noun_risk
 
+# Substitutions the formatter made deliberately and vouches for, keyed by
+# reference number.  Populated by _format_word_reference and consumed by
+# _verified_reformat immediately afterwards.
+_ALLOWED_SUBSTITUTIONS: dict[int, list[tuple[str, str]]] = {}
+
 
 class WordPrescreenResult:
     """Result of screening a Word submission."""
@@ -257,6 +262,49 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
     )
 
 
+_CONTAINER_STOP_RE = re.compile(
+    r"^(?:vol\.?|volume|no\.?|nos\.?|iss\.?|issue|pp?\.?|pages?|art(?:icle)?\.?|"
+    r"e?id|doi|https?:|arxiv|in\s+press|\(?(?:19|20)\d{2}\)?$)",
+    re.IGNORECASE,
+)
+
+
+def _container_from_raw(raw: str) -> str | None:
+    r"""The journal or proceedings name in ``authors, "title," CONTAINER, vol. N…``.
+
+    ``extract_from_raw`` misses the container for this very common Word shape —
+    a curly-quoted title followed by the journal — so the formatter emitted a
+    reference with the journal name simply absent.  The rewrite verifier catches
+    that as dropped words and keeps the original, which is safe but leaves the
+    reference unimproved; extracting the container fixes the cause.
+
+    Returns a substring of *raw*, verbatim, or ``None``.  Nothing is inferred:
+    if the shape is not recognised the caller goes without.
+    """
+    closing = None
+    for quote in ("\u201d", "\u2019\u2019", "''", '"'):
+        index = raw.find(quote, raw.find(quote) + 1) if quote == '"' else raw.find(quote)
+        if index > 0:
+            closing = index + len(quote) if closing is None else min(closing, index + len(quote))
+    if closing is None:
+        return None
+
+    tail = raw[closing:].lstrip(" ,.")
+    for segment in tail.split(","):
+        candidate = segment.strip().strip(".").strip()
+        if not candidate:
+            continue
+        if _CONTAINER_STOP_RE.match(candidate):
+            return None          # went straight to volume/pages: no container
+        if len(candidate) < 3 or not re.search(r"[A-Za-z]{3}", candidate):
+            return None
+        # "in Proc. IPAC'23" is a container with a lead-in; the formatter adds
+        # the "in Proc." itself, so hand it the bare name.
+        candidate = re.sub(r"^in\s+Proc\.?\s*", "", candidate, flags=re.IGNORECASE)
+        return candidate.strip() or None
+    return None
+
+
 def _rebuild_paragraph(paragraph_text: str, raw_body: str, corrected_body: str) -> str | None:
     r"""Put *corrected_body* back into *paragraph_text*, keeping its prefix.
 
@@ -312,7 +360,11 @@ def _verified_reformat(ref, line_corrected: str):
     if not formatted or formatted.strip() == line_corrected.strip():
         return None, None, None
 
-    verdict = check_rewrite(line_corrected, formatted, allow_case_change=False)
+    verdict = check_rewrite(
+        line_corrected, formatted,
+        allow_case_change=False,
+        allowed_substitutions=_ALLOWED_SUBSTITUTIONS.get(ref.n, ()),
+    )
     if verdict.ok:
         return formatted, finding, None
 
@@ -342,6 +394,7 @@ def _format_word_reference(ref, line_corrected: str, *, ref_n: int):
     """
     from src.refs import JacoWConnector, format_ref, normalize_journal
 
+    _ALLOWED_SUBSTITUTIONS.pop(ref_n, None)
     if not (ref.title and ref.authors):
         return line_corrected, None
 
@@ -379,13 +432,30 @@ def _format_word_reference(ref, line_corrected: str, *, ref_n: int):
         if extracted.get(key) and not record.get(key):
             record[key] = extracted[key]
 
+    # Last resort for the container title, taken verbatim from the reference.
+    if not record.get("journal") and not record.get("conference") \
+            and not record.get("booktitle"):
+        container = _container_from_raw(raw)
+        if container:
+            kind = (record.get("ref_type") or "").lower()
+            if kind.startswith(("proceedings", "conference")):
+                record["conference"] = container
+            elif kind in ("book", "book_chapter"):
+                record["booktitle"] = container
+            else:
+                record["journal"] = container
+
     if record.get("conference"):
         record["conference"] = re.sub(r"['’]\d{2,4}$", "", record["conference"])
         if record.get("year"):
             record = JacoWConnector(allow_network=False).complete_record(record, [])
+    substitutions: list[tuple[str, str]] = []
     if record.get("journal"):
         normalised = normalize_journal(record["journal"])
-        if normalised:
+        if normalised and normalised != record["journal"]:
+            # An ISO-4 abbreviation is what JACoW asks for, so declare it to the
+            # verifier rather than letting it read as five dropped words.
+            substitutions.append((record["journal"], normalised))
             record["journal"] = normalised
 
     try:
@@ -393,12 +463,16 @@ def _format_word_reference(ref, line_corrected: str, *, ref_n: int):
     except Exception:  # noqa: BLE001
         return line_corrected, None
 
-    formatted = (formatted or "").strip()
-    if not formatted or formatted == line_corrected.strip():
+    # The formatter lays references out for LaTeX, where a newline is
+    # whitespace.  Inside a Word paragraph it is not: collapse it, or the
+    # corrected reference carries a stray break.
+    formatted = " ".join((formatted or "").split())
+    if not formatted or formatted == " ".join(line_corrected.split()):
         # No-op: the caller keeps its own text and no finding is emitted.  An
         # "improvement" that changes nothing must never be reported.
         return line_corrected, None
 
+    _ALLOWED_SUBSTITUTIONS[ref_n] = substitutions
     return formatted, Finding(
         check_id="FMT-REF-01",
         severity=Severity.INFO,

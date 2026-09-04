@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 # Markers whose disappearance means a whole clause was lost.
@@ -81,10 +82,18 @@ def check_rewrite(
     *,
     allow_case_change: bool = True,
     unsure_tokens: tuple[str, ...] | list[str] = (),
+    allowed_substitutions: Sequence[tuple[str, str]] = (),
 ) -> RewriteVerdict:
     """Return a verdict on whether *rewritten* is a safe replacement for *original*.
 
     The checks, in the order they are cheapest to reason about:
+
+    *allowed_substitutions* declares changes the caller knows about and vouches
+    for, as ``(before, after)`` pairs.  Both sides are masked out before
+    comparison, so a legitimate ISO-4 journal abbreviation — "SIAM Journal on
+    Applied Dynamical Systems" to "SIAM J. Appl. Dyn. Syst.", which is exactly
+    what JACoW requires — is not reported as five dropped words.  Anything the
+    caller does not declare is still checked.
 
     1. **Abstention.** If sentence-casing could not classify a word, no rewrite.
     2. **Doubled punctuation.** New ``,,`` / ``..`` / `` ,`` / empty groups.
@@ -106,6 +115,17 @@ def check_rewrite(
 
     if not rewritten:
         return RewriteVerdict(False, ["the rewrite is empty"])
+
+    # Mask declared substitutions on both sides with the same placeholder.
+    for index, (was, now) in enumerate(allowed_substitutions):
+        was, now = (was or "").strip(), (now or "").strip()
+        if not was or not now or was == now:
+            continue
+        if was in original and now in rewritten:
+            placeholder = f"\x00SUB{index}\x00"
+            original = original.replace(was, placeholder)
+            rewritten = rewritten.replace(now, placeholder)
+            notes.append(f"allowed substitution: {was!r} -> {now!r}")
 
     if unsure_tokens:
         listed = ", ".join(f"'{token}'" for token in unsure_tokens)

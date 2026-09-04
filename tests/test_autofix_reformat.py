@@ -552,3 +552,44 @@ def test_word_format_returns_caller_text_when_unchanged():
         assert text == ref.raw_text
     else:
         assert text.strip() != ref.raw_text.strip()
+
+
+def test_declared_journal_abbreviation_is_not_read_as_dropped_words():
+    """ISO-4 abbreviation is what JACoW asks for, so it must not fail the guard.
+
+    Caught on TUP033: with the guard in place but no way to declare the
+    substitution, abbreviating "SIAM Journal on Applied Dynamical Systems" to
+    "SIAM J. Appl. Dyn. Syst." was rejected as five dropped words, so the tool
+    swung from damaging the reference to refusing to improve it.
+    """
+    original = (
+        'M. Ruth and D. Bindel, "Level set learning", SIAM Journal on Applied '
+        'Dynamical Systems, vol. 24, no. 1, pp. 611-632, Feb. 2025. doi:10.1137/x'
+    )
+    abbreviated = original.replace(
+        "SIAM Journal on Applied Dynamical Systems", "SIAM J. Appl. Dyn. Syst.",
+    )
+    substitution = [(
+        "SIAM Journal on Applied Dynamical Systems", "SIAM J. Appl. Dyn. Syst.",
+    )]
+
+    assert check_rewrite(original, abbreviated).ok is False
+    assert check_rewrite(
+        original, abbreviated, allowed_substitutions=substitution,
+    ).ok is True
+
+
+def test_a_declared_substitution_is_not_a_licence_to_lose_other_things():
+    original = (
+        'M. Ruth, "Level set learning", SIAM Journal on Applied Dynamical '
+        'Systems, vol. 24, no. 1, pp. 611-632, 2025. doi:10.1137/x'
+    )
+    lossy = 'M. Ruth, "Level set learning", SIAM J. Appl. Dyn. Syst., vol. 24, 2025. doi:10.1137/x'
+    verdict = check_rewrite(
+        original, lossy,
+        allowed_substitutions=[(
+            "SIAM Journal on Applied Dynamical Systems", "SIAM J. Appl. Dyn. Syst.",
+        )],
+    )
+    assert verdict.ok is False
+    assert "611" in verdict.reason and "page numbers" in verdict.reason

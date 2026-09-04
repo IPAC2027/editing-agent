@@ -313,9 +313,13 @@ def bibitem_rewrite_edits(
 
         if record.get("conference") and record.get("year"):
             record = connector.complete_record(record, [])
+        substitutions: list[tuple[str, str]] = []
         if record.get("journal"):
             normalised = normalize_journal(record["journal"])
-            if normalised:
+            if normalised and normalised != record["journal"]:
+                # ISO-4 abbreviation is required by JACoW, so declare it rather
+                # than letting the verifier read it as dropped words.
+                substitutions.append((record["journal"], normalised))
                 record["journal"] = normalised
 
         try:
@@ -342,6 +346,7 @@ def bibitem_rewrite_edits(
             rewritten,
             allow_case_change=False,
             unsure_tokens=record.get("_unsure_tokens", ()),
+            allowed_substitutions=substitutions,
         )
         if not verdict.ok:
             risky = proper_noun_risk(original, rewritten)

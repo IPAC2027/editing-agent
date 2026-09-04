@@ -66,10 +66,18 @@ _AFFILIATION_CUE_RE = re.compile(
 
 # "Initials Surname" — the JACoW convention.  Allows compound and particled
 # surnames ("van der Meer", "Le Duff", "O'Shea", "Garcia-Lopez").
+# "Initials Surname", where the surname may itself contain nobiliary or
+# patronymic particles anywhere in the sequence — "van der Meer",
+# "Hoffstaetter de Torquat", "Le Duff", "O'Shea", "Garcia-Lopez".
+_NAME_PARTICLE = (
+    r"(?:de|del|den|der|di|du|da|das|dos|la|las|le|les|van|von|vander|ter|ten|"
+    r"el|al|bin|ibn|abu|mac|mc|st|of|y|e|i)"
+)
 _JACOW_NAME_RE = re.compile(
     r"^(?:[A-Z]\.[\s\-]*)+"
-    r"(?:(?:de|del|den|der|di|du|da|dos|la|le|van|von|ter|ten|el|al|bin|ibn)\s+)*"
-    r"[A-Z][\w'\u2019\-]*(?:[\s\-][A-Z][\w'\u2019\-]*)*$",
+    r"(?:" + _NAME_PARTICLE + r"[\s\-])*"
+    r"[A-Z][\w'\u2019\-]*"
+    r"(?:[\s\-](?:" + _NAME_PARTICLE + r"|[A-Z][\w'\u2019\-]*))*$",
     re.UNICODE,
 )
 
@@ -398,6 +406,9 @@ def _strip_author_decorations(text: str) -> str:
         text = re.sub(r"\\" + cmd + r"\b", "", text)
     # Footnote symbols left bare.
     text = re.sub(r"[*\u2020\u2021\u00a7\u00b6#]+", "", text)
+    # A LaTeX non-breaking space between initials and surname is correct JACoW
+    # style ("E.~Hamwi"), so it must read as a space rather than as markup.
+    text = text.replace("~", " ")
     # Residual empty groups and stray markup.
     text = re.sub(r"\{\s*\}", "", text)
     text = re.sub(r"\\[a-zA-Z]+\s*", " ", text)
