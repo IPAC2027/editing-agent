@@ -221,11 +221,29 @@ that live in code rather than in the prompt:
 * **Sample three times and require unanimity.** Not a majority — two out of
   three is exactly where a small model is guessing. Disagreement becomes
   `UNSURE`.
+* **Draw those samples at a non-zero temperature.** This one was wrong for a
+  while and is worth naming, because it is the kind of bug that leaves every
+  test passing. Unanimity is only evidence of confidence if the samples *can*
+  differ; drawn greedily a local model returns the same tokens three times, and
+  the check silently degenerates into "did the server answer three times". The
+  default is now `LLM_TEMPERATURE=0.3`, and `LLM_SAMPLES=1` — where there is
+  nothing to compare — is drawn at 0.
 * **Abstention is a first-class answer** and propagates to the report, where it
   becomes a flag for a human instead of an edit.
 
 The model is off by default (`LLM_ENABLED=false`). Turning it on can only add
 suggestions and remove findings; it can never change what the AUTO tier does.
+
+**There is one answer to "is a model in play?"** `--llm` / `--no-llm` wins;
+with neither, `LLM_ENABLED` decides; and `src/desk/server._settle_model` asks
+the server once, at start-up, whether the requested model is actually there.
+If it is not, the flag *and* the environment are put back to off, and the
+launcher window says so. The state being avoided is the half-on one: a `.env`
+saying `LLM_ENABLED=true` used to buy the desk one of the four sanctioned uses
+of a model — the one that reads the environment directly — and not the other
+three, which is a run nobody can describe afterwards. A model that cannot be
+reached is never silently swapped for another one either: asking for a model
+the server does not have is a failure that names what it does have.
 
 ## 9. The noise budget
 

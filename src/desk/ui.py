@@ -287,6 +287,8 @@ label.opt span small{display:block;color:var(--muted);font-size:.82rem}
 .keyhint{font-size:.8rem;color:var(--muted);margin-bottom:14px}
 kbd{font-family:var(--mono);font-size:.75rem;border:1px solid var(--rule);
     border-bottom-width:2px;border-radius:4px;padding:1px 5px;background:var(--surface2)}
+#llmBadge{margin-left:10px;padding:1px 7px;border:1px solid var(--rule);border-radius:9px;
+         font-variant-numeric:tabular-nums;white-space:nowrap}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--rule);
       border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -296,7 +298,7 @@ kbd{font-family:var(--mono);font-size:.75rem;border:1px solid var(--rule);
 <body>
 
 <div class="top"><div class="top-in">
-  <div class="brand">JACoW review desk<small id="rootName">&nbsp;</small></div>
+  <div class="brand">JACoW review desk<small id="rootName">&nbsp;</small><small id="llmBadge" hidden></small></div>
   <div class="top-spacer"></div>
   <label class="who">Your name
     <input id="editorName" type="text" placeholder="e.g. A. Editor" autocomplete="name">
@@ -1317,6 +1319,15 @@ nameInput.addEventListener("input", ()=>{
     const setup = await api("/api/setup");
     S.root = setup.root; S.editor = setup.editor || "";
     $("#rootName").textContent = setup.root;
+    const llm = setup.llm || {};
+    if(llm.enabled){
+      const badge = $("#llmBadge");
+      badge.textContent = "model: " + llm.model;
+      badge.title = "A local model at " + llm.base_url + " helps with sentence case "
+        + "and hides findings it judges to be false positives. It is never allowed "
+        + "to supply a fact such as a DOI, year, volume or page range.";
+      badge.hidden = false;
+    }
     nameInput.value = S.editor;
     if((setup.jobs||[]).length){ S.job = setup.jobs[0]; pollJob(); }
     await loadWorklist();

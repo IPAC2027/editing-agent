@@ -179,26 +179,61 @@ is requested so a malformed answer is a parse failure; `UNSURE` propagates to
 the report as a flag for a human.
 
 ```bash
-# Ollama
-uv run python main.py prescreen <folder> --llm \
-    --model llama3 --base-url http://localhost:11434/v1
+# Ollama — the default backend; nothing to configure but the model name
+ollama pull llama3.1:8b
+uv run python main.py prescreen <folder> --llm --model llama3.1:8b
 
 # LM Studio exposes the same OpenAI-compatible interface
 uv run python main.py prescreen <folder> --llm \
     --model local-model --base-url http://localhost:1234/v1
+
+# The desk takes the same three options
+uv run python main.py desk <folder> --llm --model llama3.1:8b
 ```
 
+On the 48 example submissions the deterministic pass abstains on about **two
+reference titles per paper**, so the model is asked roughly six questions per
+paper — seconds, not minutes.
+
+**The model is checked once, at start-up, not discovered halfway through a
+batch.** `desk --llm` asks the server which models it has before it prints its
+address, and says which of three things is true:
+
+```
+  Model:    llama3.1:8b at http://localhost:11434/v1
+  Model:    NOT USED — could not reach a model server at http://localhost:11434/v1
+            (APIConnectionError). Is Ollama running? Papers are screened
+            without it; every check that does not need a model still runs.
+  Model:    NOT USED — http://localhost:11434/v1 answered, but has no model
+            called 'qwen3.8:27b-mlx'. It offers: llama3.1:8b, qwen2.5:14b.
+```
+
+A model that is not there degrades the run to the deterministic path; it never
+silently substitutes a different model, and the page does not advertise a model
+it is not using. When one *is* in use the desk's header carries a `model:` chip,
+so an editor can always tell which kind of run they are looking at.
+
 ## Configuration
+
+`cp .env.example .env` and edit. Everything is optional: with no `.env` the
+agent runs fully deterministically.
 
 ```
 LLM_ENABLED=false
 LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL=llama3
+LLM_MODEL=llama3.1:8b
 LLM_API_KEY=ollama
 LLM_SAMPLES=3                    # samples that must agree before a label is used
+LLM_TEMPERATURE=                 # default 0.3; see below
 LLM_TIMEOUT=60
 CROSSREF_EMAIL=you@example.com   # for polite Crossref lookups
 ```
+
+`LLM_TEMPERATURE` defaults to **0.3** rather than 0, and that is deliberate:
+unanimity across three samples is only evidence of confidence if the samples
+can differ. Drawn greedily, a local model returns the same tokens three times
+and the check degenerates into "did the server answer three times". With
+`LLM_SAMPLES=1` there is nothing to compare, so that case is drawn at 0.
 
 ## Rule pack
 

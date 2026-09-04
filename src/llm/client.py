@@ -74,3 +74,44 @@ def chat(
         kwargs.pop("response_format", None)
         response = client.chat.completions.create(**kwargs)
     return response.choices[0].message.content or ""
+
+
+def settings() -> dict:
+    """What the current environment says the model backend is."""
+    return {
+        "enabled": is_enabled(),
+        "base_url": os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1"),
+        "model": os.environ.get("LLM_MODEL", "llama3"),
+    }
+
+
+def reachable(*, timeout: float = 5.0) -> tuple[bool, str]:
+    """Is the configured model actually there?  ``(ok, human-readable reason)``.
+
+    Asked once at start-up rather than discovered halfway through a batch. A
+    desk that silently runs without the model the editor asked for is the worst
+    of both worlds: they wait for it and do not get it. The message is written
+    for the launcher window, so it says what to do rather than naming an
+    exception class.
+    """
+    if not is_enabled():
+        return False, "no model configured"
+
+    conf = settings()
+    name, base_url = conf["model"], conf["base_url"]
+    try:
+        listing = _get_client().with_options(timeout=timeout).models.list()
+        available = sorted({getattr(m, "id", "") for m in listing.data} - {""})
+    except Exception as exc:  # noqa: BLE001 — any failure means "not usable"
+        return False, (
+            f"could not reach a model server at {base_url} "
+            f"({type(exc).__name__}). Is Ollama running?"
+        )
+
+    if available and name not in available:
+        offered = ", ".join(available[:8]) or "nothing"
+        return False, (
+            f"{base_url} answered, but has no model called {name!r}. "
+            f"It offers: {offered}."
+        )
+    return True, f"{name} at {base_url}"

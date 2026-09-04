@@ -111,8 +111,32 @@ def available() -> bool:
     return client.is_enabled()
 
 
-def _ask_json(user: str, *, temperature: float = 0.0) -> dict | None:
+def _sample_temperature() -> float:
+    """The temperature the repeated samples are drawn at.
+
+    Unanimity across three samples is only evidence of confidence if the
+    samples can actually differ.  Drawn at temperature 0 a local model returns
+    the same tokens three times, so the check degenerates into "did the server
+    answer three times" — it catches a timeout or malformed JSON and nothing
+    else.  A small but non-zero temperature is what makes a wobbly
+    classification disagree with itself and therefore abstain.
+
+    One sample is a different case: there is nothing to compare it with, so it
+    is drawn greedily.  ``LLM_TEMPERATURE`` overrides either.
+    """
+    raw = os.environ.get("LLM_TEMPERATURE")
+    if raw is not None:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    return 0.0 if SAMPLES <= 1 else 0.3
+
+
+def _ask_json(user: str, *, temperature: float | None = None) -> dict | None:
     """One JSON-constrained completion, or ``None`` on any failure."""
+    if temperature is None:
+        temperature = _sample_temperature()
     from src.llm import client
 
     with STATUS.attempt("llm") as outcome:

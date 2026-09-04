@@ -43,9 +43,13 @@ class JobRunner:
     one; the editor should see progress rather than a frozen tab.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, llm: bool = False) -> None:
         self._lock = threading.Lock()
         self._jobs: dict[str, dict] = {}
+        # Whether preparing a paper may consult a local model.  Held here
+        # rather than read from the environment inside the worker, so that what
+        # the launcher window announced is exactly what every paper gets.
+        self.llm = llm
 
     def start(self, label: str, folders: list[Path], *, compile_pdf: bool) -> str:
         job_id = uuid.uuid4().hex[:12]
@@ -72,7 +76,7 @@ class JobRunner:
             with self._lock:
                 self._jobs[job_id]["current"] = folder.name
             try:
-                prescreen(folder, compile=compile_pdf, git=True)
+                prescreen(folder, compile=compile_pdf, git=True, llm=self.llm)
             except Exception as exc:  # noqa: BLE001 — one bad paper must not stop a batch
                 with self._lock:
                     self._jobs[job_id]["errors"].append(
@@ -185,6 +189,7 @@ class DeskHandler(BaseHTTPRequestHandler):
                     "root_name": self.root.name,
                     "editor": self._config().get("editor", ""),
                     "compile": self._config().get("compile", True),
+                    "llm": _llm_state(self.jobs.llm),
                     "jobs": self.jobs.active(),
                 })
             elif route == "/api/worklist":
@@ -442,14 +447,59 @@ def _one(query: dict, key: str) -> str | None:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _settle_model(enabled: bool) -> tuple[bool, str]:
+    """Decide once whether a model is really in play.
+
+    Returns ``(in_use, line_for_the_launcher_window)``.  Asked here, at
+    start-up, rather than discovered by each paper in turn: an editor who
+    asked for a model and is quietly not getting one has the worst of both
+    worlds — they wait for it and do not get it — so this says which of the
+    two is happening, in words that suggest what to do about it.
+
+    When the model is not usable the environment is put back to "off" as well
+    as the flag, because one sanctioned use of a model reads the environment
+    directly.  Half a model is worse than none: it is the state nobody can
+    describe afterwards.
+    """
+    import os
+    import textwrap
+
+    if not enabled:
+        return False, ""
+
+    from src.llm import client
+
+    ok, reason = client.reachable()
+    if ok:
+        return True, f"  Model:    {reason}\n"
+
+    os.environ["LLM_ENABLED"] = "false"
+    line = textwrap.fill(
+        f"NOT USED — {reason} Papers are screened without it; "
+        "every check that does not need a model still runs.",
+        width=68, initial_indent="  Model:    ",
+        subsequent_indent="            ",
+    ) + "\n"
+    return False, line
+
+
+def _llm_state(enabled: bool) -> dict:
+    """What to tell the page about the model backend."""
+    from src.llm import client
+
+    conf = client.settings()
+    return {"enabled": bool(enabled), "model": conf["model"] if enabled else "",
+            "base_url": conf["base_url"] if enabled else ""}
+
+
 def serve(root: Path, *, host: str = "127.0.0.1", port: int = 8765,
-          open_browser: bool = True) -> None:
+          open_browser: bool = True, llm: bool = False) -> None:
     """Start the desk and block until interrupted."""
     root = root.expanduser().resolve()
     if not root.is_dir():
         raise SystemExit(f"{root} is not a folder.")
 
-    jobs = JobRunner()
+    jobs = JobRunner(llm=llm)
     handler = partial(DeskHandler, root=root, jobs=jobs)
 
     # Find a free port rather than failing when one desk is already open.
@@ -467,6 +517,8 @@ def serve(root: Path, *, host: str = "127.0.0.1", port: int = 8765,
 
     url = f"http://{host}:{port}/"
     stamp = datetime.now().strftime("%H:%M")
+
+    jobs.llm, model_line = _settle_model(llm)
     # flush=True matters: Python buffers stdout when it is not a terminal, and
     # the launcher window is exactly where an editor reads the address if the
     # browser did not open by itself.  Without this the window stays blank.
@@ -477,7 +529,7 @@ def serve(root: Path, *, host: str = "127.0.0.1", port: int = 8765,
 
   Papers:   {root}
   Address:  {url}
-
+{model_line}
   A browser window should have opened. If it did not, copy the
   address above into your browser.
 

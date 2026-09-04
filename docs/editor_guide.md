@@ -211,6 +211,16 @@ Press **Keep as submitted** and add a note saying what was wrong with it. Those
 notes are the most useful thing you can give whoever maintains the tool: they
 are how a bad rule gets found and switched off.
 
+**There is a grey "model:" label at the top of the page. What is that?**
+Whoever set the tool up has switched on a language model that runs on this
+computer — nothing is sent anywhere. It helps with two things only: deciding
+whether an unusual word in a reference title is a name or an ordinary word, and
+hiding problems it judges to be false alarms (what it hid is listed under *For
+the record*, so you can always see). It is never allowed to supply a fact — a
+DOI, a year, a volume, a page range — and it cannot change anything the tool
+corrects automatically. If the label is absent, the tool is running without it,
+which is the normal setting.
+
 **Something in the paper is wrong and the tool said nothing.**
 That is expected — it only checks a fixed list of things. Put it under *Your
 notes* and it goes to the author.

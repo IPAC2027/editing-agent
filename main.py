@@ -46,13 +46,27 @@ console = Console()
 # Shared presentation
 # ---------------------------------------------------------------------------
 
-def _configure_llm(llm: bool, model: str | None, base_url: str | None) -> None:
+def _configure_llm(llm: bool | None, model: str | None,
+                   base_url: str | None) -> bool:
+    """Settle whether a model is in play, and return the answer.
+
+    ``--llm`` / ``--no-llm`` wins; with neither, ``LLM_ENABLED`` from the
+    environment or ``.env`` decides.  There is one answer, and every part of a
+    run reads it from here: the alternative was a half-on state where the flag
+    governed some uses of a model and the environment governed others, so a
+    ``.env`` saying ``LLM_ENABLED=true`` bought an editor part of a model
+    without saying which part.
+    """
     if model:
         os.environ["LLM_MODEL"] = model
     if base_url:
         os.environ["LLM_BASE_URL"] = base_url
-    if llm:
-        os.environ["LLM_ENABLED"] = "true"
+    if llm is None:
+        from src.llm.client import is_enabled
+
+        return is_enabled()
+    os.environ["LLM_ENABLED"] = "true" if llm else "false"
+    return llm
 
 
 def _counts(paper) -> tuple[int, int, int, int]:
@@ -108,6 +122,9 @@ def desk(
                                       help="Open a browser automatically."),
     compile_pdf: bool = typer.Option(True, "--compile/--no-compile",
                                      help="Build a PDF when preparing a paper."),
+    llm: bool = typer.Option(None, "--llm/--no-llm", help="Use a local model where one is sanctioned (default: LLM_ENABLED in .env)."),
+    model: str = typer.Option(None, envvar="LLM_MODEL", help="Model name."),
+    base_url: str = typer.Option(None, envvar="LLM_BASE_URL", help="Model base URL."),
 ) -> None:
     """Open the review desk in a browser.
 
@@ -116,6 +133,8 @@ def desk(
     submissions are never modified.
     """
     from src.desk.server import CONFIG_FILENAME, serve
+
+    llm = _configure_llm(llm, model, base_url)
 
     root = submissions.expanduser().resolve()
     if not root.is_dir():
@@ -136,7 +155,7 @@ def desk(
     except OSError:
         pass
 
-    serve(root, port=port, open_browser=open_browser)
+    serve(root, port=port, open_browser=open_browser, llm=llm)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +165,7 @@ def desk(
 @app.command()
 def prescreen(
     paper_folder: Path = typer.Argument(..., help="Path to one submission folder."),
-    llm: bool = typer.Option(False, "--llm/--no-llm", help="Add an advisory model review."),
+    llm: bool = typer.Option(None, "--llm/--no-llm", help="Use a local model where one is sanctioned (default: LLM_ENABLED in .env)."),
     compile_pdf: bool = typer.Option(True, "--compile/--no-compile",
                                      help="Compile the edited source as proof it builds."),
     git: bool = typer.Option(True, "--git/--no-git",
@@ -156,7 +175,7 @@ def prescreen(
     open_browser: bool = typer.Option(False, "--open", help="Open review.html when done."),
 ) -> None:
     """Pre-screen a single submission folder."""
-    _configure_llm(llm, model, base_url)
+    llm = _configure_llm(llm, model, base_url)
 
     if not paper_folder.is_dir():
         console.print(f"[red]Not a directory:[/red] {paper_folder}")
@@ -240,7 +259,7 @@ def _report_word(paper, out_dir: Path, open_browser: bool) -> None:
 @app.command("prescreen-all")
 def prescreen_all(
     submissions_dir: Path = typer.Argument(..., help="Directory of submission folders."),
-    llm: bool = typer.Option(False, "--llm/--no-llm"),
+    llm: bool = typer.Option(None, "--llm/--no-llm", help="Use a local model where one is sanctioned (default: LLM_ENABLED in .env)."),
     compile_pdf: bool = typer.Option(True, "--compile/--no-compile"),
     git: bool = typer.Option(True, "--git/--no-git"),
     workers: int = typer.Option(1, "--workers", "-j", help="Parallel workers."),
@@ -257,7 +276,7 @@ def prescreen_all(
         raise typer.Exit(1)
 
     console.print(f"Found [bold]{len(folders)}[/bold] submission(s).\n")
-    _configure_llm(llm, model, base_url)
+    llm = _configure_llm(llm, model, base_url)
 
     from src.workflow.prescreen import WordSubmissionError
     from src.workflow.prescreen import prescreen as run
