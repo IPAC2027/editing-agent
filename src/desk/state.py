@@ -34,6 +34,9 @@ from src.desk import plain
 
 STATE_FILENAME = "review_state.json"
 
+#: What the editor did to an automatic correction, when they did anything.
+REVERTED = "reverted"
+
 SEVERITY_CHOICES = ("must_fix", "worth_a_look", "note")
 SEVERITY_TO_REPORT = {
     "must_fix": "error",
@@ -213,9 +216,25 @@ class ReviewState(BaseModel):
     def decision_for(self, edit_id: str) -> str:
         return self.decisions.get(edit_id, "undecided")
 
+    def auto_decision(self, edit_id: str) -> str:
+        """``"applied"`` or ``"reverted"``, for a correction made automatically.
+
+        The default is "applied", which is the whole point of the automatic
+        tier: the editor is not asked. But "not asked" must not mean "not
+        allowed" — an automatic correction the editor disagrees with has to be
+        as reversible as anything else, or the tier is a trap. Stored under a
+        value of its own rather than reusing ``rejected``, so a reverted
+        automatic correction is never miscounted as a suggestion the editor
+        turned down.
+        """
+        return REVERTED if self.decisions.get(edit_id) == REVERTED else "applied"
+
+    def reverted_ids(self, auto_ids: list[str]) -> list[str]:
+        return [i for i in auto_ids if self.decisions.get(i) == REVERTED]
+
     def accepted_ids(self, suggested_ids: list[str], auto_ids: list[str]) -> list[str]:
-        """Automatic edits, plus the suggestions the editor accepted."""
-        return list(auto_ids) + [
+        """Automatic edits still standing, plus the suggestions the editor accepted."""
+        return [i for i in auto_ids if self.decisions.get(i) != REVERTED] + [
             edit_id for edit_id in suggested_ids
             if self.decisions.get(edit_id) == "accepted"
         ]

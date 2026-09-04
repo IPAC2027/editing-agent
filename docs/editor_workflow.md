@@ -59,6 +59,32 @@ Two rules the code enforces rather than documents:
   from an external service that was not reached is rejected at construction if
   it claims AUTO. It may still be offered as a suggestion.
 
+### The automatic tier is not a locked door
+
+"Applied without asking" is a claim about *attention*, not about authority. A
+rule that is right on 999 submissions and wrong on this one is exactly the
+case an editor exists for, so every automatic correction is listed — folded
+away, because on a normal paper there are eight of them and they are all the
+same spacing fix — and every one of them has a way back:
+
+* at the desk, **Put back as submitted**, with a note;
+* in `review.html`, a **put back** tick that writes the same value and builds
+  the `apply` command for you;
+* on the command line, `apply --reject <id>`;
+* in `history/`, `git revert <sha>`.
+
+Putting one back is stored under its own value, `reverted`, rather than
+reusing `rejected`: a correction the editor took out must never be counted as
+a suggestion they turned down. It propagates to everything downstream — the
+reviewed source, the Word tracked-changes file, the letter (which stops
+claiming the correction was made) and `review_summary.md` (which records it,
+with the note, under *Automatic corrections you put back*).
+
+The one thing it deliberately does **not** do is re-raise the original finding
+as a problem. The editor putting a correction back is a judgement that the
+rule does not apply here; if the author should still hear about it, that is a
+note, and the desk says so on the card.
+
 ## 3. What an editor actually gets
 
 ```

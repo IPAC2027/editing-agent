@@ -326,8 +326,12 @@ class Decisions(BaseModel):
     decisions: dict[str, str] = Field(default_factory=dict)
 
     def accepted(self, editset: EditSet) -> list[str]:
-        """AUTO edits plus every SUGGEST edit explicitly accepted."""
-        ids = [e.id for e in editset.auto]
+        """AUTO edits still standing, plus every SUGGEST edit explicitly accepted.
+
+        An AUTO edit is in unless the editor marked it ``reverted``: the tier
+        means "not asked", not "not allowed to say no".
+        """
+        ids = [e.id for e in editset.auto if self.decisions.get(e.id) != "reverted"]
         ids += [
             e.id for e in editset.suggested
             if self.decisions.get(e.id) == "accepted"

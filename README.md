@@ -33,7 +33,7 @@ installed, and the files the author sent are never modified.
 | Screen | What you do there |
 |---|---|
 | **The list** | Every submission with its status, how many changes await you, and how many problems the author must fix. Click one to open it. |
-| **Your decisions** | One card per change: what it is, why JACoW wants it, before and after. Accept or keep as submitted. Keyboard: `a` `r` `j` `k` `n`. Repeated changes of one kind get an "accept all" button. |
+| **Your decisions** | One card per change: what it is, why JACoW wants it, before and after. Accept or keep as submitted. Keyboard: `a` `r` `j` `k` `n`. Repeated changes of one kind get an "accept all" button. The corrections applied automatically are listed too, folded away, each with **Put back as submitted** — "we did not ask you" never means "you cannot say no". |
 | **Problems** | Sorted by who has to act — only the author can fix these / for you to check / for the record. Tick off what you have handled. |
 | **Your notes** | Anything the agent missed. Goes into the letter. |
 | **The paper** | The paper with your accepted corrections in place. Click any line to edit it yourself. Jump to the title, authors, body, references, or the first change. |
@@ -109,6 +109,8 @@ Three ways to accept a subset, all equivalent:
 uv run python main.py apply <folder> --decisions review_decisions.json
 # by id
 uv run python main.py apply <folder> --accept E004,E007
+# an automatic correction you disagree with
+uv run python main.py apply <folder> --reject E002
 # with git
 cd <folder>/aiagent_prescreen/history && git revert <sha>
 ```
@@ -122,7 +124,7 @@ is written and the original is untouched.
 
 | Tier | Meaning | Examples |
 |---|---|---|
-| **auto** | Mechanically reversible, zero judgement, no external fact. Applied without asking. | `10 MeV` → `10~MeV`, `DOI: 10.x` → `doi:10.x`, `\url{doi:…}` → `\doi{…}`, `[1][2]` → `[1, 2]`, `et. al` → `et al.`, BibTeX `pages`/`doi` presentation |
+| **auto** | Mechanically reversible, zero judgement, no external fact. Applied without asking — and individually reversible afterwards, from the desk or with `apply --reject <id>`. | `10 MeV` → `10~MeV`, `DOI: 10.x` → `doi:10.x`, `\url{doi:…}` → `\doi{…}`, `[1][2]` → `[1, 2]`, `et. al` → `et al.`, BibTeX `pages`/`doi` presentation |
 | **suggest** | One accept/reject decision, with a before/after and the rule behind it. | author initials, unit case (`Gev` → `GeV`), title punctuation, reference sentence case, whole-reference reformat, reference-list reordering |
 | **flag** | Reported, never fixed — the fix needs a fact the agent cannot verify. | missing DOI, missing figure, unresolved `\cite`, a `.bib` file that does not exist |
 

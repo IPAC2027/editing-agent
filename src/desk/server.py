@@ -274,8 +274,10 @@ class DeskHandler(BaseHTTPRequestHandler):
         folder, review = self._with_state(body)
         edit_id = str(body.get("id", ""))
         decision = str(body.get("decision", "undecided"))
-        if decision not in ("accepted", "rejected", "undecided"):
-            raise ValueError("a decision is accept, reject or undecided")
+        if decision not in ("accepted", "rejected", "reverted", "undecided"):
+            raise ValueError(
+                "a decision is accept, reject, revert or undecided"
+            )
         review.decide(edit_id, decision)
         review.save(folder)
         self._json(self._view(folder))

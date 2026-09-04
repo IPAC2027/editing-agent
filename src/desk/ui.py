@@ -174,6 +174,21 @@ table.wl tbody tr:hover{background:var(--surface2)}
 .item.accepted{border-left:4px solid var(--good)}
 .item.rejected{border-left:4px solid var(--bad);opacity:.72}
 .item.handled{opacity:.6}
+.item.applied{border-left:4px solid var(--rule)}
+.item.reverted{border-left:4px solid var(--warn)}
+.decided.applied{color:var(--muted)} .decided.reverted{color:var(--warn)}
+.autobox{margin:0 0 11px}
+.autobox>summary{cursor:pointer;list-style:none;display:flex;gap:9px;align-items:baseline;
+                 padding:11px 14px;border:1px solid var(--rule);border-radius:var(--radius);
+                 background:var(--surface2);font-size:.9rem}
+.autobox>summary::-webkit-details-marker{display:none}
+.autobox>summary::before{content:"▸";color:var(--muted)}
+.autobox[open]>summary::before{content:"▾"}
+.autobox>summary b{font-weight:600}
+.autobox>summary .sub2{color:var(--ink2);font-size:.85rem}
+.autobox .inner{margin:11px 0 0 7px;padding-left:14px;border-left:2px solid var(--rule)}
+.autobox .inner>.why{margin-bottom:11px}
+.autobox .item{background:var(--surface2)}
 .item-top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px}
 .item-top h3{margin:0;flex:1 1 18ch}
 .where{font-family:var(--mono);font-size:.78rem;color:var(--muted);white-space:nowrap}
@@ -351,6 +366,7 @@ kbd{font-family:var(--mono);font-size:.75rem;border:1px solid var(--rule);
 const S = {
   root:"", editor:"", papers:[], filter:"all",
   folder:null, paper:null, tab:"decisions", cursor:0, job:null,
+  showApplied:false,
 };
 
 const $  = (s, r=document) => r.querySelector(s);
@@ -601,6 +617,7 @@ function renderPaper(){
     d.appendChild(el("b",null,String(n))); d.appendChild(el("span",null,label));
     return d; };
   sum.appendChild(chip(c.applied,"already corrected","ok"));
+  if(c.reverted) sum.appendChild(chip(c.reverted,"you put back","attn"));
   sum.appendChild(chip(c.to_decide,"need your decision", c.to_decide?"todo":""));
   sum.appendChild(chip(c.must_fix,"must be fixed", c.must_fix?"attn":""));
   sum.appendChild(chip(c.my_notes + c.my_edits,"your notes & edits"));
@@ -645,14 +662,103 @@ function backToList(){
 }
 
 /* ------------------------------------------------- tab: your decisions */
+
+/* The corrections the agent made without asking.  Collapsed, because on a
+   normal paper there are eight of them and they are all the same spacing fix
+   — but present and reversible, because "we did not ask you" must not mean
+   "you cannot say no". */
+function appliedSection(host){
+  const list = S.paper.applied || [];
+  if(!list.length) return;
+  const back = list.filter(a=>a.decision==="reverted").length;
+
+  const det = el("details","autobox");
+  det.open = S.showApplied || back>0;
+  det.ontoggle = () => { S.showApplied = det.open; };
+
+  const sum = el("summary");
+  sum.appendChild(el("b",null,(list.length-back)+" correction"
+    +(list.length-back===1?"":"s")+" already applied"));
+  sum.appendChild(el("span","sub2", back
+    ? back+" put back as the author wrote it"
+    : "nothing needed from you — open this to check or undo any of them"));
+  det.appendChild(sum);
+
+  const inner = el("div","inner");
+  inner.appendChild(el("p","why",
+    "These are the corrections the agent makes the same way every time, with no "
+    +"judgement involved, so it does not ask. If one of them is wrong for this "
+    +"paper, put it back — the reviewed file and the letter to the author both "
+    +"follow what you choose here."));
+  list.forEach(a=>inner.appendChild(appliedCard(a)));
+  det.appendChild(inner);
+  host.appendChild(det);
+}
+
+function appliedCard(a){
+  const item = el("div","item "+a.decision);
+
+  const top = el("div","item-top");
+  top.appendChild(el("h3",null,a.heading));
+  if(a.line_label) top.appendChild(el("span","where",a.line_label));
+  item.appendChild(top);
+  item.appendChild(el("p","why", a.why));
+
+  const ba = el("div","ba");
+  const was = el("div","was"); was.appendChild(el("span","lab","As submitted"));
+  was.appendChild(document.createTextNode(a.before));
+  const now = el("div","now");
+  now.appendChild(el("span","lab", a.decision==="reverted" ? "Was corrected to"
+                                                           : "Corrected to"));
+  now.appendChild(document.createTextNode(a.after || "(removed)"));
+  ba.appendChild(was); ba.appendChild(now);
+  item.appendChild(ba);
+
+  const acts = el("div","acts");
+  if(a.decision==="reverted"){
+    acts.appendChild(el("div","decided reverted","↩ Put back as submitted"));
+    const redo = el("button","plain","apply it again");
+    redo.onclick = () => decide(a.id,"undecided");
+    acts.appendChild(redo);
+  } else {
+    acts.appendChild(el("div","decided applied","✓ Applied"));
+    const undo = el("button","no","Put back as submitted");
+    undo.onclick = () => decide(a.id,"reverted");
+    acts.appendChild(undo);
+  }
+  const id = el("span","checkid"); id.textContent = a.check_id;
+  id.title = (a.rule||"") + (a.detail? "\n\n"+a.detail : "");
+  acts.appendChild(el("span",null," ")); acts.appendChild(id);
+  item.appendChild(acts);
+
+  if(a.decision==="reverted"){
+    const hint = el("p","why");
+    hint.style.marginTop = "9px";
+    hint.textContent = "The author's own wording stands. If they should be told "
+      + "about it, add it under Your notes — the letter no longer mentions this.";
+    item.appendChild(hint);
+  }
+
+  if(a.note){
+    const n = el("div","hasnote");
+    n.appendChild(el("b",null,"Your note: "));
+    n.appendChild(document.createTextNode(a.note));
+    item.appendChild(n);
+  }
+  item.appendChild(noteEditor(a.note, a.id, "edit"));
+  return item;
+}
+
 function tabDecisions(host){
   const list = S.paper.decisions;
+  appliedSection(host);
   if(!list.length){
     const e = el("div","empty");
     e.appendChild(el("b",null,"Nothing to decide"));
     e.appendChild(el("div",null,
-      "Every correction the agent was confident about is already applied. "
-      +"Anything it was not confident about is under Problems."));
+      "Every correction the agent was confident about is already applied — they "
+      +"are listed above, and any of them can be put back. Anything it was not "
+      +"confident about is under Problems."));
     host.appendChild(e); return;
   }
   const undec = list.filter(d=>d.decision==="undecided").length;
@@ -772,7 +878,9 @@ async function decide(id, decision){
   try{
     S.paper = await api("/api/decide",{folder:S.folder,id,decision});
     const list = S.paper.decisions;
-    if(decision!=="undecided"){
+    if(decision==="reverted"){
+      S.showApplied = true;      /* keep the section the editor is working in open */
+    }else if(decision!=="undecided"){
       const next = list.findIndex((d,i)=> i>S.cursor && d.decision==="undecided");
       S.cursor = next>=0 ? next : Math.min(S.cursor+1, Math.max(0,list.length-1));
     }

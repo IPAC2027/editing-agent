@@ -52,10 +52,10 @@ this once per paper.
 At the top you see four numbers:
 
 - **already corrected** — the tool fixed these. You do not need to look at
-  them, and they are listed under *Your decisions* only for the record. These
-  are things like the spacing between a number and its unit: the same
-  correction, made the same way, thousands of times, with no judgement
-  involved.
+  them. These are things like the spacing between a number and its unit: the
+  same correction, made the same way, thousands of times, with no judgement
+  involved. They are listed at the top of *Your decisions*, folded away, and
+  **any one of them can be put back** — see below.
 - **need your decision** — this is your work.
 - **must be fixed** — problems the tool will not touch, because fixing them
   needs something only the author has.
@@ -65,7 +65,18 @@ Then six tabs.
 
 ### Your decisions
 
-One card per change. Each card says what would change, why JACoW wants it, and
+At the top is a folded line — *"8 corrections already applied"*. Open it and
+you get one card per automatic correction: what it changed, where, and why.
+Each has a **Put back as submitted** button.
+
+You will not normally open this. But if the tool has done something that is
+wrong for *this* paper — it read a megatesla as a millitesla, say — put it
+back, and add a note saying why. The reviewed file, the Word file and the
+letter to the author all follow what you choose: a correction you put back is
+not mentioned to the author at all, so if they should still be told about it,
+add it under *Your notes*. **change** or *apply it again* undoes the undo.
+
+Below that, one card per change the tool wants you to decide. Each card says what would change, why JACoW wants it, and
 shows the text before and after.
 
 - **Accept** — make this change.
@@ -224,6 +235,11 @@ which is the normal setting.
 **Something in the paper is wrong and the tool said nothing.**
 That is expected — it only checks a fixed list of things. Put it under *Your
 notes* and it goes to the author.
+
+**The tool corrected something automatically and it is wrong.**
+Open *"corrections already applied"* at the top of *Your decisions* and press
+**Put back as submitted** on it. Add a note saying what was wrong — that note
+is how a bad rule gets found and moved out of the automatic list.
 
 **Why did it not just fix everything?**
 Because a wrong automatic change costs you more time than no change at all. The

@@ -200,17 +200,7 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
     if paper.reorder:
         decisions.insert(0, _reorder_card(paper.reorder, state))
 
-    applied = [
-        {
-            "id": edit.id,
-            "heading": plain.label(edit.check_id),
-            "why": plain.explain(edit.check_id).why,
-            "line": edit.line,
-            "before": edit.before,
-            "after": edit.after,
-        }
-        for edit in paper.auto_edits
-    ]
+    applied = [_applied_card(edit, state) for edit in paper.auto_edits]
 
     findings = _finding_cards(
         paper.report.get("findings", []), state,
@@ -232,7 +222,8 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
         "generated_at": paper.report.get("generated_at", ""),
         "paper_note": state.paper_note,
         "counts": {
-            "applied": len(applied),
+            "applied": sum(1 for a in applied if a["decision"] == "applied"),
+            "reverted": sum(1 for a in applied if a["decision"] == "reverted"),
             "to_decide": sum(1 for d in decisions if d["decision"] == "undecided"),
             "accepted": sum(1 for d in decisions if d["decision"] == "accepted"),
             "rejected": sum(1 for d in decisions if d["decision"] == "rejected"),
@@ -254,6 +245,34 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
         "files": _files(paper),
         "source": _source_view(paper),
         "lookups": paper.report.get("lookups", []),
+    }
+
+
+def _applied_card(edit, state: ReviewState) -> dict:
+    """One correction the agent made without asking — and how to undo it.
+
+    Carries the same fields as a decision card, because an editor looking at
+    an automatic correction wants exactly what they want for a suggestion:
+    what changed, why, where, and a way to put it back.
+    """
+    explanation = plain.explain(edit.check_id)
+    return {
+        "id": edit.id,
+        "kind": "applied",
+        "check_id": edit.check_id,
+        "heading": explanation.label,
+        "why": explanation.why,
+        "detail": edit.message,
+        "rule": edit.rule or "",
+        "line": edit.line,
+        "line_label": ("reference " + str(edit.line)) if isinstance(edit, _WordChange)
+                      else ("line " + str(edit.line) if edit.line else ""),
+        "before": edit.before,
+        "after": edit.after,
+        "context_before": edit.context_before,
+        "context_after": edit.context_after,
+        "decision": state.auto_decision(edit.id),
+        "note": state.edit_notes.get(edit.id, ""),
     }
 
 
@@ -322,6 +341,11 @@ def _covered_by_corrections(paper: Paper) -> set[tuple[str, object]]:
     """
     covered: set[tuple[str, object]] = set()
     for correction in paper.word_corrections:
+        # A correction the editor put back no longer handles anything, so the
+        # finding it was hiding has to come back with it.
+        if (correction.get("tier") == "auto"
+                and paper.state.auto_decision(correction.get("id", "")) != "applied"):
+            continue
         reference = correction.get("reference")
         for check_id in correction.get("checks") or [correction.get("check_id")]:
             covered.add((check_id, reference))
@@ -415,6 +439,7 @@ def _source_view(paper: Paper) -> dict:
     working = compose(paper, include_undecided=False)
     touched = {
         edit.line for edit in paper.auto_edits
+        if paper.state.auto_decision(edit.id) == "applied"
     } | {
         edit.line for edit in paper.suggested_edits
         if paper.state.decision_for(edit.id) == "accepted"
@@ -454,7 +479,8 @@ def compose(paper: Paper, *, include_undecided: bool = False) -> str:
 
     text = paper.source
     if paper.editset:
-        chosen = [edit.id for edit in paper.auto_edits]
+        chosen = [edit.id for edit in paper.auto_edits
+                  if paper.state.auto_decision(edit.id) == "applied"]
         for edit in paper.suggested_edits:
             decision = paper.state.decision_for(edit.id)
             if decision == "accepted" or (include_undecided and decision == "undecided"):
@@ -556,7 +582,8 @@ def letter_text(paper: Paper) -> str:
             corrected.append(phrase)
 
     for edit in paper.auto_edits:
-        _note_fixed(edit.check_id)
+        if state.auto_decision(edit.id) == "applied":
+            _note_fixed(edit.check_id)
     for edit in paper.suggested_edits:
         if state.decision_for(edit.id) == "accepted":
             _note_fixed(edit.check_id)
@@ -694,7 +721,8 @@ def _write_reviewed_docx(paper: Paper) -> list[str]:
         return []
     accepted = [
         c for c in paper.word_corrections
-        if c.get("tier") == "auto"
+        if (c.get("tier") == "auto"
+            and paper.state.auto_decision(c.get("id", "")) == "applied")
         or paper.state.decision_for(c.get("id", "")) == "accepted"
     ]
     target = paper.out_dir / f"{paper.source_path.stem}_reviewed.docx"
@@ -741,11 +769,29 @@ def _summary_markdown(paper: Paper, letter: str) -> str:
         "## Corrections applied automatically",
         "",
     ]
+    reverted = []
     for edit in paper.auto_edits:
-        lines.append(f"- line {edit.line}: {plain.label(edit.check_id)} — "
-                     f"`{_short(edit.before, 60)}` → `{_short(edit.after, 60)}`")
+        entry = (f"- line {edit.line}: {plain.label(edit.check_id)} — "
+                 f"`{_short(edit.before, 60)}` → `{_short(edit.after, 60)}`")
+        note = state.edit_notes.get(edit.id, "")
+        if state.auto_decision(edit.id) == "applied":
+            lines.append(entry)
+        else:
+            reverted.append(entry + (f"\n  - your note: {note}" if note else ""))
     if not paper.auto_edits:
         lines.append("- none")
+    elif len(reverted) == len(paper.auto_edits):
+        lines.append("- none left standing; see below")
+
+    if reverted:
+        lines += ["", "## Automatic corrections you put back", ""]
+        lines += reverted
+        lines.append("")
+        lines.append(
+            "These were applied by the agent and undone by the editor. The "
+            "author's own wording stands in the reviewed file, and the letter "
+            "does not mention them."
+        )
 
     lines += ["", "## Suggestions and what you decided", ""]
     any_decision = False

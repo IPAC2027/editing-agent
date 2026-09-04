@@ -456,3 +456,163 @@ def test_editing_the_author_source_makes_the_conflict_visible(paper_folder: Path
                       "\\end{document}\n", encoding="utf-8")
     with pytest.raises(DeskError, match="Prepare this paper"):
         compose(Paper(paper_folder))
+
+
+# ---------------------------------------------------------------------------
+# Putting back an automatic correction
+#
+# The AUTO tier means "the editor is not asked".  It must never come to mean
+# "the editor is not allowed to say no": a rule that is right on 999 papers
+# and wrong on this one is exactly the case an editor is there for.
+# ---------------------------------------------------------------------------
+
+def _first_auto(folder: Path):
+    from src.edits import EditSet
+
+    editset = EditSet.read(folder / "aiagent_prescreen" / "edits.json")
+    assert editset.auto, "the fixture is meant to produce automatic corrections"
+    return editset.auto[0]
+
+
+def test_automatic_corrections_are_listed_with_everything_needed_to_undo_one(
+        paper_folder: Path):
+    data = view(paper_folder)
+
+    assert data["applied"], "an automatic correction the editor cannot see is a trap"
+    card = data["applied"][0]
+    for field in ("id", "check_id", "heading", "why", "before", "after", "decision"):
+        assert card[field] != "" and card[field] is not None, field
+    assert card["decision"] == "applied"
+    assert card["before"] != card["after"]
+
+
+def test_putting_one_back_restores_the_authors_text_in_the_file(paper_folder: Path):
+    auto = _first_auto(paper_folder)
+    paper = Paper(paper_folder)
+    with_it = compose(paper)
+    assert auto.after in with_it
+
+    state = ReviewState.load(paper_folder)
+    state.decide(auto.id, "reverted")
+    state.save(paper_folder)
+
+    without_it = compose(Paper(paper_folder))
+    assert without_it != with_it
+    assert without_it.count(auto.before) > with_it.count(auto.before)
+
+
+def test_the_other_automatic_corrections_are_unaffected(paper_folder: Path):
+    from src.edits import EditSet
+
+    editset = EditSet.read(paper_folder / "aiagent_prescreen" / "edits.json")
+    if len(editset.auto) < 2:
+        pytest.skip("needs two automatic corrections")
+    first, second = editset.auto[0], editset.auto[1]
+
+    state = ReviewState.load(paper_folder)
+    state.decide(first.id, "reverted")
+    state.save(paper_folder)
+
+    text = compose(Paper(paper_folder))
+    assert second.after in text
+
+
+def test_the_count_moves_from_applied_to_put_back(paper_folder: Path):
+    before = view(paper_folder)["counts"]
+    auto = _first_auto(paper_folder)
+
+    state = ReviewState.load(paper_folder)
+    state.decide(auto.id, "reverted")
+    state.save(paper_folder)
+
+    after = view(paper_folder)["counts"]
+    assert after["applied"] == before["applied"] - 1
+    assert after["reverted"] == before.get("reverted", 0) + 1
+    # And it is not miscounted as a suggestion the editor turned down.
+    assert after["rejected"] == before["rejected"]
+
+
+def test_the_letter_does_not_claim_a_correction_that_was_put_back(paper_folder: Path):
+    from src.desk import plain
+
+    auto = _first_auto(paper_folder)
+    phrase = plain.explain(auto.check_id).fixed_phrase()
+    if not phrase:
+        pytest.skip("this check has no letter phrasing of its own")
+
+    # Nothing else may be producing the same phrase, or the assertion is empty.
+    others = [
+        e for e in Paper(paper_folder).auto_edits
+        if e.id != auto.id and plain.explain(e.check_id).fixed_phrase() == phrase
+    ]
+    state = ReviewState.load(paper_folder)
+    for edit in [auto, *others]:
+        state.decide(edit.id, "reverted")
+    state.save(paper_folder)
+
+    assert phrase not in letter_text(Paper(paper_folder))
+
+
+def test_the_summary_records_what_was_put_back_and_why(paper_folder: Path):
+    auto = _first_auto(paper_folder)
+    state = ReviewState.load(paper_folder)
+    state.decide(auto.id, "reverted")
+    state.set_edit_note(auto.id, "the author means megatesla here")
+    state.save(paper_folder)
+
+    close_paper(paper_folder, compile_pdf=False)
+    summary = (paper_folder / "aiagent_prescreen" / "review_summary.md").read_text(
+        encoding="utf-8")
+
+    assert "put back" in summary.lower()
+    assert "the author means megatesla here" in summary
+
+
+def test_a_revert_survives_rescreening(paper_folder: Path):
+    auto = _first_auto(paper_folder)
+    state = ReviewState.load(paper_folder)
+    state.decide(auto.id, "reverted")
+    state.save(paper_folder)
+
+    prescreen(paper_folder, compile=False, git=False)
+
+    assert ReviewState.load(paper_folder).auto_decision(auto.id) == "reverted"
+
+
+def test_a_revert_can_itself_be_undone(paper_folder: Path):
+    auto = _first_auto(paper_folder)
+    state = ReviewState.load(paper_folder)
+    state.decide(auto.id, "reverted")
+    state.decide(auto.id, "undecided")     # what "apply it again" sends
+    state.save(paper_folder)
+
+    assert ReviewState.load(paper_folder).auto_decision(auto.id) == "applied"
+    assert auto.after in compose(Paper(paper_folder))
+
+
+def test_the_standalone_review_page_offers_the_same_undo(paper_folder: Path):
+    """review.html is the no-desk path; it must not be a dead end either."""
+    page = (paper_folder / "aiagent_prescreen" / "review.html").read_text(
+        encoding="utf-8")
+    auto = _first_auto(paper_folder)
+
+    assert f"data-revert='{auto.id}'" in page
+    assert "put back" in page
+    assert "--reject" in page          # the command it builds for you
+
+
+def test_apply_honours_a_reverted_automatic_edit_from_a_decisions_file(
+        paper_folder: Path):
+    import json
+
+    from src.workflow.prescreen import apply_decisions
+
+    auto = _first_auto(paper_folder)
+    path = paper_folder / "aiagent_prescreen" / "review_decisions.json"
+    path.write_text(json.dumps({"decisions": {auto.id: "reverted"}}),
+                    encoding="utf-8")
+
+    _written, applied, _skipped = apply_decisions(
+        paper_folder, decisions_path=path, compile=False)
+
+    assert auto.id not in applied

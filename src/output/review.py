@@ -221,6 +221,10 @@ _STYLE = """
        text-transform:uppercase;padding:.15em .45em;border-radius:2px;
        border:1px solid currentColor}
  .tier.auto{color:var(--auto)} .tier.suggest{color:var(--suggest)}
+ td.revert{white-space:nowrap;font-size:.82rem;color:var(--muted)}
+ td.revert label{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+ tr.reverted{opacity:.62}
+ tr.reverted td:nth-child(2) code{text-decoration:line-through}
  .loc{font-family:var(--mono);font-size:.76rem;color:var(--muted)}
  .state{margin-left:auto;font-family:var(--mono);font-size:.74rem;color:var(--muted)}
  .msg{font-size:.9rem;color:var(--ink2);margin:0 0 9px;max-width:82ch}
@@ -257,7 +261,8 @@ _SCRIPT = r"""
 <script>
 (() => {
   const cards = [...document.querySelectorAll('.edit[data-id]')];
-  if (!cards.length) return;
+  const reverts = [...document.querySelectorAll('input[data-revert]')];
+  if (!cards.length && !reverts.length) return;
   const key = 'aiagent:' + document.body.dataset.paper + ':' + document.body.dataset.sha;
   let decisions = {};
   try { decisions = JSON.parse(localStorage.getItem(key) || '{}'); } catch (_) {}
@@ -277,14 +282,33 @@ _SCRIPT = r"""
       if (state === 'accepted') a++;
       if (state === 'rejected') r++;
     });
-    document.getElementById('tally').textContent =
-      `${a} accepted · ${r} rejected · ${cards.length - a - r} undecided`;
+    /* An automatic correction stands unless it is explicitly put back, so
+       'reverted' is the only value ever stored for one — absence means applied. */
+    let put_back = 0;
+    reverts.forEach((box) => {
+      box.checked = decisions[box.dataset.revert] === 'reverted';
+      box.closest('tr').classList.toggle('reverted', box.checked);
+      if (box.checked) put_back++;
+    });
+
+    const tally = document.getElementById('tally');
+    if (tally) {
+      tally.textContent =
+        `${a} accepted · ${r} rejected · ${cards.length - a - r} undecided`
+        + (put_back ? ` · ${put_back} put back` : '');
+    }
     const accepted = cards.filter((c) => decisions[c.dataset.id] === 'accepted')
                           .map((c) => c.dataset.id);
-    document.getElementById('cmd-accept').textContent =
-      accepted.length
-        ? `uv run python main.py apply ${document.body.dataset.folder} --accept ${accepted.join(',')}`
-        : `uv run python main.py apply ${document.body.dataset.folder}   # AUTO edits only`;
+    const reverted = reverts.filter((b) => decisions[b.dataset.revert] === 'reverted')
+                            .map((b) => b.dataset.revert);
+    const parts = [`uv run python main.py apply ${document.body.dataset.folder}`];
+    if (accepted.length) parts.push(`--accept ${accepted.join(',')}`);
+    if (reverted.length) parts.push(`--reject ${reverted.join(',')}`);
+    const cmd = document.getElementById('cmd-accept');
+    if (cmd) {
+      cmd.textContent = parts.join(' ')
+        + (parts.length === 1 ? '   # AUTO edits only' : '');
+    }
   };
 
   const decide = (index, value) => {
@@ -294,8 +318,16 @@ _SCRIPT = r"""
     save();
     if (index === cursor && cursor < cards.length - 1) cursor++;
     render();
-    cards[cursor].scrollIntoView({ block: 'center', behavior: 'smooth' });
+    cards[cursor]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   };
+
+  document.addEventListener('change', (event) => {
+    const box = event.target.closest('input[data-revert]');
+    if (!box) return;
+    if (box.checked) decisions[box.dataset.revert] = 'reverted';
+    else delete decisions[box.dataset.revert];
+    save(); render();
+  });
 
   document.addEventListener('click', (event) => {
     const button = event.target.closest('button');
@@ -307,6 +339,8 @@ _SCRIPT = r"""
       return;
     }
     if (action === 'accept-all' || action === 'reject-all') {
+      /* Bulk actions are about suggestions; an automatic correction is put
+         back one at a time, deliberately. */
       const value = action === 'accept-all' ? 'accepted' : 'rejected';
       cards.forEach((c) => { decisions[c.dataset.id] = value; });
       save(); render();
@@ -338,10 +372,10 @@ _SCRIPT = r"""
     if (map[event.key]) { decide(cursor, map[event.key]); event.preventDefault(); }
     else if (event.key === 'j' || event.key === 'ArrowDown') {
       cursor = Math.min(cursor + 1, cards.length - 1); render();
-      cards[cursor].scrollIntoView({ block: 'center' }); event.preventDefault();
+      cards[cursor]?.scrollIntoView({ block: 'center' }); event.preventDefault();
     } else if (event.key === 'k' || event.key === 'ArrowUp') {
       cursor = Math.max(cursor - 1, 0); render();
-      cards[cursor].scrollIntoView({ block: 'center' }); event.preventDefault();
+      cards[cursor]?.scrollIntoView({ block: 'center' }); event.preventDefault();
     }
   });
 
@@ -477,16 +511,21 @@ def write_review_html(
     auto_rows = "".join(
         f"<tr><td class='eid'>{_esc(e.id)}</td>"
         f"<td><code>{_esc(e.check_id)}</code> <span class='loc'>line {_esc(e.line)}</span><br>"
-        f"<code>{_esc(e.before)}</code> &rarr; <code>{_esc(e.after)}</code></td></tr>"
+        f"<code>{_esc(e.before)}</code> &rarr; <code>{_esc(e.after)}</code></td>"
+        f"<td class='revert'><label><input type='checkbox' data-revert='{_esc(e.id)}'>"
+        f" put back</label></td></tr>"
         for e in auto
     )
     auto_section = f"""
   <section>
     <h2>Already applied &mdash; {len(auto)} automatic {'change' if len(auto) == 1 else 'changes'}</h2>
-    <p class="sub">Mechanically safe, individually reversible, and applied without asking.
+    <p class="sub">Mechanically safe, no judgement involved, and applied without asking.
        They are in <code>{_esc(paper_id)}_edited.tex</code> and each is one commit in
-       <code>history/</code>. Listed for the record, not for review.</p>
-    <div class="panel"><table><thead><tr><th>Edit</th><th>Change</th></tr></thead>
+       <code>history/</code>. Nothing here needs you &mdash; but tick
+       <b>put back</b> on any one of them and it is dropped from the command below,
+       so &ldquo;we did not ask&rdquo; never means &ldquo;you cannot say no&rdquo;.</p>
+    <div class="panel"><table><thead><tr><th>Edit</th><th>Change</th>
+      <th>Keep the author&rsquo;s?</th></tr></thead>
       <tbody>{auto_rows}</tbody></table></div>
   </section>""" if auto else ""
 
