@@ -80,17 +80,46 @@ def _char_formats(paragraph) -> list:
     return formats
 
 
+# python-docx renders a <w:tab/> element as "\t" and a <w:br/> as "\n" when it
+# reads a paragraph, so those characters arrive here standing for elements
+# rather than for literal text.  Writing them back as literal characters
+# inside <w:t> looks right in a text dump but is not the same document: a
+# numbered reference list uses a real tab element against a tab stop to get
+# its hanging indent, and a literal tab does not honour it.
+_ELEMENT_CHARS = {"\t": "w:tab", "\n": "w:br", "\v": "w:br"}
+
+
 def _make_run(text: str, rpr, *, deleted: bool):
-    """Build a ``w:r`` carrying *text*, as delText when *deleted*."""
+    """Build a ``w:r`` carrying *text*, as delText when *deleted*.
+
+    Tabs and line breaks are emitted as the elements Word uses for them, so a
+    rewritten paragraph keeps the layout of the one it replaced.
+    """
     from docx.oxml import OxmlElement
 
     run = OxmlElement("w:r")
     if rpr is not None:
         run.append(copy.deepcopy(rpr))
-    node = OxmlElement("w:delText" if deleted else "w:t")
-    node.set(qn("xml:space"), "preserve")
-    node.text = text
-    run.append(node)
+
+    buffer: list[str] = []
+
+    def _flush() -> None:
+        if not buffer:
+            return
+        node = OxmlElement("w:delText" if deleted else "w:t")
+        node.set(qn("xml:space"), "preserve")
+        node.text = "".join(buffer)
+        run.append(node)
+        buffer.clear()
+
+    for char in text:
+        tag = _ELEMENT_CHARS.get(char)
+        if tag is None:
+            buffer.append(char)
+            continue
+        _flush()
+        run.append(OxmlElement(tag))
+    _flush()
     return run
 
 

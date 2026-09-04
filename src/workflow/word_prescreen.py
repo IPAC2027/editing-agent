@@ -22,6 +22,7 @@ Two guards decide what gets into that document:
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -32,6 +33,13 @@ from src.models import Finding, Severity
 from src.output.word_report import write_word_reference_report
 from src.parser.word_parser import parse_word
 from src.refs.verify import check_rewrite, proper_noun_risk
+
+# Word corrections whose only content is presentation, and which therefore
+# carry the same AUTO tier as their LaTeX counterparts.
+_AUTO_CHECKS = frozenset({
+    "DOI-FMT-01", "DOI-FMT-02", "DOI-FMT-03", "AUTH-01", "AUTH-02",
+    "REF-PAGES-01", "CITE-SPACE-01", "CITE-BRACKET-01",
+})
 
 # Substitutions the formatter made deliberately and vouches for, keyed by
 # reference number.  Populated by _format_word_reference and consumed by
@@ -52,6 +60,7 @@ class WordPrescreenResult:
         tracked_docx: str | None = None,
         revisions: int = 0,
         skipped: int = 0,
+        corrections: list | None = None,
     ) -> None:
         self.paper_id = paper_id
         self.out_dir = out_dir
@@ -61,6 +70,7 @@ class WordPrescreenResult:
         self.tracked_docx = tracked_docx
         self.revisions = revisions
         self.skipped = skipped
+        self.corrections = corrections or []
 
 
 def prescreen_word(folder: Path) -> WordPrescreenResult:
@@ -78,6 +88,7 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
     refs_after: list[tuple[int, str]] = []
     findings_by_ref: dict[int, list] = {}
     rewrites: list = []
+    corrections: list[dict] = []
     rejected_rewrites = 0
 
     from src.output.docx_tracked import ParagraphRewrite
@@ -148,6 +159,29 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
             continue
 
         checks = sorted({f.check_id for f in fix_findings}) or ["FMT-REF-01"]
+        # Same tiering as the LaTeX side: presentation is applied, a
+        # whole-reference rewrite is offered.  This is what lets an editor make
+        # every decision at the desk and receive a Word file containing only
+        # what they accepted.
+        tier = "auto" if checks and set(checks) <= _AUTO_CHECKS else "suggest"
+        corrections.append({
+            "id": f"W{len(corrections) + 1:03d}",
+            "tier": tier,
+            # Name the correction after its biggest component: a whole-reference
+            # reformat is what the editor is really being asked about, even when
+            # a DOI fix rides along with it.
+            "check_id": ("FMT-REF-01" if "FMT-REF-01" in checks
+                         else (checks[0] if checks else "FMT-REF-01")),
+            "checks": checks,
+            "reference": ref.n,
+            "paragraph_index": ref.paragraph_index,
+            "before": ref.paragraph_text,
+            "after": paragraph_after,
+            "shown_before": ref.raw_text,
+            "shown_after": corrected,
+            "message": "; ".join(f.message for f in fix_findings)
+                       or f"Reference [{ref.n}] reformatted to JACoW style.",
+        })
         rewrites.append(ParagraphRewrite(
             paragraph_index=ref.paragraph_index,
             before=ref.paragraph_text,
@@ -232,6 +266,21 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
         f for group in findings_by_ref.values() for f in group
     ]
 
+    _write_word_report_json(
+        out_dir / "report.json",
+        parsed,
+        doc_path,
+        all_findings,
+        corrections,
+        tracked_name,
+        revisions,
+    )
+    (out_dir / "word_edits.json").write_text(
+        json.dumps({"schema_version": 1, "document": doc_path.name,
+                    "corrections": corrections}, indent=2),
+        encoding="utf-8",
+    )
+
     report_path = write_word_reference_report(
         parsed.paper_id,
         refs_before,
@@ -259,6 +308,7 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
         tracked_docx=tracked_name,
         revisions=revisions,
         skipped=len(skipped),
+        corrections=corrections,
     )
 
 
@@ -552,3 +602,52 @@ def _write_word_report_md(
 
     lines += ["## External authorities", "", STATUS.summary_line(), ""]
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_word_report_json(
+    path: Path,
+    parsed,
+    doc_path: Path,
+    findings: list,
+    corrections: list[dict],
+    tracked_name: str | None,
+    revisions: int,
+) -> None:
+    """Write the same ``report.json`` shape the LaTeX path writes.
+
+    Without this a Word submission was invisible to the review desk and to the
+    worklist: both read ``report.json`` to decide whether a paper has been
+    prepared, and the Word path only ever wrote Markdown and HTML.
+    """
+    from datetime import datetime, timezone
+
+    auto = [c for c in corrections if c["tier"] == "auto"]
+    suggested = [c for c in corrections if c["tier"] != "auto"]
+    payload = {
+        "schema_version": 2,
+        "paper_id": parsed.paper_id,
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "source": str(doc_path),
+        "title": parsed.title,
+        "authors": [],
+        "build": (
+            f"{revisions} reference(s) corrected as tracked changes"
+            if tracked_name else "no corrections needed"
+        ),
+        "findings": [f.model_dump() for f in findings],
+        "edits": corrections,
+        "summary": {
+            "errors": sum(1 for f in findings if f.severity is Severity.ERROR),
+            "warnings": sum(1 for f in findings if f.severity is Severity.WARNING),
+            "notes": sum(1 for f in findings if f.severity is Severity.INFO),
+            "edits": {
+                "applied_automatically": len(auto),
+                "awaiting_decision": len(suggested),
+                "total": len(corrections),
+            },
+        },
+        "lookups": STATUS.report(),
+        "references_checked": len(parsed.references),
+        "tracked_document": tracked_name,
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")

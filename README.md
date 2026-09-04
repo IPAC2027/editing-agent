@@ -17,7 +17,45 @@ follows from that, and the two rules worth stating up front are:
 
 ---
 
-## Quick start
+## For editors: the review desk
+
+Editors do not use a terminal. **Double-click `Start Review Desk`** — the
+`.command` file on macOS, the `.bat` file on Windows — and a browser opens on
+your papers.
+
+```
+aiagent desk <folder-of-submissions>        # what the launcher runs
+```
+
+The desk serves a page on your own computer. Nothing is uploaded, nothing is
+installed, and the files the author sent are never modified.
+
+| Screen | What you do there |
+|---|---|
+| **The list** | Every submission with its status, how many changes await you, and how many problems the author must fix. Click one to open it. |
+| **Your decisions** | One card per change: what it is, why JACoW wants it, before and after. Accept or keep as submitted. Keyboard: `a` `r` `j` `k` `n`. Repeated changes of one kind get an "accept all" button. |
+| **Problems** | Sorted by who has to act — only the author can fix these / for you to check / for the record. Tick off what you have handled. |
+| **Your notes** | Anything the agent missed. Goes into the letter. |
+| **The paper** | The paper with your accepted corrections in place. Click any line to edit it yourself. Jump to the title, authors, body, references, or the first change. |
+| **Letter to the author** | Drafted from your decisions and notes. Edit, save, copy. |
+| **Files** | The corrected PDF, the author's original, the Word tracked-changes file. |
+
+**Finish this paper** writes the reviewed source, the letter and a summary of
+every decision, then offers the next unfinished paper. A finished paper can be
+reopened; nothing is locked. Everything is saved as you go — there is no save
+button to forget.
+
+Word submissions work the same way, except the text is edited in Word: finishing
+produces a `.docx` carrying **only the corrections you accepted**, as tracked
+changes, so *Review → Accept / Reject* works per change and rejecting restores
+the author's words exactly.
+
+Full walkthrough: [`docs/editor_guide.md`](docs/editor_guide.md) — written for
+someone who has never opened a terminal.
+
+---
+
+## For maintainers: the command line
 
 ```bash
 uv sync
@@ -25,8 +63,8 @@ uv sync
 # One submission
 uv run python main.py prescreen paper_examples/MOP030-revision-27360_author
 
-# Review the changes that need a decision, then apply them
-uv run python main.py review  paper_examples/MOP030-revision-27360_author
+# List the decisions, then apply the accepted ones
+uv run python main.py review  paper_examples/MOP030-revision-27360_author --show
 uv run python main.py apply   paper_examples/MOP030-revision-27360_author \
     --decisions review_decisions.json
 
@@ -45,7 +83,10 @@ MOP070 — decisions waiting
 └───────────────────────┴───────────────────┴───────────────┴──────────────┘
 ```
 
-## What an editor gets
+## What lands on disk
+
+Everything the agent and the desk write goes into an `aiagent_prescreen/`
+folder beside the author's files. The author's files are never touched.
 
 | File | What it is |
 |---|---|
@@ -57,6 +98,9 @@ MOP070 — decisions waiting
 | `history/` | A git repository: one commit per edit. `git log -p`, `git revert <sha>`. |
 | `report.md` | Findings, grouped by who has to act, plus which checks did not run and why. |
 | `edits.json` | The machine-readable edit set that `apply` operates on. |
+| `review_state.json` | The editor's decisions, notes and hand edits. Survives re-screening. |
+| `author_letter.txt` | The letter, once the paper is finished. |
+| `review_summary.md` | Every decision and note, for the record. |
 
 Three ways to accept a subset, all equivalent:
 
@@ -172,6 +216,12 @@ uv run python main.py rules --json
 
 ```
 src/
+├── desk/                     the editor's browser workspace
+│   ├── server.py             a local-only web server (standard library only)
+│   ├── ui.py                 the page: one file, no external requests
+│   ├── paper.py              assembling a paper; composing and closing it
+│   ├── state.py             decisions, notes, hand edits, the worklist
+│   └── plain.py              plain English for every check, and the letter phrasing
 ├── edits.py                  Edit, EditSet, Tier — the unit of everything proposed
 ├── lookup_status.py          which external authorities actually answered
 ├── models.py                 Finding, Reference, Paper
@@ -200,9 +250,11 @@ src/
 ## Tests
 
 ```bash
-uv run pytest -q          # 301 tests
+uv run pytest -q          # 323 tests
 ```
 
+`tests/test_desk.py` walks the whole editor journey — open, decide, note, hand
+edit, finish — and asserts that the file on disk matches what the editor chose.
 `tests/test_edits.py` pins the edit-model invariants;
 `tests/test_editor_workflow.py` runs the whole pipeline on a synthetic
 submission and asserts the report matches the file on disk, that accept/reject
@@ -220,6 +272,7 @@ prevent.
 | Evidence tracking and NOT CHECKED reporting | done |
 | Rewrite damage verification, sentence-case abstention | done |
 | Constrained local-model classification with abstention | done |
+| Browser review desk for non-technical editors | done |
 | Labelled gold set over the 49 examples, per-check precision in CI | next |
 | Tier derived from measured precision rather than chosen by hand | next |
 | Indico integration, green/yellow/red submission judge | later |

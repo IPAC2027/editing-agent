@@ -429,24 +429,47 @@ def prescreen(
     return paper
 
 
-def _reset_dir(out_dir: Path) -> None:
-    """Make *out_dir* exist and be empty, tolerating undeletable contents.
+#: Files in the output directory that belong to the editor, not to the agent.
+#: A re-screen regenerates everything else, but wiping these would throw away
+#: decisions, notes and hand edits — which is exactly what an editor does when
+#: they press "Prepare this paper again" after the author resubmits.
+EDITOR_OWNED = ("review_state.json", "review_decisions.json")
 
-    ``shutil.rmtree`` used to be unconditional, so a run failed outright on any
-    filesystem that refuses deletion (a read-only mount, a synced folder, a
-    locked PDF).  Failing to clean an output directory must not fail the run.
+
+def _reset_dir(out_dir: Path) -> None:
+    """Make *out_dir* exist and be empty, keeping anything the editor owns.
+
+    ``shutil.rmtree`` used to be unconditional, which had two problems: a run
+    failed outright on any filesystem that refuses deletion (a read-only mount,
+    a synced folder, a locked PDF), and it deleted the editor's review state
+    along with the agent's output.
     """
-    if out_dir.exists():
-        try:
-            shutil.rmtree(out_dir)
-        except OSError:
-            for child in out_dir.rglob("*"):
-                if child.is_file():
-                    try:
-                        child.unlink()
-                    except OSError:
-                        pass
     out_dir.mkdir(parents=True, exist_ok=True)
+    keep: dict[str, bytes] = {}
+    for name in EDITOR_OWNED:
+        path = out_dir / name
+        if path.is_file():
+            try:
+                keep[name] = path.read_bytes()
+            except OSError:
+                pass
+
+    try:
+        shutil.rmtree(out_dir)
+    except OSError:
+        for child in sorted(out_dir.rglob("*"), reverse=True):
+            if child.is_file() and child.name not in EDITOR_OWNED:
+                try:
+                    child.unlink()
+                except OSError:
+                    pass
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for name, data in keep.items():
+        try:
+            (out_dir / name).write_bytes(data)
+        except OSError:
+            pass
 
 
 def apply_decisions(

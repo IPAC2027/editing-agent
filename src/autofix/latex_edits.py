@@ -480,18 +480,48 @@ def etal_edits(source: str, file: str = "") -> list[Edit]:
 # Author list  (FMT-AUTH-01 corrections, suggestion tier)
 # ---------------------------------------------------------------------------
 
+# A name with at least one given name written out in full.
+#
+# Three traps this has to avoid, all found on real submissions:
+#
+# * "D. Edstrom Jr." — the given name is already an initial and "Jr" is a
+#   suffix, not a surname.  An earlier version offered "Edstrom Jr" -> "E. Jr",
+#   which is not a name at all.
+# * "Mary Jane Watson" — must become "M. J. Watson", not "M. Jane"; the pattern
+#   has to consume every given name, not just the first.
+# * "Derong Xu, Brookhaven National Laboratory" — the match must stop at the
+#   comma, so an affiliation can never be read as a surname.
+_NAME_SUFFIXES = frozenset({
+    "jr", "sr", "ii", "iii", "iv", "phd", "md", "esq",
+})
+_NOT_A_SURNAME = frozenset({
+    "university", "universite", "laboratory", "laboratories", "institute",
+    "institut", "national", "center", "centre", "college", "school",
+    "department", "division", "facility", "academy", "research", "technology",
+    "alamos", "haven", "ridge", "valley", "park", "hill", "city", "state",
+})
 _FULL_FIRST_NAME_RE = re.compile(
-    r"(?<![A-Za-z.])(?P<first>[A-Z][a-z]{2,})(?P<mid>(?:\s+[A-Z]\.)*)\s+(?P<last>[A-Z][A-Za-z'\u2019\-]+)"
+    r"(?<![A-Za-z.])"
+    r"(?P<pre>(?:[A-Z]\.[ \t]*)*)"                       # leading initials, kept as-is
+    r"(?P<given>[A-Z][a-z]{2,}(?:[ \t]+[A-Z][a-z]{2,})*)"  # given name(s) in full
+    r"(?P<mid>(?:[ \t]+[A-Z]\.)*)"                       # middle initials
+    r"[ \t]+"
+    r"(?P<last>[A-Z][A-Za-z'\u2019\-]+\.?)"              # surname
+    r"(?=[ \t]*(?:,|;|\\|\}|$))"                         # ...and then a boundary
 )
+
+
+def _initials(given: str) -> str:
+    return " ".join(f"{word[0]}." for word in given.split())
 
 
 def author_initial_edits(source: str, author_span: tuple[int, int] | None,
                          file: str = "") -> list[Edit]:
-    """Suggest ``Initials Surname`` where a full given name was written out.
+    """Suggest ``Initials Surname`` where a given name was written out in full.
 
-    Restricted to the ``\\author{}`` argument so no body text is touched, and
-    always :attr:`Tier.SUGGEST`: only the author can confirm which token is the
-    given name.
+    Restricted to the ``\author{}`` names region so no body text and no
+    affiliation is ever touched, and always :attr:`Tier.SUGGEST`: only the
+    author can confirm which token is the given name.
     """
     if not author_span:
         return []
@@ -506,17 +536,27 @@ def author_initial_edits(source: str, author_span: tuple[int, int] | None,
     )
     edits: list[Edit] = []
     for match in _FULL_FIRST_NAME_RE.finditer(searchable):
-        first = match.group("first")
-        last = match.group("last")
-        if last.lower() in {"university", "laboratory", "institute", "national", "center",
-                            "centre", "college", "department", "division", "facility",
-                            "alamos", "haven", "hill", "park", "ridge", "valley"}:
+        given, last = match.group("given"), match.group("last")
+        if last.lower().strip(".") in _NAME_SUFFIXES:
+            continue                      # a surname followed by a suffix
+        if last.lower().strip(".") in _NOT_A_SURNAME:
+            continue                      # an affiliation, not a person
+        if any(word.lower() in _NOT_A_SURNAME for word in given.split()):
             continue
+        if any(word.lower() in _NAME_SUFFIXES for word in given.split()):
+            continue
+
+        pre = match.group("pre")
         middle = match.group("mid").strip()
-        initials = f"{first[0]}." + (f" {middle}" if middle else "")
-        replacement = f"{initials} {last}"
+        replacement = pre + _initials(given)
+        if middle:
+            replacement += " " + middle
+        replacement += " " + last
+
         abs_start = start + match.start()
-        if source[abs_start:start + match.end()] == replacement:
+        abs_end = start + match.end()
+        before = source[abs_start:abs_end]
+        if before == replacement:
             continue
         edits.append(Edit(
             check_id="FMT-AUTH-01",
@@ -524,12 +564,12 @@ def author_initial_edits(source: str, author_span: tuple[int, int] | None,
             confidence=Confidence.LIKELY,
             file=file,
             start=abs_start,
-            end=start + match.end(),
-            before=source[abs_start:start + match.end()],
+            end=abs_end,
+            before=before,
             after=replacement,
             message=(
-                f"JACoW author lists use initials: '{match.group(0)}' → '{replacement}'. "
-                "Reject if the first token is not a given name."
+                f"JACoW author lists use initials: '{before.strip()}' becomes "
+                f"'{replacement.strip()}'. Reject if the first word is not a given name."
             ),
             rule="JACoW: authors are listed as 'Initials Surname'",
         ))

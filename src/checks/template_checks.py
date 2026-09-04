@@ -65,20 +65,20 @@ def check_bibliography_style(paper: Paper) -> None:
     if not pt:
         return
     if pt.bibliography_env == "thebibliography" and not pt.uses_biblatex:
-        # A preference, not a defect: a hand-written reference list is valid
-        # JACoW, and telling every author who used one to restructure their
-        # paper is not something an editor acts on per submission.
-        _add(paper, "JACOW-CLS-02", Severity.INFO,
-             "Manual \\thebibliography / \\bibitem detected. "
-             "JACoW class ≥ v2.10 supports BibLaTeX which is strongly preferred "
-             "for consistent reference formatting. Consider switching.",
+        # A preference, not a defect, and reported under its own id so it does
+        # not share a heading with the classic-BibTeX problem below — which is
+        # a real defect, and which an editor must be able to tell apart at a
+        # glance.
+        _add(paper, "JACOW-CLS-03", Severity.INFO,
+             "The reference list is written out by hand. That is valid, but "
+             "BibLaTeX gives more consistent formatting and the JACoW template "
+             "has supported it since v2.10.",
              suggested="Use \\documentclass[biblatex,...]{jacow} + \\addbibresource{<paper>.bib}")
     elif pt.bibliography_env == "bibtex" and not pt.uses_biblatex:
         _add(paper, "JACOW-CLS-02", Severity.ERROR,
-             "Classic BibTeX (\\bibliographystyle + \\bibliography) detected. "
-             "Most traditional styles (e.g. ieeetr) do not render the 'doi' field, "
-             "so DOIs stored in your .bib will not appear in the PDF. "
-             "Switch to BibLaTeX for correct DOI rendering.",
+             "The paper uses classic BibTeX with a traditional style. Styles like "
+             "ieeetr do not print the 'doi' field at all, so every DOI in the "
+             ".bib file will be missing from the published PDF.",
              suggested="Use \\documentclass[biblatex,...]{jacow} + \\addbibresource{<paper>.bib}")
 
 

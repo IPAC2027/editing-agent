@@ -1,15 +1,24 @@
 """JACoW conference-paper pre-screening agent — command line.
 
+    desk           open the review desk in a browser (for editors)
     prescreen      screen one submission folder
     prescreen-all  screen every submission under a directory
     apply          apply the edits an editor accepted
     review         open review.html for a screened folder
     rules          inspect the versioned JACoW rule pack
 
-The workflow this is built around:
+Two audiences, two front doors.
+
+Editors use one command and never see another:
+
+    aiagent desk <folder-of-submissions>
+
+which prepares each paper on demand and opens a browser page where they accept
+or reject each change, add problems the agent missed, note why, and close the
+paper.  Everything else here is for the people maintaining the tool:
 
     aiagent prescreen <folder>     # safe changes applied, decisions prepared
-    aiagent review <folder>        # accept/reject each remaining change
+    aiagent review <folder>        # list the decisions on the terminal
     aiagent apply <folder> --decisions review_decisions.json
 """
 
@@ -84,6 +93,50 @@ def _one_line(paper) -> None:
         f"auto={auto:<3} decisions={pending:<3} "
         f"problems={errors:<3} style={warnings}"
     )
+
+
+# ---------------------------------------------------------------------------
+# desk — the editor's front door
+# ---------------------------------------------------------------------------
+
+@app.command()
+def desk(
+    submissions: Path = typer.Argument(
+        Path("."), help="Folder holding the submissions (or one submission folder)."),
+    port: int = typer.Option(8765, "--port", help="Port to serve on."),
+    open_browser: bool = typer.Option(True, "--open/--no-open",
+                                      help="Open a browser automatically."),
+    compile_pdf: bool = typer.Option(True, "--compile/--no-compile",
+                                     help="Build a PDF when preparing a paper."),
+) -> None:
+    """Open the review desk in a browser.
+
+    This is the only command an editor needs.  It serves a page on this
+    computer only — nothing is uploaded, nothing is installed, and the
+    submissions are never modified.
+    """
+    from src.desk.server import CONFIG_FILENAME, serve
+
+    root = submissions.expanduser().resolve()
+    if not root.is_dir():
+        console.print(f"[red]Not a folder:[/red] {root}")
+        raise typer.Exit(1)
+
+    # Remember the build preference so the page does not have to ask.
+    import json as _json
+
+    config_path = root / CONFIG_FILENAME
+    try:
+        config = _json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        config = {}
+    config["compile"] = compile_pdf
+    try:
+        config_path.write_text(_json.dumps(config, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+    serve(root, port=port, open_browser=open_browser)
 
 
 # ---------------------------------------------------------------------------
