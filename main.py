@@ -27,10 +27,40 @@ app = typer.Typer(
 console = Console()
 
 
+@app.command("rules")
+def rules(
+    query: str = typer.Option("", "--query", "-q", help="Text to search across the rule pack."),
+    category: str = typer.Option(None, "--category", "-c", help="Filter by rule category."),
+    source_format: str = typer.Option(None, "--format", help="Filter by source format: latex or word."),
+    version: str = typer.Option(None, "--version", help="Rule-pack version; defaults to latest."),
+    as_json: bool = typer.Option(False, "--json", help="Print matching rules as JSON."),
+) -> None:
+    """Inspect versioned JACoW editorial rules used by the agent."""
+    from src.knowledge import agent_context, search_rules
+
+    categories = [category] if category else None
+    if as_json:
+        import json
+
+        console.print_json(json.dumps(search_rules(
+            query,
+            categories=categories,
+            applies_to=source_format,
+            version=version,
+        )))
+        return
+    console.print(agent_context(
+        query,
+        categories=categories,
+        applies_to=source_format,
+        version=version,
+    ))
+
+
 @app.command()
 def prescreen(
     paper_folder: Path = typer.Argument(..., help="Path to one submission folder."),
-    llm: bool = typer.Option(False, "--llm/--no-llm", help="Enable LLM suggestions."),
+    llm: bool = typer.Option(False, "--llm/--no-llm", help="Run local/OpenAI-compatible LLM review."),
     compile_pdf: bool = typer.Option(True, "--compile/--no-compile", help="Compile edited .tex to PDF."),
     model: str = typer.Option(None, envvar="LLM_MODEL", help="LLM model name."),
     base_url: str = typer.Option(None, envvar="LLM_BASE_URL", help="LLM base URL."),
@@ -98,6 +128,7 @@ def prescreen(
         console.print(f"  [bold]index.html[/bold]   — open in browser for full review")
         console.print(f"  [bold]changes.html[/bold] — side-by-side diff of auto-fixes")
         console.print(f"  [bold]report.md[/bold]    — editor-friendly findings")
+        console.print(f"  [bold]repair_plan.json[/bold] — structured repairs and build validation")
         pdf = out_dir / f"{paper.paper_id}_edited.pdf"
         if pdf.exists():
             console.print(f"  [bold green]{pdf.name}[/bold green] — compiled PDF")
@@ -117,9 +148,11 @@ def prescreen(
 @app.command("prescreen-all")
 def prescreen_all(
     submissions_dir: Path = typer.Argument(..., help="Directory containing all submission folders."),
-    llm: bool = typer.Option(False, "--llm/--no-llm", help="Enable LLM suggestions."),
+    llm: bool = typer.Option(False, "--llm/--no-llm", help="Run local/OpenAI-compatible LLM review."),
     compile_pdf: bool = typer.Option(True, "--compile/--no-compile", help="Compile edited .tex to PDF."),
     workers: int = typer.Option(1, "--workers", "-j", help="Parallel workers."),
+    model: str = typer.Option(None, envvar="LLM_MODEL", help="LLM model name."),
+    base_url: str = typer.Option(None, envvar="LLM_BASE_URL", help="LLM base URL."),
 ) -> None:
     """Batch pre-screen all submission folders under a directory."""
     folders = sorted(
@@ -131,6 +164,15 @@ def prescreen_all(
         raise typer.Exit(1)
 
     console.print(f"Found [bold]{len(folders)}[/bold] submission(s).")
+
+    import os
+
+    if model:
+        os.environ["LLM_MODEL"] = model
+    if base_url:
+        os.environ["LLM_BASE_URL"] = base_url
+    if llm:
+        os.environ["LLM_ENABLED"] = "true"
 
     from src.workflow.prescreen import prescreen as _prescreen, WordSubmissionError
 

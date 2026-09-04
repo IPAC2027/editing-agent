@@ -1,0 +1,202 @@
+{
+  "schema_version": "1.0",
+  "id": "jacow",
+  "version": "1.0.0",
+  "title": "JACoW LaTeX and Annex B editorial rules",
+  "description": "Initial agent-operational rule pack for JACoW/IPAC papers. Rules preserve source provenance and distinguish deterministic actions from editor judgement.",
+  "sources": [
+    {
+      "id": "jacow_latex",
+      "title": "JACoW Writing a paper in LaTeX resources",
+      "url": "https://ipac-docs.jacow.org/Paper/Writing/latex/",
+      "retrieved_on": "2026-07-16"
+    },
+    {
+      "id": "annex_b_local",
+      "title": "JACoW MS Word Style Guide, Annex B operational transcription",
+      "url": "jacow_reference_rules_appendixB.md",
+      "retrieved_on": "repository snapshot"
+    }
+  ],
+  "rules": [
+    {
+      "id": "JACOW-TEMPLATE-01",
+      "title": "Use the current JACoW class file",
+      "category": "template",
+      "applies_to": ["latex"],
+      "summary": "Use the current jacow.cls supplied by JACoW rather than an older distribution copy.",
+      "agent_guidance": {
+        "action": "Compare the detected template version with the configured current version and report evidence.",
+        "automation": "report_only",
+        "escalate_when": "the source does not expose a version or updating the class could change layout"
+      },
+      "sources": ["jacow_latex"],
+      "tags": ["class", "template", "version"]
+    },
+    {
+      "id": "JACOW-TITLE-01",
+      "title": "Protect intentional lowercase title text",
+      "category": "template",
+      "applies_to": ["latex"],
+      "summary": "JACoW title and section commands uppercase their content; preserve intentional lowercase acronyms or units with \\NoCaseChange.",
+      "agent_guidance": {
+        "action": "Flag only unprotected tokens that must preserve mixed or lowercase rendering, such as acronyms, model names, or units; ordinary source title case is rendered uppercase by the class.",
+        "automation": "suggest_only",
+        "escalate_when": "the agent cannot distinguish a proper noun from ordinary title-case prose"
+      },
+      "sources": ["jacow_latex"],
+      "tags": ["title", "section", "NoCaseChange"]
+    },
+    {
+      "id": "JACOW-UNIT-01",
+      "title": "Typeset quantities with a non-breaking thin space",
+      "category": "units",
+      "applies_to": ["latex", "references"],
+      "summary": "Write the number before the unit and separate them with \\, or a siunitx quantity command such as \\qty or \\SI; do not split a quantity across a line break.",
+      "agent_guidance": {
+        "action": "Detect adjacent number-unit pairs and validate spacing, order, and unit casing.",
+        "automation": "safe_fix_when_the_unit_token_is_unambiguous",
+        "escalate_when": "the expression is mathematical, uses an ambiguous symbol, or contains temperature or angle exceptions"
+      },
+      "sources": ["jacow_latex"],
+      "tags": ["siunitx", "spacing", "quantity"]
+    },
+    {
+      "id": "JACOW-EQUATION-01",
+      "title": "Use equation-aware references",
+      "category": "template",
+      "applies_to": ["latex"],
+      "summary": "Prefer \\eqref{label} for equation references so numbering is rendered with parentheses.",
+      "agent_guidance": {
+        "action": "Identify parenthesized \\ref references that target equation labels and offer \\eqref as a candidate.",
+        "automation": "suggest_only",
+        "escalate_when": "the label type cannot be determined from the source"
+      },
+      "sources": ["jacow_latex"],
+      "tags": ["equation", "cross-reference"]
+    },
+    {
+      "id": "ANNEXB-REFERENCE-01",
+      "title": "Maintain a numbered REFERENCES section",
+      "category": "references",
+      "applies_to": ["latex", "word"],
+      "summary": "References are numbered, begin at one, and are presented under a REFERENCES heading; in-text citations use bracketed ascending numbers.",
+      "agent_guidance": {
+        "action": "Check section presence, citation-link integrity, numbering, order, and bracket syntax deterministically.",
+        "automation": "safe_fix_for_bracket_spacing_and_known_bibitem_reordering_only",
+        "escalate_when": "renumbering would require changing ambiguous free-text citations"
+      },
+      "sources": ["annex_b_local", "jacow_latex"],
+      "tags": ["citation", "numbering", "references"]
+    },
+    {
+      "id": "ANNEXB-AUTHOR-01",
+      "title": "Format reference author lists consistently",
+      "category": "references",
+      "applies_to": ["latex", "word"],
+      "summary": "Use initials and surnames; use a serial comma for three or more authors and et al. for more than six authors.",
+      "agent_guidance": {
+        "action": "Validate punctuation and author-count conventions after parsing an author list.",
+        "automation": "safe_fix_for_unambiguous_et_al_punctuation_and_serial_comma_only",
+        "escalate_when": "author boundaries or the intended author roster are uncertain"
+      },
+      "sources": ["annex_b_local", "jacow_latex"],
+      "tags": ["authors", "et al", "punctuation"]
+    },
+    {
+      "id": "ANNEXB-TITLE-01",
+      "title": "Use sentence case for referenced paper titles",
+      "category": "references",
+      "applies_to": ["latex", "word"],
+      "summary": "Titles of cited papers use sentence case while retaining proper nouns and acronyms.",
+      "agent_guidance": {
+        "action": "Use a deterministic title-case heuristic, then request an LLM or editor review only for proposed conversion.",
+        "automation": "never_auto_fix_without_preserving_proper_nouns_and_acronyms",
+        "escalate_when": "capitalization could change a proper noun, acronym, chemical name, or product name"
+      },
+      "sources": ["annex_b_local", "jacow_latex"],
+      "tags": ["title", "sentence case"]
+    },
+    {
+      "id": "ANNEXB-PROCEEDINGS-01",
+      "title": "Require key proceedings fields",
+      "category": "references",
+      "applies_to": ["latex", "word"],
+      "summary": "Published proceedings references identify Proc. CONF’YY, venue, month and year, and page range; DOI follows when known.",
+      "agent_guidance": {
+        "action": "Classify proceedings records and report missing required fields with the parsed evidence.",
+        "automation": "format_existing_fields_only",
+        "escalate_when": "venue, date, pages, paper ID, or DOI would need external metadata"
+      },
+      "sources": ["annex_b_local", "jacow_latex"],
+      "tags": ["proceedings", "pages", "venue"]
+    },
+    {
+      "id": "ANNEXB-DOI-01",
+      "title": "Normalize DOI presentation without inventing identifiers",
+      "category": "references",
+      "applies_to": ["latex", "word"],
+      "summary": "When a verified DOI exists, present it as one atomic doi:<identifier> token at the end of the entry; retain a URL only when a DOI is unavailable.",
+      "agent_guidance": {
+        "action": "Normalize DOI prefixes and DOI URLs; use lookup results only when provenance and title/author matching are recorded.",
+        "automation": "safe_fix_existing_doi_format_only",
+        "escalate_when": "a DOI is missing, lookup candidates disagree, or the reference identity is uncertain"
+      },
+      "sources": ["annex_b_local", "jacow_latex"],
+      "tags": ["doi", "url", "metadata"]
+    },
+    {
+      "id": "JACOW-BIBLATEX-01",
+      "title": "Prefer BibLaTeX/Biber for generated bibliographies",
+      "category": "references",
+      "applies_to": ["latex"],
+      "summary": "JACoW guidance recommends BibLaTeX with BibTeX or Biber when its generated bibliography can achieve the requested formatting.",
+      "agent_guidance": {
+        "action": "Detect bibliography mode and explain the benefits and migration impact of BibLaTeX.",
+        "automation": "report_only",
+        "escalate_when": "migration would require changing a submission's bibliography workflow"
+      },
+      "sources": ["jacow_latex"],
+      "tags": ["biblatex", "biber", "bibliography"]
+    },
+    {
+      "id": "JACOW-JOURNAL-01",
+      "title": "Use ISO-4 journal abbreviations",
+      "category": "references",
+      "applies_to": ["latex", "word"],
+      "summary": "Use ISO-4 journal abbreviations and, for BibLaTeX data, keep the abbreviated form in shortjournal where appropriate.",
+      "agent_guidance": {
+        "action": "Normalize only when an authoritative abbreviation mapping is available and retain the original title as evidence.",
+        "automation": "safe_fix_when_the_mapping_is_unambiguous",
+        "escalate_when": "multiple journals share a similar title or no authoritative mapping is available"
+      },
+      "sources": ["jacow_latex", "annex_b_local"],
+      "tags": ["journal", "ISO-4", "shortjournal"]
+    }
+  ],
+  "common_editor_decisions": [
+    {
+      "id": "EDITOR-DECISION-01",
+      "decision": "Do not invent bibliographic metadata.",
+      "policy": "Missing authors, dates, venue, pages, paper IDs, and DOI values require an evidence-backed lookup or human review.",
+      "sources": ["annex_b_local"]
+    },
+    {
+      "id": "EDITOR-DECISION-02",
+      "decision": "Deterministic evidence overrides an unsupported model suggestion.",
+      "policy": "The agent may propose an LLM-assisted repair only when it cites the applicable rule and source evidence; otherwise leave it pending editor review.",
+      "sources": ["annex_b_local"]
+    },
+    {
+      "id": "EDITOR-DECISION-03",
+      "decision": "Only retain repairs that preserve build validity.",
+      "policy": "A repair batch remains pending until the edited source is compiled when compilation is available; compile failures must be surfaced with the repair evidence.",
+      "sources": ["jacow_latex"]
+    }
+  ],
+  "extension_guide": {
+    "add_a_version": "Copy this file to the next semantic version, retain prior rule IDs when their meaning is unchanged, and add source provenance for every changed rule.",
+    "add_a_rule": "Use a stable ID, narrow applicability, an operational summary, deterministic action guidance, automation policy, escalation condition, and source IDs.",
+    "avoid": "Do not store unsourced model advice as a rule or convert editor decisions into automatic fixes without validation."
+  }
+}

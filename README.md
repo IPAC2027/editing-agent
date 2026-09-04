@@ -15,7 +15,8 @@ Given a submission folder, the tool writes an `aiagent_prescreen/` subfolder con
 | `report.md` | Human-readable Markdown report for the editor |
 | `<ID>_edited.tex` | Source with all **safe auto-fixes** applied |
 | `changes.patch` | Unified diff of every change made |
-| `llm_suggestions.md` | LLM-generated hints for items requiring human judgment |
+| `repair_plan.json` | Structured repair evidence, editor-review status, and final build validation |
+| `llm_suggestions.md` | Optional local/OpenAI-compatible model review of the full source and every reference |
 
 ### Priority 1 — References (highest value)
 
@@ -28,7 +29,7 @@ Given a submission folder, the tool writes an `aiagent_prescreen/` subfolder con
 
 ### Priority 2 — Formatting
 
-- Title: ALL CAPS in `\title{}`, no trailing punctuation.
+- Title: JACoW renders `\title{}` in capitals; use `\NoCaseChange{}` for intentional lowercase tokens and avoid trailing punctuation.
 - Authors: `Initials Surname` format, email footnote on corresponding author.
 - Figures: sequential numbering, in-text reference before appearance, caption format.
 - Tables: sequential numbering, caption above, in-text reference before appearance.
@@ -45,9 +46,13 @@ uv run python main.py prescreen paper_examples/MOP019-revision-27544_author
 # All papers in a submissions directory
 uv run python main.py prescreen-all paper_examples/
 
-# With LLM suggestions (requires a running Ollama or API key)
+# With a local Ollama model: reviews the complete source and every reference
 uv run python main.py prescreen paper_examples/MOP019-revision-27544_author \
   --llm --model llama3 --base-url http://localhost:11434/v1
+
+# LM Studio exposes the same OpenAI-compatible interface
+uv run python main.py prescreen paper_examples/MOP019-revision-27544_author \
+  --llm --model local-model --base-url http://localhost:1234/v1
 ```
 
 ---
@@ -63,6 +68,27 @@ LLM_MODEL=llama3
 LLM_API_KEY=ollama                       # use your key for commercial APIs
 CROSSREF_EMAIL=you@example.com           # for polite CrossRef DOI lookups
 ```
+
+`--llm` never changes source files from a model response. Deterministic checks
+remain authoritative in `report.json` and `report.md`; the model's source and
+per-reference review is written separately to `llm_suggestions.md`.
+
+## Rule knowledge base
+
+The agent reads a versioned, sourced JACoW rule pack from
+`src/knowledge/rulesets/jacow/`. It initially covers LaTeX template guidance,
+Annex B reference rules, and editor decision policies. Inspect the active pack
+or retrieve a focused prompt-ready subset with:
+
+```bash
+uv run aiagent rules --format latex
+uv run aiagent rules --query "proceedings DOI" --category references
+uv run aiagent rules --json
+```
+
+Add a new semantic-versioned JSON file beside `1.0.0.json` to extend the pack;
+each rule must include source IDs, applicability, automation policy, and an
+editor-escalation condition.
 
 ---
 

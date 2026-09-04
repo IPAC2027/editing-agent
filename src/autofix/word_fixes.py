@@ -119,9 +119,15 @@ def _fix_doi_space(ref_n: int, text: str) -> tuple[str, list[Finding]]:
 
 
 def _fix_oxford_comma(ref_n: int, text: str) -> tuple[str, list[Finding]]:
-    """Add Oxford comma before 'and' in author list of ≥3 authors.
+    """Add Oxford comma before 'and' in author list of >=3 authors.
 
     Only operates on the author section (before the first quoted title).
+
+    The Oxford comma is only valid for 3+ authors.  For 1 or 2 authors
+    JACoW style is ``"A"`` and ``"A and B"`` respectively -- the comma
+    before ``and`` would be wrong.  We detect the author count by counting
+    comma-separated name boundaries before the separator ``and`` (the
+    number of authors = commas + 1).
     """
     # Find title boundary
     title_m = re.search(r'["\u201c]', text)
@@ -131,23 +137,32 @@ def _fix_oxford_comma(ref_n: int, text: str) -> tuple[str, list[Finding]]:
     author_part = text[: title_m.start()]
     rest = text[title_m.start():]
 
-    # Pattern: word, space, 'and' space capital — missing comma
-    pat = re.compile(r'([A-Za-z\.])\s+and\s+([A-Z\-])')
-    if not pat.search(author_part):
+    # Find the separator 'and' before the last author.  We only need to
+    # fix the *last* comma (the Oxford one) -- a 4-author list with no
+    # Oxford comma looks like "A, B, C and D" and should become
+    # "A, B, C, and D", not "A,, B,, C, and D".
+    and_matches = list(re.finditer(r'\band\b', author_part, re.IGNORECASE))
+    if not and_matches:
+        return text, []  # 1 author
+    last_and = and_matches[-1]
+    front = author_part[: last_and.start()].rstrip()
+    tail  = author_part[last_and.end():].lstrip()
+
+    # Split front on ", " -- the pieces are the names before the last
+    # author.  Empty strings come from the Oxford-comma case ("A, B, "
+    # -> ["A", "B", ""]); filter them.  The number of authors is
+    # (front_names count) + 1, for the tail which is the last author.
+    front_names = [s for s in re.split(r',\s+', front) if s]
+    n_authors = len(front_names) + 1
+
+    if n_authors < 3:
+        return text, []  # 2 authors -- Oxford comma would be wrong
+
+    # If a comma already precedes 'and', the Oxford comma is already there.
+    if front.endswith(','):
         return text, []
 
-    # Count 'and' occurrences to see if there are ≥3 authors
-    n_and = len(re.findall(r'\band\b', author_part, re.IGNORECASE))
-    # For exactly 2 authors ("A and B") Oxford comma is wrong — don't add it
-    if n_and < 1:
-        return text, []
-    # For 2 authors total (1 'and') no Oxford comma needed
-    # For ≥3 authors (≥1 'and') we need "A, B, and C"
-    # Rough detection: if there's a comma before 'and' already, skip
-    if re.search(r',\s+and\b', author_part):
-        return text, []
-
-    new_author = pat.sub(r'\1, and \2', author_part)
+    new_author = front + ', and ' + tail
     new_text = new_author + rest
 
     findings = [Finding(
@@ -156,11 +171,13 @@ def _fix_oxford_comma(ref_n: int, text: str) -> tuple[str, list[Finding]]:
         line=ref_n,
         original=author_part.strip(),
         suggested=new_author.strip(),
-        message=f"Reference [{ref_n}]: added Oxford comma before 'and' in author list.",
+        message=(
+            f"Reference [{ref_n}]: added Oxford comma before 'and' in "
+            f"author list ({n_authors} authors)."
+        ),
         auto_fixed=True,
     )]
     return new_text, findings
-
 
 def _fix_etal(ref_n: int, text: str) -> tuple[str, list[Finding]]:
     """Normalise 'et al' variants to 'et al.'"""

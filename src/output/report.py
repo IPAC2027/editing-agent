@@ -39,6 +39,8 @@ def _write_markdown(paper: Paper, path: Path, generated_at: str) -> None:
     warnings  = [f for f in paper.findings if f.severity == Severity.WARNING and not f.auto_fixed]
     fixed     = [f for f in paper.findings if f.auto_fixed]
     info      = [f for f in paper.findings if f.severity == Severity.INFO    and not f.auto_fixed]
+    llm_review_path = paper.__dict__.get("llm_review_path")
+    repair_plan_path = paper.__dict__.get("repair_plan_path")
 
     traffic = "🔴 RED"   if errors else ("🟡 YELLOW" if warnings else "🟢 GREEN")
 
@@ -61,6 +63,10 @@ def _write_markdown(paper: Paper, path: Path, generated_at: str) -> None:
         "- Items below marked ✏️ were auto-fixed; items marked ⚠️ or ❌ need human attention.",
         "",
     ]
+    if llm_review_path:
+        lines += [f"- **`{llm_review_path}`** contains the optional local-model review; verify every suggestion before editing.", ""]
+    if repair_plan_path:
+        lines += [f"- **`{repair_plan_path}`** records every auto-fix, its evidence, and the final build validation status.", ""]
 
     for group, heading, icon in [
         (errors,   "Errors (must fix)",           "❌"),
@@ -128,6 +134,8 @@ def _write_index_html(paper: Paper, path: Path, generated_at: str) -> None:
     warnings = [f for f in paper.findings if f.severity == Severity.WARNING and not f.auto_fixed]
     fixed    = [f for f in paper.findings if f.auto_fixed]
     info     = [f for f in paper.findings if f.severity == Severity.INFO    and not f.auto_fixed]
+    llm_review_path = paper.__dict__.get("llm_review_path")
+    repair_plan_path = paper.__dict__.get("repair_plan_path")
 
     badge_cls = "red" if errors else ("yellow" if warnings else "green")
     badge_txt = "🔴 Needs fixes" if errors else ("🟡 Review suggested fixes" if (warnings or fixed) else "🟢 Pass")
@@ -149,6 +157,15 @@ def _write_index_html(paper: Paper, path: Path, generated_at: str) -> None:
         findings_html += _finding_html(f, "warn-f")
     for f in fixed:
         findings_html += _finding_html(f, "fix-f")
+
+    llm_link = (
+        f'<a href="{_esc(llm_review_path)}" class="sec">&#129302; LLM review</a>'
+        if llm_review_path else ""
+    )
+    repair_plan_link = (
+        f'<a href="{_esc(repair_plan_path)}" class="sec">&#128221; repair plan</a>'
+        if repair_plan_path else ""
+    )
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -183,6 +200,8 @@ def _write_index_html(paper: Paper, path: Path, generated_at: str) -> None:
       <a href="report.md" class="sec">&#128196; report.md</a>
       <a href="report.json" class="sec">&#128203; report.json</a>
       <a href="changes.patch" class="sec">&#128203; changes.patch</a>
+      {llm_link}
+      {repair_plan_link}
     </div>
   </div>
 

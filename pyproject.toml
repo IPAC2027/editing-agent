@@ -26,6 +26,11 @@ dev = [
 [project.scripts]
 aiagent = "main:app"
 
+[tool.pytest.ini_options]
+markers = [
+    "network: test that requires external network access",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src", "main.py"]
 

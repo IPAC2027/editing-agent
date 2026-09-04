@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 
 from src.checks import formatting_checks, reference_checks, template_checks
-from src.models import Paper, Severity
+from src.models import Finding, Paper, Severity
 from src.parser import bib_parser, latex_parser
 
 
@@ -67,6 +67,7 @@ def prescreen(folder: Path, *, llm: bool = False, compile: bool = True) -> Paper
     - ``<ID>_edited.pdf``     — compiled PDF of the fixed source (if ``compile``)
     - ``report.md``           — Markdown findings for the editor
     - ``report.json``         — machine-readable findings
+    - ``repair_plan.json``    — repair evidence and final build validation
     - ``llm_suggestions.md``  — LLM hints (only when ``--llm``)
     """
     fmt = detect_source_format(folder)
@@ -91,7 +92,7 @@ def prescreen(folder: Path, *, llm: bool = False, compile: bool = True) -> Paper
     # --- Checks ---
     template_checks.run_all(paper)
     reference_checks.run_all(paper)
-    formatting_checks.run_all(paper)   # stubs — no-ops in Phase 1
+    formatting_checks.run_all(paper)
 
     # --- Safe auto-fixes ---
     from src.autofix.safe_fixes import apply_safe_fixes, apply_paper_fixes
@@ -120,7 +121,13 @@ def prescreen(folder: Path, *, llm: bool = False, compile: bool = True) -> Paper
     from src.output.report import write_report
     from src.output.diff import write_diff
 
-    write_diff(source_text, fixed_text, tex_path.name, out_dir)
+    write_diff(
+        source_text,
+        fixed_text,
+        tex_path.name,
+        out_dir,
+        [*fix_findings, *paper_fix_findings],
+    )
 
     edited_path = out_dir / f"{paper.paper_id}_edited.tex"
     edited_path.write_text(fixed_text, encoding="utf-8")
@@ -131,7 +138,18 @@ def prescreen(folder: Path, *, llm: bool = False, compile: bool = True) -> Paper
 
     # --- LLM suggestions (optional) ---
     if llm:
-        _run_llm_suggestions(paper, out_dir)
+        _run_llm_suggestions(paper, out_dir, source_text)
+
+    from src.output.repair_plan import write_repair_plan
+
+    repair_plan_path = write_repair_plan(
+        paper,
+        out_dir,
+        [*fix_findings, *paper_fix_findings],
+        original_source=source_text,
+        edited_source=fixed_text,
+    )
+    paper.__dict__["repair_plan_path"] = repair_plan_path.name
 
     # Write report after ALL checks (including compile-time checks like PAGE-LIMIT-01)
     write_report(paper, out_dir)
@@ -167,18 +185,46 @@ def _compile(folder: Path, edited_tex: Path, paper: Paper, out_dir: Path) -> Non
         ))
 
 
-def _run_llm_suggestions(paper: Paper, out_dir: Path) -> None:
+def _run_llm_suggestions(paper: Paper, out_dir: Path, source_text: str) -> None:
     from src.llm import client, prompts
 
-    lines: list[str] = ["# LLM Suggestions\n",
-                        "These suggestions require human review before applying.\n"]
-    for ref in paper.references:
-        if not ref.doi:
-            try:
-                system, user = prompts.doi_lookup_prompt(ref)
-                suggestion = client.chat(system, user)
-                lines.append(f"## [{ref.n}] DOI suggestion for `{ref.key}`\n\n{suggestion}\n")
-            except Exception as exc:
-                lines.append(f"## [{ref.n}] DOI suggestion for `{ref.key}`\n\nError: {exc}\n")
+    lines: list[str] = [
+        "# LLM Review\n",
+        "This optional model review supplements deterministic checks; it never edits source files automatically.\n",
+    ]
+    successful_reviews = 0
+    try:
+        system, user = prompts.latex_source_review_prompt(source_text)
+        review = client.chat(system, user)
+        lines.append(f"## Complete LaTeX source\n\n{review}\n")
+        successful_reviews += 1
+    except Exception as exc:
+        lines.append(f"## Complete LaTeX source\n\nError: {exc}\n")
 
-    (out_dir / "llm_suggestions.md").write_text("\n".join(lines), encoding="utf-8")
+    for ref in paper.references:
+        try:
+            system, user = prompts.reference_review_prompt(ref)
+            review = client.chat(system, user)
+            lines.append(f"## Reference [{ref.n}] `{ref.key}`\n\n{review}\n")
+            successful_reviews += 1
+        except Exception as exc:
+            lines.append(f"## Reference [{ref.n}] `{ref.key}`\n\nError: {exc}\n")
+
+    review_path = out_dir / "llm_suggestions.md"
+    review_path.write_text("\n".join(lines), encoding="utf-8")
+    paper.__dict__["llm_review_path"] = review_path.name
+    if successful_reviews:
+        paper.findings.append(Finding(
+            check_id="LLM-REVIEW-01",
+            severity=Severity.INFO,
+            message=(
+                f"Local/OpenAI-compatible model completed {successful_reviews} review(s). "
+                f"See {review_path.name}; suggestions require human review."
+            ),
+        ))
+    else:
+        paper.findings.append(Finding(
+            check_id="LLM-REVIEW-FAIL",
+            severity=Severity.WARNING,
+            message=f"The model review could not run. See {review_path.name} for connection details.",
+        ))
