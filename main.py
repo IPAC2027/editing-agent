@@ -282,6 +282,166 @@ def indico_pull(
                   "manifest.json with the editors' tags.[/dim]")
 
 
+@app.command()
+def corpus(
+    folder: Path = typer.Argument(..., help="A conference pulled with indico-pull."),
+    save: bool = typer.Option(True, "--save/--no-save",
+                              help="Write corpus_report.json beside the papers."),
+    limit: int = typer.Option(0, "--papers", help="Also list this many papers."),
+) -> None:
+    """Describe a pulled conference: what is usable, in what format, and what
+    the editors actually spend their time on.
+
+    Reads the folder only.  Nothing is sent anywhere, and no paper is modified.
+    """
+    from src.corpus.index import PAIRED, build_index
+
+    try:
+        index = build_index(folder)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    if not index.papers:
+        console.print(f"[yellow]No paper folders with a manifest under {folder}."
+                      "[/yellow]  Is this a folder written by `indico-pull`?")
+        raise typer.Exit(1)
+
+    total = len(index.papers)
+    usable, teachable = len(index.usable), len(index.teachable)
+
+    console.print(f"\n[bold]{folder}[/bold]"
+                  + (f"  ·  event {index.event_id}" if index.event_id else ""))
+
+    status = Table(title=f"{total} paper(s)")
+    status.add_column("What"); status.add_column("Papers", justify="right")
+    status.add_column("", style="dim")
+    labels = {
+        PAIRED: "both revisions, and they differ",
+        "unchanged": "both revisions, identical — nothing was edited",
+        "single-revision": "submitted once, never edited",
+        "not-submitted": "nothing submitted",
+        "no-files": "revisions carry no files",
+    }
+    for key, count in index.by_status().most_common():
+        status.add_row(key, str(count), labels.get(key, ""))
+    console.print(status)
+
+    console.print(f"[bold]{teachable}[/bold] of {usable} usable pair(s) have a "
+                  f"changed document rather than only changed figures — "
+                  f"[bold]that is the sample size that matters[/bold].")
+
+    fmt = Table(title="Format of what the author submitted")
+    fmt.add_column("Format"); fmt.add_column("All", justify="right")
+    fmt.add_column("Usable pairs", justify="right")
+    usable_formats = index.by_format(index.usable)
+    for name, count in index.by_format().most_common():
+        fmt.add_row(name, str(count), str(usable_formats.get(name, 0)))
+    console.print(fmt)
+
+    rows = index.tag_rows(index.usable)
+    if rows:
+        tags = Table(title="What the editors corrected, on the usable pairs")
+        tags.add_column("Code"); tags.add_column("Papers", justify="right")
+        tags.add_column("Share", justify="right"); tags.add_column("Agent")
+        tags.add_column("What it means", max_width=52)
+        style = {"agent proposes this": "green", "NOT IMPLEMENTED": "yellow",
+                 "out of reach": "dim", "editing service": "dim"}
+        for row in rows:
+            colour = style.get(row["coverage"], "")
+            tags.add_row(row["code"], str(row["papers"]),
+                         f"{row['share'] * 100:.0f}%",
+                         f"[{colour}]{row['coverage']}[/{colour}]" if colour
+                         else row["coverage"],
+                         row["title"])
+        console.print(tags)
+
+        gaps = [r for r in rows if r["coverage"] == "NOT IMPLEMENTED"]
+        if gaps:
+            console.print("[yellow]Worth building next[/yellow] — frequent, and "
+                          "needs no PDF: "
+                          + ", ".join(f"{g['code']} ({g['papers']})" for g in gaps))
+    else:
+        console.print("[dim]No tags on the usable pairs.[/dim]")
+
+    if limit:
+        listing = Table(title=f"First {limit} paper(s)")
+        listing.add_column("Paper"); listing.add_column("Format")
+        listing.add_column("Status"); listing.add_column("Changed files",
+                                                         justify="right")
+        listing.add_column("Tags")
+        for paper in index.papers[:limit]:
+            listing.add_row(paper.code, paper.fmt, paper.status,
+                            str(len(paper.changed_files)), " ".join(paper.tags))
+        console.print(listing)
+
+    if save:
+        import json as _json
+
+        out = folder / "corpus_report.json"
+        out.write_text(_json.dumps(index.to_dict(), indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        console.print(f"[dim]Written {out}[/dim]")
+
+
+@app.command()
+def corpus(
+    folder: Path = typer.Argument(..., help="A conference pulled by 'indico-pull'."),
+    usable_only: bool = typer.Option(False, "--usable-only",
+                                     help="Count tags only on pairs we can learn from."),
+    show_papers: bool = typer.Option(False, "--papers", help="List every paper."),
+) -> None:
+    """Describe a pulled conference: what can be learned from it, and what cannot.
+
+    Runs no checks and scores nothing.  It answers how many papers give a real
+    before/after pair, in what format, and what the editors said was wrong —
+    joined with whether this agent can propose the same thing.
+    """
+    from src.corpus.index import load, measurable_sample, summary, tag_report
+
+    try:
+        data = load(folder)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]{summary(data)}[/bold]\n")
+
+    sizes = Table(title="How much evidence there is")
+    sizes.add_column("Checks"); sizes.add_column("Pairs to score on", justify="right")
+    for label, count in measurable_sample(data).items():
+        sizes.add_row(label, str(count))
+    console.print(sizes)
+
+    reasons = data.reasons()
+    if reasons:
+        skipped = Table(title="Why the rest cannot be used")
+        skipped.add_column("Reason"); skipped.add_column("Papers", justify="right")
+        for reason, count in reasons.most_common():
+            skipped.add_row(reason, str(count))
+        console.print(skipped)
+
+    tags = Table(title="What the editors corrected"
+                       + (" (usable pairs only)" if usable_only else ""))
+    tags.add_column("Tag"); tags.add_column("Papers", justify="right")
+    tags.add_column("Us"); tags.add_column("What it means", max_width=44)
+    tags.add_column("Detail", max_width=40)
+    for row in tag_report(data, usable_only=usable_only):
+        tags.add_row(row.code, str(row.papers), row.status, row.title, row.detail)
+    console.print(tags)
+
+    if show_papers:
+        listing = Table(title="Papers")
+        listing.add_column("Paper"); listing.add_column("Format")
+        listing.add_column("Usable"); listing.add_column("Tags")
+        for paper in data.papers:
+            usable, reason = paper.usability()
+            listing.add_row(paper.code, paper.kind,
+                            "yes" if usable else f"[dim]{reason}[/dim]",
+                            " ".join(paper.tags))
+        console.print(listing)
+
+
 # ---------------------------------------------------------------------------
 # prescreen
 # ---------------------------------------------------------------------------
