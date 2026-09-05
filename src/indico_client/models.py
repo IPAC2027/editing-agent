@@ -85,3 +85,95 @@ class ContributionRow(_Model):
     @property
     def label(self) -> str:
         return f"{self.code or self.friendly_id}"
+
+
+class RevisionFile(_Model):
+    """One file on a revision.
+
+    ``file_type`` is a numeric id, not a name: 192 and 193 on HIAT2025 are the
+    main document and its images. Names come from
+    ``GET /editing/api/<type>/file-types`` and differ per event, so nothing here
+    hardcodes them.
+    """
+
+    id: int
+    uuid: str = ""
+    filename: str
+    content_type: str = ""
+    size: int = 0
+    file_type: int = 0
+    download_url: str = ""
+    external_download_url: str = ""
+
+    @property
+    def is_word(self) -> bool:
+        return self.filename.lower().endswith((".docx", ".doc"))
+
+    @property
+    def is_archive(self) -> bool:
+        return self.filename.lower().endswith((".zip", ".tar.gz", ".tgz"))
+
+
+class Revision(_Model):
+    """One revision, with the urls Indico hands out for acting on it.
+
+    The urls are used in preference to anything this client could build: they
+    are correct by construction, and they change between Indico versions.
+    """
+
+    id: int
+    created_dt: str = ""
+    comment: str = ""
+    files: list[RevisionFile] = []
+    download_files_url: str = ""
+    create_comment_url: str = ""
+    custom_action_url: str = ""
+    confirm_url: str | None = None
+    custom_actions: list[dict] = []
+
+
+class EditableDetail(_Model):
+    """One editable in full — revisions, files, and what this editor may do.
+
+    The permission block is the part worth reading before showing a button.
+    ``can_perform_editor_actions`` is false on a paper assigned to someone else,
+    so a tool that offers "accept" on every paper is offering something that
+    will fail. Better to know before the editor spends the work.
+    """
+
+    id: int
+    revisions: list[Revision] = []
+    editor: IndicoUser | None = None
+    editing_enabled: bool = True
+    has_published_revision: bool = False
+    review_conditions_valid: bool = True
+    can_comment: bool = False
+    can_create_internal_comments: bool = False
+    can_perform_editor_actions: bool = False
+    can_perform_submitter_actions: bool = False
+    can_assign_self: bool = False
+    can_unassign: bool = False
+
+    @property
+    def latest(self) -> Revision | None:
+        """The newest revision, by creation time rather than by position."""
+        if not self.revisions:
+            return None
+        return max(self.revisions, key=lambda r: (r.created_dt, r.id))
+
+    @property
+    def latest_id(self) -> int | None:
+        newest = self.latest
+        return newest.id if newest else None
+
+    def why_not_editable(self) -> str:
+        """Empty when this editor may act; otherwise the reason, in plain words."""
+        if not self.editing_enabled:
+            return "editing is switched off for this paper"
+        if not self.revisions:
+            return "the author has not submitted anything yet"
+        if self.can_perform_editor_actions:
+            return ""
+        if self.editor is not None:
+            return f"this paper is assigned to {self.editor.full_name}"
+        return "you are not assigned to this paper — take it first"

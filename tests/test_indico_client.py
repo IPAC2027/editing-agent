@@ -180,12 +180,18 @@ def test_a_403_is_reported_as_a_scope_problem_not_a_crash(client: IndicoClient):
 @respx.mock
 def test_a_write_is_refused_when_the_author_has_submitted_again(client: IndicoClient):
     respx.get(f"{BASE}/event/82/api/contributions/6680/editing/paper").mock(
-        return_value=httpx.Response(200, json={"revisions": [{"id": 11}, {"id": 12}]}))
+        return_value=httpx.Response(200, json={
+            "id": 5440,
+            "revisions": [
+                {"id": 26704, "created_dt": "2025-06-19T23:18:16+00:00"},
+                {"id": 26999, "created_dt": "2025-06-23T00:14:17+00:00"},
+            ],
+        }))
 
-    client.assert_unchanged(6680, 12)          # still current: fine
+    client.assert_unchanged(6680, 26999)       # still current: fine
 
     with pytest.raises(RevisionMoved, match="submitted again"):
-        client.assert_unchanged(6680, 11)      # worked offline on the old one
+        client.assert_unchanged(6680, 26704)   # worked offline on the old one
 
 
 @respx.mock
@@ -262,3 +268,162 @@ def test_every_tag_is_either_mapped_out_of_reach_or_the_services_own():
 def test_the_named_next_checks_are_the_ones_reachable_without_a_pdf():
     for code in tagmod.BUILDABLE_NEXT:
         assert "not implemented" in tagmod.OUT_OF_REACH[code]
+
+
+# ---------------------------------------------------------------------------
+# One editable in full — the shape everything else hangs off
+#
+# Trimmed from the real payload for contribution 6680 (MOX01), a Word
+# submission with its figures as separate files.
+# ---------------------------------------------------------------------------
+
+DETAIL_JSON = {
+    "id": 5440,
+    "editing_enabled": True,
+    "has_published_revision": False,
+    "review_conditions_valid": True,
+    "can_assign_self": True,
+    "can_comment": True,
+    "can_create_internal_comments": True,
+    "can_delete": True,
+    "can_perform_editor_actions": False,
+    "can_perform_submitter_actions": False,
+    "can_unassign": True,
+    "contribution": {"code": "MOX01", "friendly_id": 4, "id": 6680,
+                     "title": "FRIB operations: first three years"},
+    "editor": {"id": 3653, "full_name": "Kent Wootton",
+               "identifier": "User:3653:MzY1Mw.BpXUskrf"},
+    "revisions": [
+        {
+            "id": 26704,
+            "created_dt": "2025-06-19T23:18:16.027165+00:00",
+            "comment": "",
+            "comments": [],
+            "confirm_url": None,
+            "create_comment_url":
+                "/event/82/api/contributions/6680/editing/paper/26704/comments/",
+            "custom_action_url":
+                "/event/82/api/contributions/6680/editing/paper/26704/custom-action",
+            "custom_actions": [],
+            "download_files_url":
+                "/event/82/contributions/6680/editing/paper/26704/files.zip",
+            "files": [
+                {"id": 67863, "uuid": "0349671b-6eef-4590-a39d-cfd4bd97ecd6",
+                 "filename": "MOX01.docx", "file_type": 192, "size": 22812388,
+                 "content_type": "application/vnd.openxmlformats-officedocument"
+                                 ".wordprocessingml.document",
+                 "download_url":
+                     "/event/82/contributions/6680/editing/paper/26704/67863/MOX01.docx",
+                 "external_download_url":
+                     "https://indico.jacow.org/event/82/contributions/6680/editing/"
+                     "paper/26704/67863/MOX01.docx"},
+                {"id": 67864, "uuid": "2ca516a7-a55e-4031-9c6b-b9e5f146543a",
+                 "filename": "MOX01_f11.png", "file_type": 193, "size": 31167,
+                 "content_type": "image/png",
+                 "download_url":
+                     "/event/82/contributions/6680/editing/paper/26704/67864/"
+                     "MOX01_f11.png",
+                 "external_download_url": ""},
+            ],
+        },
+        {
+            "id": 26999,
+            "created_dt": "2025-06-23T00:14:17.037406+00:00",
+            "files": [],
+            "create_comment_url":
+                "/event/82/api/contributions/6680/editing/paper/26999/comments/",
+        },
+    ],
+}
+
+
+@respx.mock
+def test_the_editable_detail_parses_and_finds_the_newest_revision(client: IndicoClient):
+    respx.get(f"{BASE}/event/82/api/contributions/6680/editing/paper").mock(
+        return_value=httpx.Response(200, json=DETAIL_JSON))
+
+    detail = client.editable(6680)
+
+    assert [r.id for r in detail.revisions] == [26704, 26999]
+    assert detail.latest_id == 26999          # by created_dt, not by position
+    assert detail.revisions[0].files[0].filename == "MOX01.docx"
+    assert detail.revisions[0].files[0].is_word is True
+
+
+@respx.mock
+def test_the_newest_revision_is_found_even_if_the_order_is_reversed(
+        client: IndicoClient):
+    """Nothing may depend on the order Indico happens to serialise them in."""
+    payload = dict(DETAIL_JSON, revisions=list(reversed(DETAIL_JSON["revisions"])))
+    respx.get(f"{BASE}/event/82/api/contributions/6680/editing/paper").mock(
+        return_value=httpx.Response(200, json=payload))
+
+    assert client.editable(6680).latest_id == 26999
+
+
+@respx.mock
+def test_a_paper_assigned_to_someone_else_says_so_before_any_work_is_done(
+        client: IndicoClient):
+    """can_perform_editor_actions is false on another editor's paper.
+
+    Offering "accept" on it would spend the editor's time and then fail, so the
+    reason is read from Indico up front and phrased for a human.
+    """
+    respx.get(f"{BASE}/event/82/api/contributions/6680/editing/paper").mock(
+        return_value=httpx.Response(200, json=DETAIL_JSON))
+
+    detail = client.editable(6680)
+
+    assert detail.can_comment is True                    # a note is still fine
+    assert detail.can_create_internal_comments is True
+    assert detail.can_perform_editor_actions is False
+    assert detail.why_not_editable() == "this paper is assigned to Kent Wootton"
+
+
+def test_an_unassigned_paper_says_to_take_it_first():
+    from src.indico_client.models import EditableDetail
+
+    detail = EditableDetail.model_validate(
+        dict(DETAIL_JSON, editor=None, can_perform_editor_actions=False))
+    assert detail.why_not_editable() == (
+        "you are not assigned to this paper — take it first")
+
+
+def test_nothing_submitted_is_reported_as_such_not_as_a_permission_problem():
+    from src.indico_client.models import EditableDetail
+
+    detail = EditableDetail.model_validate(dict(DETAIL_JSON, revisions=[]))
+    assert detail.latest is None
+    assert detail.why_not_editable() == "the author has not submitted anything yet"
+
+
+@respx.mock
+def test_a_file_is_fetched_by_the_url_indico_supplied(client: IndicoClient,
+                                                      tmp_path: Path):
+    respx.get(f"{BASE}/event/82/api/contributions/6680/editing/paper").mock(
+        return_value=httpx.Response(200, json=DETAIL_JSON))
+    respx.get(
+        f"{BASE}/event/82/contributions/6680/editing/paper/26704/67863/MOX01.docx"
+    ).mock(return_value=httpx.Response(200, content=b"PK\x03\x04docx"))
+
+    word = client.editable(6680).revisions[0].files[0]
+    written = client.download_file(word, tmp_path / word.filename)
+
+    assert written.read_bytes().startswith(b"PK")
+
+
+@respx.mock
+def test_a_relative_download_url_is_resolved_against_the_site(client: IndicoClient,
+                                                             tmp_path: Path):
+    """Only the first file carries an external url; the rest are site-relative."""
+    respx.get(f"{BASE}/event/82/api/contributions/6680/editing/paper").mock(
+        return_value=httpx.Response(200, json=DETAIL_JSON))
+    respx.get(
+        f"{BASE}/event/82/contributions/6680/editing/paper/26704/67864/MOX01_f11.png"
+    ).mock(return_value=httpx.Response(200, content=b"\x89PNG"))
+
+    figure = client.editable(6680).revisions[0].files[1]
+    assert figure.external_download_url == ""
+
+    written = client.download_file(figure, tmp_path / figure.filename)
+    assert written.read_bytes().startswith(b"\x89PNG")

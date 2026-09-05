@@ -32,7 +32,7 @@ from pathlib import Path
 
 import httpx
 
-from src.indico_client.models import ContributionRow, IndicoTag
+from src.indico_client.models import ContributionRow, EditableDetail, IndicoTag
 
 TOKEN_ENV = "INDICO_TOKEN"
 KEYRING_SERVICE = "jacow-prescreen"
@@ -175,9 +175,30 @@ class IndicoClient:
         raw = self._get_json(self._api("tags"))
         return [IndicoTag.model_validate(tag) for tag in raw]
 
-    def editable(self, contribution_id: int) -> dict:
-        """One editable in full, including its revisions and their files."""
-        return self._get_json(self._contrib(contribution_id))
+    def editable(self, contribution_id: int) -> EditableDetail:
+        """One editable in full: its revisions, their files, and your rights."""
+        return EditableDetail.model_validate(self._get_json(self._contrib(contribution_id)))
+
+    def file_types(self) -> dict[int, str]:
+        """``{id: name}`` for this event — files carry the id, not the name."""
+        raw = self._get_json(self._api(f"{self.editable_type}/file-types"))
+        return {ft["id"]: ft.get("name", str(ft["id"])) for ft in raw}
+
+    def download_file(self, file: "object", destination: Path) -> Path:
+        """One file of a revision, by the url Indico gave for it.
+
+        Server-supplied urls are used rather than constructed ones: they are
+        right by definition, and they have moved between Indico versions.
+        """
+        url = getattr(file, "external_download_url", "") or (
+            self.base_url + getattr(file, "download_url", ""))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with self._client() as http, http.stream("GET", url) as response:
+            self._check(response)
+            with destination.open("wb") as handle:
+                for chunk in response.iter_bytes():
+                    handle.write(chunk)
+        return destination
 
     def download_revision_files(self, contribution_id: int, revision_id: int,
                                 destination: Path) -> Path:
@@ -194,12 +215,13 @@ class IndicoClient:
 
     # -- the guard every write goes through -------------------------------
     def current_revision_id(self, contribution_id: int) -> int | None:
-        """The newest revision id, or ``None`` if nothing has been submitted."""
-        data = self.editable(contribution_id) or {}
-        revisions = data.get("revisions") or []
-        if not revisions:
-            return None
-        return revisions[-1].get("id")
+        """The newest revision id, or ``None`` if nothing has been submitted.
+
+        Newest by creation time, not by position in the list: relying on the
+        order Indico happens to serialise them in is the kind of assumption that
+        holds for a year and then quietly writes to the wrong revision.
+        """
+        return self.editable(contribution_id).latest_id
 
     def assert_unchanged(self, contribution_id: int, revision_id: int) -> None:
         """Refuse to write against a paper the author has moved on from."""
