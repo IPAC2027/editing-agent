@@ -426,8 +426,11 @@ def corpus(
     tags.add_column("Tag"); tags.add_column("Papers", justify="right")
     tags.add_column("Us"); tags.add_column("What it means", max_width=44)
     tags.add_column("Detail", max_width=40)
+    from rich.markup import escape as _escape
+
     for row in tag_report(data, usable_only=usable_only):
-        tags.add_row(row.code, str(row.papers), row.status, row.title, row.detail)
+        tags.add_row(row.code, str(row.papers), row.status,
+                     _escape(row.title), _escape(row.detail))
     console.print(tags)
 
     if show_papers:
@@ -440,6 +443,76 @@ def corpus(
                             "yes" if usable else f"[dim]{reason}[/dim]",
                             " ".join(paper.tags))
         console.print(listing)
+
+
+@app.command("corpus-diff")
+def corpus_diff(
+    folder: Path = typer.Argument(..., help="A conference pulled by 'indico-pull'."),
+    top: int = typer.Option(25, "--top", help="How many recurring corrections to show."),
+    only: str = typer.Option("", "--only", help="Comma-separated paper codes."),
+) -> None:
+    """Extract what the editors actually changed, paper by paper.
+
+    Writes one json per paper into ``<folder>/_diffs`` and prints the
+    corrections that recur most often across the conference — which is where
+    candidate new checks come from.
+    """
+    from collections import Counter
+
+    from rich.markup import escape
+
+    from src.corpus.diff import diff_paper, write
+    from src.corpus.index import load
+
+    try:
+        data = load(folder)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    codes = {c.strip() for c in only.split(",") if c.strip()}
+    papers = [p for p in data.usable if not codes or p.code in codes]
+    if not papers:
+        console.print("[yellow]No usable pairs to diff.[/yellow]")
+        raise typer.Exit(1)
+
+    diffs = [diff_paper(p) for p in papers]
+    out = write(diffs, folder / "_diffs")
+
+    total = sum(len(d.hunks) for d in diffs)
+    small = sum(len(d.small) for d in diffs)
+    per_paper = sorted(len(d.small) for d in diffs)
+
+    shape = Table(title="What the editors changed")
+    shape.add_column("Measure"); shape.add_column("Value", justify="right")
+    shape.add_row("papers compared", str(len(diffs)))
+    shape.add_row("corrections found", str(small))
+    shape.add_row("whole-paragraph rewrites (excluded)", str(total - small))
+    shape.add_row("median corrections per paper",
+                  str(per_paper[len(per_paper) // 2]) if per_paper else "0")
+    by_source = Counter(h.source for d in diffs for h in d.small)
+    for source, count in by_source.most_common():
+        shape.add_row(f"  from {source}", str(count))
+    console.print(shape)
+
+    notes = Counter(d.note for d in diffs if d.note)
+    if notes:
+        skipped = Table(title="Papers that yielded nothing")
+        skipped.add_column("Reason"); skipped.add_column("Papers", justify="right")
+        for note, count in notes.most_common():
+            skipped.add_row(escape(note), str(count))
+        console.print(skipped)
+
+    recurring = Counter(h.signature for d in diffs for h in d.small)
+    table = Table(title=f"The {top} most repeated corrections "
+                        "(digits shown as #)")
+    table.add_column("Times", justify="right"); table.add_column("Correction")
+    for signature, count in recurring.most_common(top):
+        # LaTeX is full of [!htb] and [width=...]; Rich would read those as
+        # markup and silently render the row blank.
+        table.add_row(str(count), escape(signature))
+    console.print(table)
+    console.print(f"[dim]{out}[/dim]")
 
 
 # ---------------------------------------------------------------------------
