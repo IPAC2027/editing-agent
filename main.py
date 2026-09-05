@@ -159,6 +159,65 @@ def desk(
 
 
 # ---------------------------------------------------------------------------
+# indico — the editor's own credential against the editing API
+# ---------------------------------------------------------------------------
+
+@app.command()
+def indico(
+    url: str = typer.Option("https://indico.jacow.org", "--url",
+                            envvar="INDICO_URL", help="Indico site."),
+    event: int = typer.Option(..., "--event", envvar="INDICO_EVENT",
+                              help="Event id, e.g. 82."),
+    editable_type: str = typer.Option("paper", "--type", help="paper, slides or poster."),
+    show_tags: bool = typer.Option(False, "--tags",
+                                   help="List the event's tag vocabulary instead."),
+    todo: bool = typer.Option(False, "--todo", help="Only papers with no editor yet."),
+) -> None:
+    """List a conference's papers from Indico, using your own token.
+
+    Reads only.  The token comes from ``INDICO_TOKEN`` or your OS keyring and is
+    never printed.  Create one at ``<indico>/user/tokens/`` with the
+    ``read:everything`` scope.
+    """
+    from src.indico_client.client import IndicoClient, IndicoError, load_token
+
+    try:
+        client = IndicoClient(base_url=url, event_id=event,
+                              token=load_token(), editable_type=editable_type)
+        if show_tags:
+            table = Table(title=f"Tag vocabulary — event {event}")
+            table.add_column("Code"); table.add_column("Used"); table.add_column("Title")
+            for tag in client.tags():
+                table.add_row(tag.code, "yes" if tag.is_used_in_revision else "",
+                              tag.title[:78])
+            console.print(table)
+            return
+
+        rows = client.list_editables()
+    except IndicoError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    submitted = [r for r in rows if r.submitted]
+    if todo:
+        submitted = [r for r in submitted if not r.editor_name]
+
+    table = Table(title=f"Event {event} — {len(submitted)} of {len(rows)} submitted")
+    table.add_column("Paper"); table.add_column("Title", max_width=48)
+    table.add_column("Rev", justify="right"); table.add_column("Status")
+    table.add_column("Editor"); table.add_column("Tags")
+    for row in submitted:
+        table.add_row(row.label, row.title, str(row.editable.revision_count),
+                      row.state.replace("_", " "), row.editor_name,
+                      " ".join(row.tag_codes))
+    console.print(table)
+    not_submitted = len(rows) - len([r for r in rows if r.submitted])
+    if not_submitted:
+        console.print(f"[dim]{not_submitted} contribution(s) with nothing "
+                      f"submitted yet.[/dim]")
+
+
+# ---------------------------------------------------------------------------
 # prescreen
 # ---------------------------------------------------------------------------
 
