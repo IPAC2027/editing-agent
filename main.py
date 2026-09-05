@@ -217,6 +217,71 @@ def indico(
                       f"submitted yet.[/dim]")
 
 
+@app.command("indico-pull")
+def indico_pull(
+    destination: Path = typer.Argument(..., help="Folder to write the conference into."),
+    url: str = typer.Option("https://indico.jacow.org", "--url", envvar="INDICO_URL"),
+    event: int = typer.Option(..., "--event", envvar="INDICO_EVENT"),
+    editable_type: str = typer.Option("paper", "--type"),
+    which: str = typer.Option("first-last", "--revisions",
+                              help="first-last, latest or all."),
+    only: str = typer.Option("", "--only",
+                             help="Comma-separated paper codes, e.g. MOX01,TUZ02."),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Say what would be fetched and how big it is."),
+) -> None:
+    """Download a conference from Indico for study. Reads only; writes nothing.
+
+    Fetches the author's first revision and the current one for every paper, with
+    a manifest carrying the editors' tags — the labels for what changed between
+    them.  The client refuses any request that is not a GET.
+    """
+    from src.indico_client.client import IndicoClient, IndicoError, load_token
+    from src.indico_client.pull import build_plan, _human, pull
+
+    codes = {c.strip() for c in only.split(",") if c.strip()} or None
+    try:
+        client = IndicoClient(base_url=url, event_id=event, token=load_token(),
+                              editable_type=editable_type, read_only=True)
+        console.print(f"[dim]Reading event {event}…[/dim]")
+        plan = build_plan(client, which=which, only=codes)
+    except IndicoError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]{plan.summary()}[/bold]")
+    if dry_run:
+        table = Table(title="What would be downloaded")
+        table.add_column("Paper"); table.add_column("Revisions")
+        table.add_column("Size", justify="right"); table.add_column("Tags")
+        for paper in plan.papers[:400]:
+            table.add_row(
+                paper.folder,
+                ", ".join(r.role for r in paper.revisions) or f"[dim]{paper.note}[/dim]",
+                _human(paper.bytes) if paper.revisions else "",
+                " ".join(paper.row.tag_codes))
+        console.print(table)
+        console.print("[dim]Nothing was downloaded. Drop --dry-run to fetch.[/dim]")
+        return
+
+    def _progress(index: int, total: int, paper) -> None:
+        console.print(f"  [{index}/{total}] {paper.folder} "
+                      f"[dim]{_human(paper.bytes)}[/dim]")
+
+    try:
+        pull(client, destination, which=which, only=codes, plan=plan,
+             on_paper=_progress)
+    except IndicoError as exc:
+        console.print(f"[red]{exc}[/red]")
+        console.print("[dim]Already-downloaded files are kept; run again to "
+                      "resume.[/dim]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[green]Done.[/green] {destination}")
+    console.print("[dim]index.json lists every paper; each folder has a "
+                  "manifest.json with the editors' tags.[/dim]")
+
+
 # ---------------------------------------------------------------------------
 # prescreen
 # ---------------------------------------------------------------------------

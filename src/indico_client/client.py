@@ -46,6 +46,10 @@ class IndicoAuthError(IndicoError):
     pass
 
 
+class ReadOnlyViolation(IndicoError):
+    """A client opened read-only was asked to send a modifying request."""
+
+
 class RevisionMoved(IndicoError):
     """The paper changed in Indico since it was pulled.
 
@@ -84,6 +88,14 @@ class IndicoClient:
     token: str
     editable_type: str = "paper"
     timeout: float = 60.0
+    read_only: bool = False
+    """Refuse to send anything but GET.
+
+    Not a promise in a docstring — a latch. When a task is "read the whole
+    conference and touch nothing", the guarantee has to be enforced where the
+    request is made, so that no later change to a caller can quietly turn a pull
+    into a write. :class:`ReadOnlyViolation` is raised before the socket opens.
+    """
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
@@ -120,6 +132,13 @@ class IndicoClient:
                 f"editing/{self.editable_type}")
 
     # -- plumbing --------------------------------------------------------
+    def _guard(self, method: str, url: str) -> None:
+        if self.read_only and method.upper() not in ("GET", "HEAD"):
+            raise ReadOnlyViolation(
+                f"This client was opened read-only and refuses to {method.upper()} "
+                f"{url}. Nothing has been sent."
+            )
+
     def _client(self) -> httpx.Client:
         return httpx.Client(
             timeout=self.timeout,
@@ -156,9 +175,14 @@ class IndicoClient:
             )
         return response
 
-    def _get_json(self, url: str):
+    def request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """The single place every request goes through, guard included."""
+        self._guard(method, url)
         with self._client() as http:
-            return self._check(http.get(url)).json()
+            return self._check(http.request(method, url, **kwargs))
+
+    def _get_json(self, url: str):
+        return self.request("GET", url).json()
 
     # -- reads -----------------------------------------------------------
     def ping(self) -> int:
@@ -192,6 +216,7 @@ class IndicoClient:
         """
         url = getattr(file, "external_download_url", "") or (
             self.base_url + getattr(file, "download_url", ""))
+        self._guard("GET", url)
         destination.parent.mkdir(parents=True, exist_ok=True)
         with self._client() as http, http.stream("GET", url) as response:
             self._check(response)
@@ -205,6 +230,7 @@ class IndicoClient:
         """The revision's files, as the zip Indico builds for exactly this."""
         url = (f"{self._event}/contributions/{contribution_id}/editing/"
                f"{self.editable_type}/{revision_id}/files.zip")
+        self._guard("GET", url)
         destination.parent.mkdir(parents=True, exist_ok=True)
         with self._client() as http, http.stream("GET", url) as response:
             self._check(response)
