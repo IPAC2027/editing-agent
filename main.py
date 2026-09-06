@@ -515,6 +515,81 @@ def corpus_diff(
     console.print(f"[dim]{out}[/dim]")
 
 
+@app.command("corpus-score")
+def corpus_score(
+    folder: Path = typer.Argument(..., help="A conference pulled by 'indico-pull'."),
+    top: int = typer.Option(20, "--top", help="How many missed corrections to list."),
+    only: str = typer.Option("", "--only", help="Comma-separated paper codes."),
+) -> None:
+    """Score the agent's proposals against what the editors actually did.
+
+    Screens every author revision in the corpus and looks for each proposed
+    edit in the editors' real diff.  Reports confirmed, contradicted and
+    unconfirmed per check — and unconfirmed is not evidence of error.
+    """
+    from rich.markup import escape
+
+    from src.corpus.diff import diff_paper
+    from src.corpus.index import load
+    from src.corpus.score import by_check, missed_signatures, score_paper, totals
+
+    try:
+        data = load(folder)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    codes = {c.strip() for c in only.split(",") if c.strip()}
+    papers = [p for p in data.usable if not codes or p.code in codes]
+    if not papers:
+        console.print("[yellow]No usable pairs to score.[/yellow]")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Screening {len(papers)} paper(s)…[/dim]")
+    scores = [score_paper(p, diff_paper(p)) for p in papers]
+
+    shape = Table(title="Overall")
+    shape.add_column("Measure"); shape.add_column("Value", justify="right")
+    for label, value in totals(scores).items():
+        shape.add_row(label, str(value))
+    console.print(shape)
+
+    checks = Table(title="Per check — against what the editors really did")
+    checks.add_column("Check"); checks.add_column("Tier")
+    checks.add_column("Proposed", justify="right")
+    checks.add_column("Confirmed", justify="right")
+    checks.add_column("Contradicted", justify="right")
+    checks.add_column("Papers", justify="right"); checks.add_column("Verdict")
+    for score in by_check(scores):
+        checks.add_row(score.check_id, score.tier, str(score.proposals),
+                       f"{score.confirmed} ({score.rate:.0%})",
+                       str(score.contradicted) or "", str(len(score.papers)),
+                       escape(score.verdict))
+    console.print(checks)
+
+    disagreements = [(c, e) for c in by_check(scores) for e in c.examples]
+    if disagreements:
+        table = Table(title="Where the editors did something else "
+                            "(the strongest evidence against a rule)")
+        table.add_column("Check"); table.add_column("What happened", max_width=88)
+        for check, example in disagreements:
+            table.add_row(check.check_id, escape(example))
+        console.print(table)
+
+    missed = Table(title=f"The {top} most common corrections nothing proposed")
+    missed.add_column("Times", justify="right"); missed.add_column("Correction")
+    for signature, count in missed_signatures(scores, top=top):
+        missed.add_row(str(count), escape(signature))
+    console.print(missed)
+
+    failed = [s for s in scores if s.error]
+    if failed:
+        console.print(f"[yellow]{len(failed)} paper(s) could not be "
+                      f"screened:[/yellow]")
+        for score in failed[:8]:
+            console.print(f"  {score.paper}: {escape(score.error[:100])}")
+
+
 # ---------------------------------------------------------------------------
 # prescreen
 # ---------------------------------------------------------------------------
