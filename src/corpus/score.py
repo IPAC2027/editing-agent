@@ -30,6 +30,11 @@ from pathlib import Path
 
 from src.corpus.diff import Hunk, PaperDiff, diff_paper
 from src.corpus.index import PaperEntry
+from src.corpus.zones import (
+    reading,
+    zone_of_check,
+    zone_of_hunk,
+)
 
 #: A proposal whose ``before`` is shorter than this matches too much to trust.
 _MIN_ANCHOR = 2
@@ -132,22 +137,22 @@ class CheckScore:
         return self.confirmed / self.proposals if self.proposals else 0.0
 
     @property
+    def zone(self) -> str:
+        return zone_of_check(self.check_id)
+
+    @property
     def verdict(self) -> str:
-        """What the evidence supports — deliberately conservative.
+        """What the evidence supports, read against the zone it comes from.
 
         A check is never promoted or demoted by this program; it can only earn
-        or lose the argument a human then makes. Absence of confirmation is
-        treated as weak evidence, contradiction as strong.
+        or lose the argument a human then makes. Absence of confirmation is weak
+        evidence, contradiction is strong — and in running text even the weak
+        evidence is worth almost nothing, because the editors disagree with each
+        other there. See :mod:`~src.corpus.zones`.
         """
         if self.contradicted:
             return f"{self.contradicted} contradicted — read them"
-        if self.proposals < 5:
-            return "too few to say"
-        if self.rate >= 0.9:
-            return "editors agree"
-        if self.rate >= 0.4:
-            return "editors sometimes agree"
-        return "editors rarely did this"
+        return reading(self.zone, self.rate, self.proposals)
 
 
 # ---------------------------------------------------------------------------
@@ -294,3 +299,88 @@ def totals(scores: list[PaperScore]) -> dict[str, int]:
         "editorial corrections": len(small),
         "of those, explained": explained,
     }
+
+# ---------------------------------------------------------------------------
+# The two cuts that make a rate mean something
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ZoneScore:
+    """Confirmation within one part of the paper."""
+
+    zone: str
+    proposals: int = 0
+    confirmed: int = 0
+    contradicted: int = 0
+    corrections: int = 0        # what the editors did here, whether we saw it
+    explained: int = 0
+
+    @property
+    def rate(self) -> float:
+        return self.confirmed / self.proposals if self.proposals else 0.0
+
+    @property
+    def recall(self) -> float:
+        return self.explained / self.corrections if self.corrections else 0.0
+
+
+def by_zone(scores: list[PaperScore]) -> list[ZoneScore]:
+    """Split every number by where in the paper it happened.
+
+    Without this cut the headline rate is an average over zones with completely
+    different meanings, and it flatters the strict zones while condemning the
+    loose ones.
+    """
+    from src.corpus.zones import ZONES
+
+    table = {zone: ZoneScore(zone=zone) for zone in ZONES}
+    for score in scores:
+        for judged in score.judged:
+            entry = table[zone_of_check(judged.proposal.check_id)]
+            entry.proposals += 1
+            entry.confirmed += int(judged.confirmed)
+            entry.contradicted += int(judged.contradicted)
+        for index, hunk in enumerate(score.hunks):
+            if hunk.large:
+                continue
+            entry = table[zone_of_hunk(hunk)]
+            entry.corrections += 1
+            entry.explained += int(index in score.explained)
+    return [z for z in table.values() if z.proposals or z.corrections]
+
+
+@dataclass
+class EditorScore:
+    """One editor's habits, so 'editors vary' can be a number."""
+
+    editor: str
+    papers: int = 0
+    corrections: int = 0
+    by_zone: Counter = field(default_factory=Counter)
+
+    @property
+    def per_paper(self) -> float:
+        return self.corrections / self.papers if self.papers else 0.0
+
+    def share(self, zone: str) -> float:
+        return self.by_zone[zone] / self.corrections if self.corrections else 0.0
+
+
+def by_editor(entries, diffs) -> list[EditorScore]:
+    """How much each editor changed, and where they spent it.
+
+    The claim this measures is that strictness varies by person, most of all in
+    running text. If two editors correct the same zone at very different rates,
+    no single confirmation threshold can be right for that zone.
+    """
+    table: dict[str, EditorScore] = {}
+    for entry, diff in zip(entries, diffs):
+        name = entry.editor or "(unassigned)"
+        record = table.setdefault(name, EditorScore(editor=name))
+        record.papers += 1
+        for hunk in diff.hunks:
+            if hunk.large:
+                continue
+            record.corrections += 1
+            record.by_zone[zone_of_hunk(hunk)] += 1
+    return sorted(table.values(), key=lambda e: -e.papers)

@@ -144,18 +144,30 @@ def test_a_small_sample_is_never_called_strong():
     assert check.verdict == "too few to say"
 
 
-def test_a_high_rate_over_a_real_sample_is_stated_as_agreement_not_correctness():
-    check = CheckScore(check_id="X", proposals=40, confirmed=39)
-    assert check.verdict == "editors agree"
+def test_a_high_rate_is_only_called_strong_where_editors_are_strict():
+    """A reference check and a running-text check earn different claims from
+    the same arithmetic — see src/corpus/zones.py."""
+    strict = CheckScore(check_id="FMT-REF-01", proposals=40, confirmed=39)
+    loose = CheckScore(check_id="FMT-UNIT-01", proposals=40, confirmed=39)
+
+    assert strict.verdict.startswith("strong")
+    assert not loose.verdict.startswith("strong")
 
 
-def test_a_low_rate_says_the_editors_rarely_did_it_not_that_it_is_wrong():
-    """Wording matters: absence is weak evidence and must not read as a defect."""
-    check = CheckScore(check_id="X", proposals=40, confirmed=2)
+def test_a_low_rate_in_running_text_is_not_reported_as_a_defect():
+    """Wording matters: in the loose zone absence is barely evidence at all,
+    and must never read as a fault in the check."""
+    check = CheckScore(check_id="FMT-UNIT-01", proposals=40, confirmed=2)
 
-    assert check.verdict == "editors rarely did this"
+    assert "editors vary" in check.verdict
     assert "wrong" not in check.verdict
     assert "false" not in check.verdict
+    assert "investigate" not in check.verdict
+
+
+def test_a_low_rate_where_editors_are_strict_does_ask_for_a_look():
+    check = CheckScore(check_id="AUTH-02", proposals=45, confirmed=10)
+    assert "investigate" in check.verdict
 
 
 def test_per_check_aggregation_counts_papers_not_just_proposals():

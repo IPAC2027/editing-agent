@@ -531,7 +531,15 @@ def corpus_score(
 
     from src.corpus.diff import diff_paper
     from src.corpus.index import load
-    from src.corpus.score import by_check, missed_signatures, score_paper, totals
+    from src.corpus.score import (
+        by_check,
+        by_editor,
+        by_zone,
+        missed_signatures,
+        score_paper,
+        totals,
+    )
+    from src.corpus.zones import STRICTNESS
 
     try:
         data = load(folder)
@@ -546,7 +554,8 @@ def corpus_score(
         raise typer.Exit(1)
 
     console.print(f"[dim]Screening {len(papers)} paper(s)…[/dim]")
-    scores = [score_paper(p, diff_paper(p)) for p in papers]
+    diffs = [diff_paper(p) for p in papers]
+    scores = [score_paper(p, d) for p, d in zip(papers, diffs)]
 
     shape = Table(title="Overall")
     shape.add_column("Measure"); shape.add_column("Value", justify="right")
@@ -554,14 +563,48 @@ def corpus_score(
         shape.add_row(label, str(value))
     console.print(shape)
 
+    zones = Table(title="By zone — editors are not equally strict everywhere")
+    zones.add_column("Zone"); zones.add_column("Strictness")
+    zones.add_column("Proposed", justify="right")
+    zones.add_column("Confirmed", justify="right")
+    zones.add_column("Contradicted", justify="right")
+    zones.add_column("Their corrections", justify="right")
+    zones.add_column("We explained", justify="right")
+    for zone in by_zone(scores):
+        zones.add_row(zone.zone, STRICTNESS[zone.zone], str(zone.proposals),
+                      f"{zone.confirmed} ({zone.rate:.0%})",
+                      str(zone.contradicted) or "", str(zone.corrections),
+                      f"{zone.explained} ({zone.recall:.0%})")
+    console.print(zones)
+    console.print("[dim]A rate in a strict zone is evidence about the check. A "
+                  "rate in running text is evidence about editorial appetite: "
+                  "the editors disagree with each other there.[/dim]\n")
+
+    editors = Table(title="By editor — how much, and where they spend it")
+    editors.add_column("Editor"); editors.add_column("Papers", justify="right")
+    editors.add_column("Edits/paper", justify="right")
+    for label in ("front matter", "references", "figures and tables",
+                  "running text"):
+        editors.add_column(label.split()[0].title(), justify="right")
+    for record in by_editor(papers, diffs):
+        if record.papers < 3:
+            continue
+        editors.add_row(escape(record.editor[:24]), str(record.papers),
+                        f"{record.per_paper:.0f}",
+                        *(f"{record.share(z):.0%}" for z in
+                          ("front matter", "references", "figures and tables",
+                           "running text")))
+    console.print(editors)
+
     checks = Table(title="Per check — against what the editors really did")
+    checks.add_column("Zone")
     checks.add_column("Check"); checks.add_column("Tier")
     checks.add_column("Proposed", justify="right")
     checks.add_column("Confirmed", justify="right")
     checks.add_column("Contradicted", justify="right")
     checks.add_column("Papers", justify="right"); checks.add_column("Verdict")
     for score in by_check(scores):
-        checks.add_row(score.check_id, score.tier, str(score.proposals),
+        checks.add_row(score.zone, score.check_id, score.tier, str(score.proposals),
                        f"{score.confirmed} ({score.rate:.0%})",
                        str(score.contradicted) or "", str(len(score.papers)),
                        escape(score.verdict))
