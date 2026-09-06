@@ -109,7 +109,14 @@ _CANONICAL_UNITS = frozenset({
     "A", "pA", "nA", "uA", "mA", "kA", "MA",
     "V", "uV", "mV", "kV", "MV", "GV", "TV",
     "W", "uW", "mW", "kW", "MW", "GW", "TW", "PW",
-    "T", "nT", "uT", "mT", "kT", "MT", "GT", "G",
+    # Gauss, with its prefixes.  They are here for the same reason mT and MT
+    # are: to make "mG" and "mg" collide so that *neither* is case-corrected.
+    # Without the prefixed forms, "0.5 mG" (milligauss, an ordinary stray-field
+    # figure) lowercased to the unique key "mg" and was rewritten to
+    # milligrams.  Found by measuring against NAPAC2025, where the editors had
+    # written 0.5\,mG and the agent proposed 0.5~mg.
+    "T", "nT", "uT", "mT", "kT", "MT", "GT",
+    "G", "uG", "mG", "kG", "MG",
     "K", "mK", "uK",
     "Pa", "hPa", "kPa", "MPa", "GPa", "bar", "mbar", "Torr", "mTorr",
     "rad", "urad", "mrad", "sr", "deg",

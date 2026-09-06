@@ -9,6 +9,8 @@ just do.
 
 from pathlib import Path
 
+import pytest
+
 from src.autofix.latex_edits import all_source_edits
 from src.checks.formatting_checks import run_all
 from src.edits import EditSet, Tier
@@ -182,3 +184,55 @@ Institute of Physics}
     run_all(paper)
 
     assert paper.findings == []
+
+
+# ---------------------------------------------------------------------------
+# Unit case: the pairs that must never be resolved by guessing
+#
+# Found by measuring against NAPAC2025, where the agent proposed rewriting
+# "0.5 mG" (milligauss) to "0.5 mg" (milligrams) and the editors had written
+# "0.5\,mG". Gauss was in the table but its prefixed forms were not, so "mG"
+# lowercased to the unique key "mg" and was "corrected" into a different
+# physical quantity.
+# ---------------------------------------------------------------------------
+
+DANGEROUS_PAIRS = [
+    ("mG", "mg"),   # milligauss vs milligrams
+    ("kG", "kg"),   # kilogauss vs kilograms
+    ("uG", "ug"),   # microgauss vs micrograms
+    ("mV", "MV"),   # millivolts vs megavolts
+    ("mT", "MT"),   # millitesla vs megatesla
+    ("mA", "MA"),   # milliamps vs megaamps
+]
+
+
+@pytest.mark.parametrize(("one", "other"), DANGEROUS_PAIRS)
+def test_units_that_differ_only_by_case_are_both_known(one: str, other: str):
+    """Both spellings must be in the table, or the collision is invisible."""
+    from src.autofix.latex_edits import _CANONICAL_UNITS
+
+    assert one in _CANONICAL_UNITS, f"{one} missing — {other} would swallow it"
+    assert other in _CANONICAL_UNITS, f"{other} missing — {one} would swallow it"
+
+
+@pytest.mark.parametrize(("one", "other"), DANGEROUS_PAIRS)
+def test_a_unit_that_could_be_two_things_is_never_case_corrected(one: str, other: str):
+    from src.autofix.latex_edits import _AMBIGUOUS_UNIT_KEYS, _UNIT_BY_LOWER
+
+    assert one.lower() in _AMBIGUOUS_UNIT_KEYS
+    assert _UNIT_BY_LOWER.get(one.lower()) is None
+
+
+@pytest.mark.parametrize("written", ["0.5 mG", "200 kG", "1.5 mg", "12 kg"])
+def test_a_gauss_or_gram_measurement_keeps_the_case_the_author_wrote(
+        written: str, tmp_path: Path):
+    """Spacing is still fixed; the letters are left exactly as submitted."""
+    from src.autofix.latex_edits import unit_edits
+
+    source = f"The stray field was {written} at the wall.\n"
+    edits = unit_edits(source)
+
+    unit = written.split()[1]
+    for edit in edits:
+        assert unit in edit.after, (
+            f"{written}: the agent rewrote the unit to {edit.after!r}")
