@@ -83,6 +83,55 @@ MOP070 — decisions waiting
 └───────────────────────┴───────────────────┴───────────────┴──────────────┘
 ```
 
+## Measuring against real editorial work
+
+The agent is calibrated against conferences that real editors have already
+finished. Their corrections are the ground truth, and the tag codes they
+applied are the labels.
+
+```bash
+# What is in a conference, using your own Indico account (reads only)
+uv run python main.py indico --event 82
+uv run python main.py indico --event 82 --tags     # the tag vocabulary
+
+# Pull it for study. Reads only: the client refuses any non-GET request.
+uv run python main.py indico-pull ~/HIAT2025 --event 82 --dry-run
+uv run python main.py indico-pull ~/HIAT2025 --event 82
+
+# What can be learned from it, and what cannot
+uv run python main.py corpus      ~/HIAT2025
+# What the editors actually changed, and which corrections recur
+uv run python main.py corpus-diff ~/HIAT2025
+# How the agent's proposals compare, per check, per zone, per editor
+uv run python main.py corpus-score ~/HIAT2025
+```
+
+An Indico personal token with `read:everything` is needed
+(`<indico>/user/tokens/`), in `INDICO_TOKEN` or the OS keyring. It is never
+printed and never written to disk. Indico has no narrower scope for the
+editing module, so treat it as your whole account and revoke it when done.
+
+**Reading the numbers.** Three columns, and only one of them is evidence of a
+defect:
+
+| | |
+|---|---|
+| **confirmed** | the editors made this change too |
+| **contradicted** | they changed this very text into something else — the strongest evidence against a rule |
+| **unconfirmed** | they did not make it. **Not** evidence that it is wrong |
+
+And every rate is read against the part of the paper it comes from, because
+editors are strict about front matter and references, variable about figures
+and tables, and inconsistent with each other in running text. Measured over
+253 papers the agent confirms at 52% in the strict zones and 14% in running
+text. `src/corpus/zones.py` holds that logic; a low rate in running text is a
+statement about editorial appetite, not about the check.
+
+Two conferences, two house styles: NAPAC's editors normalise measurements to
+`\qty{}` (270 conversions to 27), HIAT's to `~` (43 to 6). So a check
+"confirmed" on one conference can be contradicted on the next, and a
+per-conference style setting is the obvious next piece of work.
+
 ## What lands on disk
 
 Everything the agent and the desk write goes into an `aiagent_prescreen/`
@@ -310,9 +359,12 @@ prevent.
 | Rewrite damage verification, sentence-case abstention | done |
 | Constrained local-model classification with abstention | done |
 | Browser review desk for non-technical editors | done |
-| Labelled gold set over the 49 examples, per-check precision in CI | next |
-| Tier derived from measured precision rather than chosen by hand | next |
-| Indico integration, green/yellow/red submission judge | later |
+| Corpus pulled from Indico; per-check scoring against real editorial diffs | done |
+| Editor's own credential against the Indico editing API (reads) | done |
+| Writing results back to Indico from the desk | next |
+| Per-conference house style (`~` vs `\qty{}`, `\emph{et al.}`, `\midrule`) | next |
+| Tier derived from measured confirmation, per zone | next |
+| TC07/TC08: figure, table and equation numbering, and "never referenced" | next |
 
 See [`docs/editor_workflow.md`](docs/editor_workflow.md) for the reasoning
 behind all of it, and [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) for the

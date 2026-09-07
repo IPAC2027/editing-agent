@@ -41,4 +41,13 @@ assets/jacow/*.cls
 assets/jacow/*.bbx
 assets/jacow/*.cbx
 
+# Conferences pulled from Indico for measurement. Gigabytes of other
+# people's unpublished papers: never committed.
 HIAT2025/
+NAPAC2025/
+*2025/
+*2026/
+*2027/
+
+# Local editor settings, per machine.
+.claude/
