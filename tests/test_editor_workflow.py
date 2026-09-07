@@ -169,8 +169,8 @@ def test_auto_tier_fixes_units_and_doi_presentation(submission: Path):
     out = submission / "aiagent_prescreen"
     edited = (out / "TEST001_edited.tex").read_text()
 
-    assert "250~pC" in edited
-    assert "50~nm" in edited
+    assert "\\qty{250}{pC}" in edited
+    assert "\\qty{50}{nm}" in edited
     assert "10~\\%" in edited
     assert "\\doi{10.1103/PhysRevAccelBeams.24.063401}" in edited
     # House style is the macro, not a "doi:" prefix — settled after measuring
@@ -190,7 +190,9 @@ def test_auto_tier_leaves_protected_regions_alone(submission: Path):
     # A comment is not prose.
     assert "% A commented 10 MeV value must not be touched." in edited
     # An ambiguous unit spelling keeps the author's capitalisation.
-    assert "0.4~MT/m" in edited
+    # Still not case-corrected — megatesla, not millitesla — but now in the
+    # house form.
+    assert "\\qty{0.4}{MT}/m" in edited
     assert "mT" not in edited
 
 

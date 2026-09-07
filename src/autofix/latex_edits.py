@@ -331,20 +331,61 @@ _SIUNITX_RE = re.compile(
 _SIUNITX_USED_RE = re.compile(r"\\(?:qty|SI|num|si)\s*[\{\[]")
 
 
+#: The manual reference list. jacow.cls (v3.01) defines \doi *inside* this
+#: environment — its own changelog says "add a macro \doi to be used inside
+#: thebibliography environment" — so the macro exists for \bibitem entries and
+#: nowhere else in the document.
+_THEBIB_RE = re.compile(
+    r"\\begin\{thebibliography\}.*?(?:\\end\{thebibliography\}|\Z)", re.DOTALL)
+
+
+def bibliography_spans(source: str) -> list[tuple[int, int]]:
+    return [match.span() for match in _THEBIB_RE.finditer(source)]
+
+
 def has_doi_macro(source: str) -> bool:
-    r"""Can this paper render ``\doi{...}``?
+    r"""Does ``\doi{...}`` exist anywhere in this document?
 
     True for the JACoW class, which provides it, and for any paper that defines
-    or already uses the macro.
+    or already uses the macro. Whether it is callable at a *given position* is
+    a separate question — see :func:`doi_macro_usable_at`.
     """
     return bool(_JACOW_CLASS_RE.search(source)
                 or _DOI_DEFINED_RE.search(source)
                 or _DOI_USED_RE.search(source))
 
 
+def doi_macro_usable_at(source: str, position: int,
+                        spans: list[tuple[int, int]] | None = None) -> bool:
+    r"""Can ``\doi{...}`` be written at *position*?
+
+    Only inside the manual reference list. Emitting it in running text would
+    compile on no JACoW paper at all, which is the failure the capability check
+    exists to prevent — and which the first version of this check walked
+    straight into by asking only whether the macro existed somewhere.
+
+    A paper that defines \doi itself is trusted anywhere, because then it is
+    the author's own global macro rather than the class's local one.
+    """
+    if _DOI_DEFINED_RE.search(source):
+        return True
+    if not has_doi_macro(source):
+        return False
+    spans = spans if spans is not None else bibliography_spans(source)
+    return any(start <= position < end for start, end in spans)
+
+
 def has_siunitx(source: str) -> bool:
-    r"""Can this paper render ``\qty{10}{MeV}``?"""
-    return bool(_SIUNITX_RE.search(source) or _SIUNITX_USED_RE.search(source))
+    r"""Can this paper render ``\qty{10}{MeV}``?
+
+    The JACoW class loads siunitx unconditionally — ``\RequirePackage{siunitx}``
+    at line 442 of v3.01, and it adds \qty to its own NoCaseChange list — so
+    every paper using the class can write \qty{} whether or not it asks for the
+    package itself. That is two thirds of a typical conference.
+    """
+    return bool(_SIUNITX_RE.search(source)
+                or _SIUNITX_USED_RE.search(source)
+                or _JACOW_CLASS_RE.search(source))
 
 
 def _trim_doi(doi: str) -> tuple[str, str]:
@@ -364,8 +405,15 @@ def doi_format_edits(source: str, file: str = "") -> list[Edit]:
     reported on the sample corpus.
     """
     edits: list[Edit] = []
+    bib_spans = bibliography_spans(source)
+
+    def _doi_here(position: int) -> bool:
+        return doi_macro_usable_at(source, position, bib_spans)
+
     # \url{doi:...} and \url{https://doi.org/...} → \doi{...}
     for match in _URL_DOI_RE.finditer(source):
+        if not _doi_here(match.start()):
+            continue
         doi, trail = _trim_doi(match.group(1))
         edit = make_edit(
             source, match, f"\\doi{{{doi}}}{trail}",
@@ -379,6 +427,8 @@ def doi_format_edits(source: str, file: str = "") -> list[Edit]:
             edits.append(edit)
 
     for match in _HREF_DOI_RE.finditer(source):
+        if not _doi_here(match.start()):
+            continue
         doi, trail = _trim_doi(match.group(1))
         edit = make_edit(
             source, match, f"\\doi{{{doi}}}{trail}",
@@ -394,7 +444,7 @@ def doi_format_edits(source: str, file: str = "") -> list[Edit]:
     # Bare https://doi.org/... outside any command
     protected = protected_spans(source)
     for match in _BARE_DOI_URL_RE.finditer(source):
-        if _blocked(protected, *match.span()):
+        if _blocked(protected, *match.span()) or not _doi_here(match.start()):
             continue
         doi, trail = _trim_doi(match.group(1))
         edit = make_edit(
@@ -412,12 +462,11 @@ def doi_format_edits(source: str, file: str = "") -> list[Edit]:
     # not a "doi:" prefix. Measured against NAPAC2025, every editor who touched
     # one of these wrote the macro, and the agent's prefix-only fix left work
     # behind — which is why it showed up as disagreement rather than absence.
-    macro = has_doi_macro(source)
     for match in _DOI_PREFIX_RE.finditer(source):
         if source[max(0, match.start() - 6):match.start()].endswith("\\"):
             continue  # part of \doi{...}
         doi, trail = _trim_doi(match.group("doi"))
-        if macro:
+        if _doi_here(match.start()):
             # JACoW writes no full stop after the DOI, and it is the last
             # element of a reference — so the trailing punctuation goes only
             # when nothing follows it on the line. Anywhere else it is
@@ -434,8 +483,8 @@ def doi_format_edits(source: str, file: str = "") -> list[Edit]:
             # rather than emitting a macro that would not compile.
             replacement = f"doi:{doi}{trail}"
             message = ("Normalise the DOI prefix to lowercase 'doi:' with no "
-                       "space. (This paper does not provide \\doi{...}, which "
-                       "is the preferred form.)")
+                       "space. (\\doi{...} is the preferred form, but it is "
+                       "only defined inside the reference list.)")
         edit = make_edit(
             source, match, replacement,
             check_id="DOI-FMT-01",

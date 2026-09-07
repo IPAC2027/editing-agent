@@ -79,18 +79,21 @@ The length remains 2~m.
     source, editset = _editset(paper)
 
     spacing = [e for e in editset.edits if e.check_id == "FMT-UNIT-01"]
-    assert [e.after for e in spacing] == ["10~MeV"]
+    # The JACoW class loads siunitx, so the house form is available.
+    assert [e.after for e in spacing] == ["\\qty{10}{MeV}"]
     assert all(e.tier is Tier.AUTO for e in spacing)
 
     # "5 mhz" needs a case change as well, so it is one SUGGEST edit that does
     # both rather than a silent AUTO rewrite of the unit.
     cased = [e for e in editset.edits if e.check_id == "FMT-UNIT-02"]
-    assert [e.after for e in cased] == ["5~MHz"]
+    assert [e.after for e in cased] == ["\\qty{5}{MHz}"]
     assert cased[0].tier is Tier.SUGGEST
 
     applied = editset.apply(source)
-    assert "10~MeV" in applied
-    # Already-correct spacing is untouched — and, crucially, is not reported.
+    assert "\\qty{10}{MeV}" in applied
+    # An already-correct "2~m" is untouched — and, crucially, not reported.
+    # Rewriting every correct non-breaking space into \qty{} as well would put
+    # dozens of edits on a paper with nothing wrong with it.
     assert "2~m" in applied
     assert not any(e.before == "2~m" for e in editset.edits)
 
@@ -111,13 +114,13 @@ A 1.3 Gev proton and a 0.4 MT/m gradient.
 
     case_edits = [e for e in editset.edits if e.check_id == "FMT-UNIT-02"]
     assert len(case_edits) == 1
-    assert case_edits[0].after == "1.3~GeV"
+    assert case_edits[0].after == "\\qty{1.3}{GeV}"
     assert case_edits[0].tier is Tier.SUGGEST, "unit case can change a quantity"
 
     # "MT" (megatesla) must never be rewritten to "mT": the spelling is
     # ambiguous, so only the spacing is corrected.
     assert not any("mT" in e.after for e in editset.edits)
-    assert any(e.after == "0.4~MT" for e in editset.edits)
+    assert any(e.after == "\\qty{0.4}{MT}" for e in editset.edits)
 
 
 def test_deterministic_formatting_accepts_jacow_conventions(tmp_path: Path):

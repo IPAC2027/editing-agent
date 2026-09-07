@@ -226,7 +226,7 @@ def test_view_offers_the_source_for_hand_editing(paper_folder: Path):
     lines = data["source"]["lines"]
     assert lines and lines[0]["n"] == 1
     # The automatic unit fix is already in the text the editor is shown.
-    assert any("250~pC" in line["text"] for line in lines)
+    assert any("\\qty{250}{pC}" in line["text"] for line in lines)
     assert any(line["changed"] for line in lines)
 
 
@@ -285,7 +285,7 @@ def test_an_editor_works_through_a_paper_and_closes_it(paper_folder: Path):
     # --- and the composed text matches those choices exactly ----------
     result = compose(Paper(paper_folder))
     assert "OVERVIEW" in result                      # the hand edit
-    assert "250~pC" in result                        # an automatic fix
+    assert "\\qty{250}{pC}" in result               # an automatic fix
     accepted_edit = editset.get(accepted["id"])
     if accepted_edit:
         assert accepted_edit.after in result

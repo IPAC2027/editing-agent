@@ -29,6 +29,14 @@ from src.autofix.latex_edits import (
 
 JACOW = "\\documentclass[keeplastbox]{jacow}\n"
 SIUNITX = "\\usepackage{siunitx}\n"
+PLAIN = "\\documentclass{article}\n"
+
+
+def _in_bibliography(*lines: str) -> str:
+    """A reference list — the only place jacow.cls defines \\doi."""
+    body = "\n".join(lines)
+    return (f"{JACOW}\\begin{{document}}\n\\begin{{thebibliography}}{{9}}\n"
+            f"{body}\n\\end{{thebibliography}}\n\\end{{document}}\n")
 
 
 def _pairs(edits):
@@ -45,7 +53,7 @@ def _pairs(edits):
     "DOI:10.1109/PAC.2007.4440878",
 ])
 def test_a_written_out_doi_becomes_the_macro(written: str):
-    source = f"{JACOW}A. Author, Title, 2007. {written}\n"
+    source = _in_bibliography(f"\\bibitem{{a}} A. Author, Title, 2007. {written}")
 
     assert _pairs(doi_format_edits(source)) == [
         (written, "\\doi{10.1109/PAC.2007.4440878}")]
@@ -54,7 +62,8 @@ def test_a_written_out_doi_becomes_the_macro(written: str):
 def test_the_full_stop_goes_when_the_doi_ends_the_entry():
     """JACoW writes no full stop after the DOI, and every editor in the corpus
     who touched one of these removed it."""
-    source = f"{JACOW}\\bibitem{{a}} A. Author, Title. doi: 10.1063/1.4926994.\n"
+    source = _in_bibliography(
+        "\\bibitem{a} A. Author, Title. doi: 10.1063/1.4926994.")
 
     assert _pairs(doi_format_edits(source))[0][1] == "\\doi{10.1063/1.4926994}"
 
@@ -62,26 +71,29 @@ def test_the_full_stop_goes_when_the_doi_ends_the_entry():
 def test_the_full_stop_stays_when_the_sentence_continues():
     """Mid-sentence it is punctuation about the prose, not about the DOI, and
     removing it would be an edit nobody asked for."""
-    source = f"{JACOW}See doi: 10.1063/1.4926994. The result was confirmed.\n"
+    source = _in_bibliography(
+        "\\bibitem{a} See doi: 10.1063/1.4926994. Confirmed later.")
 
     assert _pairs(doi_format_edits(source))[0][1] == "\\doi{10.1063/1.4926994}."
 
 
 def test_an_already_correct_macro_produces_nothing():
-    source = f"{JACOW}A. Author, \\doi{{10.1063/1.4926994}}\n"
+    source = _in_bibliography("\\bibitem{a} A. Author, \\doi{10.1063/1.4926994}")
     assert doi_format_edits(source) == []
 
 
 def test_a_paper_that_cannot_render_the_macro_gets_the_safe_form_instead():
     """Emitting \\doi{} where it is undefined turns a formatting fix into a
     build failure. The prefix is normalised instead, and the message says why."""
-    source = "\\documentclass{article}\nA. Author. DOI: 10.1109/PAC.2007.4440878\n"
+    source = (f"{PLAIN}\\begin{{document}}\n\\begin{{thebibliography}}{{9}}\n"
+              "\\bibitem{a} A. Author. DOI: 10.1109/PAC.2007.4440878\n"
+              "\\end{thebibliography}\n\\end{document}\n")
 
     edits = doi_format_edits(source)
 
     assert _pairs(edits) == [("DOI: 10.1109/PAC.2007.4440878",
-                          "doi:10.1109/PAC.2007.4440878")]
-    assert "does not provide" in edits[0].message
+                              "doi:10.1109/PAC.2007.4440878")]
+    assert "only defined inside the reference list" in edits[0].message
 
 
 @pytest.mark.parametrize(("source", "available"), [
@@ -115,7 +127,7 @@ def test_unit_case_is_still_corrected_inside_qty():
 
 def test_without_siunitx_the_non_breaking_space_is_used():
     """Same reason as the DOI macro: \\qty{} would not compile."""
-    source = f"{JACOW}A pulse of 284.5 ms was measured.\n"
+    source = f"{PLAIN}A pulse of 284.5 ms was measured.\n"
 
     assert _pairs(unit_edits(source)) == [("284.5 ms", "284.5~ms")]
 
@@ -207,3 +219,52 @@ def test_classic_bibtex_with_a_doi_dropping_style_is_still_an_error(tmp_path):
     template_checks.run_all(paper)
 
     assert [f for f in paper.findings if f.check_id == "JACOW-CLS-02"]
+
+# ---------------------------------------------------------------------------
+# Where the macros are actually callable
+#
+# jacow.cls defines \doi *inside* the thebibliography environment — its own
+# changelog says so — and loads siunitx unconditionally. The first version of
+# this capability check asked only whether \doi existed somewhere in the
+# document, which would have written it into running text where it compiles on
+# no JACoW paper at all.
+# ---------------------------------------------------------------------------
+
+def test_a_doi_in_running_text_gets_the_safe_form():
+    source = (f"{JACOW}\\begin{{document}}\n"
+              "As reported in DOI: 10.1109/PAC.2007.4440878 the beam was stable.\n"
+              "\\begin{thebibliography}{9}\n"
+              "\\bibitem{a} A. Author, Title. DOI: 10.1063/1.4926994.\n"
+              "\\end{thebibliography}\\end{document}\n")
+
+    changes = dict(_pairs(doi_format_edits(source)))
+
+    assert changes["DOI: 10.1109/PAC.2007.4440878"] == "doi:10.1109/PAC.2007.4440878"
+    assert changes["DOI: 10.1063/1.4926994."] == "\\doi{10.1063/1.4926994}"
+
+
+def test_a_url_wrapped_doi_outside_the_reference_list_is_left_alone():
+    """DOI-FMT-02 had the same bug: it emitted the macro wherever it matched."""
+    source = (f"{JACOW}\\begin{{document}}\n"
+              "see \\url{doi:10.1063/1.4926994} in the text\n\\end{document}\n")
+
+    assert doi_format_edits(source) == []
+
+
+def test_a_paper_that_defines_the_macro_itself_may_use_it_anywhere():
+    """Then it is the author's own global macro, not the class's local one."""
+    source = ("\\documentclass{article}\n\\providecommand{\\doi}[1]{}\n"
+              "\\begin{document}\nsee DOI: 10.1063/1.4926994 here\n\\end{document}\n")
+
+    assert _pairs(doi_format_edits(source)) == [
+        ("DOI: 10.1063/1.4926994", "\\doi{10.1063/1.4926994}")]
+
+
+def test_the_jacow_class_is_enough_for_qty_without_asking_for_siunitx():
+    """\\RequirePackage{siunitx} at line 442 of jacow.cls v3.01. Without this
+    the agent proposed a plain ~ on two thirds of a conference while the
+    editors were writing \\qty{}."""
+    source = f"{JACOW}A pulse of 284.5 ms was measured.\n"
+
+    assert has_siunitx(source) is True
+    assert _pairs(unit_edits(source)) == [("284.5 ms", "\\qty{284.5}{ms}")]
