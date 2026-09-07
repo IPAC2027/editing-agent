@@ -188,6 +188,7 @@ def unit_edits(source: str, file: str = "") -> list[Edit]:
     spans = protected_spans(source)
     edits: list[Edit] = []
 
+    siunitx = has_siunitx(source)
     for match in _NUMBER_UNIT_RE.finditer(source):
         if _blocked(spans, *match.span()):
             continue
@@ -218,8 +219,15 @@ def unit_edits(source: str, file: str = "") -> list[Edit]:
             continue
 
         new_unit = canonical if needs_case else unit
-        new_sep = "~" if needs_space else separator
-        replacement = f"{number}{new_sep}{new_unit}"
+        if siunitx:
+            # House style for a measurement is \qty{N}{unit}. Applied only
+            # where a fix was needed anyway: converting every already-correct
+            # "10~MeV" as well would put sixty edits on a paper that has
+            # nothing wrong with it.
+            replacement = f"\\qty{{{number}}}{{{new_unit}}}"
+        else:
+            new_sep = "~" if needs_space else separator
+            replacement = f"{number}{new_sep}{new_unit}"
 
         if needs_case:
             check_id, tier = "FMT-UNIT-02", Tier.SUGGEST
@@ -233,6 +241,18 @@ def unit_edits(source: str, file: str = "") -> list[Edit]:
         else:
             check_id, tier = "FMT-UNIT-01", Tier.AUTO
             confidence = Confidence.CERTAIN
+            if siunitx:
+                message = ("Write the measurement as \\qty{N}{unit}, the JACoW "
+                           "form, so the number and its unit cannot be split "
+                           "across lines.")
+                rule = _UNIT_RULE
+                edit = make_edit(
+                    source, match, replacement, check_id=check_id, tier=tier,
+                    confidence=confidence, message=message, rule=rule, file=file,
+                )
+                if edit:
+                    edits.append(edit)
+                continue
             message = f"Non-breaking space between value and unit: {number}~{unit}."
             rule = _UNIT_RULE
 
@@ -284,6 +304,47 @@ _BARE_DOI_URL_RE = re.compile(
 )
 
 _DOI_RULE = "JACoW Annex B: DOIs are written doi:10.xxxx/yyyy (or \\doi{...} in LaTeX)"
+
+
+# ---------------------------------------------------------------------------
+# What this document can actually render
+#
+# House style says a DOI is written \doi{...} and a measurement \qty{N}{unit}.
+# Both are macros, and emitting a macro a paper does not define turns a
+# formatting fix into a build failure — the most expensive mistake this tool
+# can make. So each is used only where the document already has it, and the
+# safe older form is kept where it does not.
+# ---------------------------------------------------------------------------
+
+# The option list routinely spans lines:
+#     \documentclass[a4paper,
+#                    keeplastbox]{jacow}
+# A pattern anchored with [^\n]* missed 82% of a real conference, which made
+# the agent fall back to the "doi:" form on papers that could render \doi{}
+# perfectly well. Options may contain anything but a closing bracket.
+_JACOW_CLASS_RE = re.compile(
+    r"\\documentclass\s*(?:\[[^\]]*\]\s*)?\{[^}]*jacow[^}]*\}", re.IGNORECASE)
+_DOI_DEFINED_RE = re.compile(r"\\(?:new|renew|provide)command\*?\s*\{?\\doi\b")
+_DOI_USED_RE = re.compile(r"\\doi\s*\{")
+_SIUNITX_RE = re.compile(
+    r"\\usepackage\s*(?:\[[^\]]*\]\s*)?\{[^}]*\bsiunitx\b[^}]*\}")
+_SIUNITX_USED_RE = re.compile(r"\\(?:qty|SI|num|si)\s*[\{\[]")
+
+
+def has_doi_macro(source: str) -> bool:
+    r"""Can this paper render ``\doi{...}``?
+
+    True for the JACoW class, which provides it, and for any paper that defines
+    or already uses the macro.
+    """
+    return bool(_JACOW_CLASS_RE.search(source)
+                or _DOI_DEFINED_RE.search(source)
+                or _DOI_USED_RE.search(source))
+
+
+def has_siunitx(source: str) -> bool:
+    r"""Can this paper render ``\qty{10}{MeV}``?"""
+    return bool(_SIUNITX_RE.search(source) or _SIUNITX_USED_RE.search(source))
 
 
 def _trim_doi(doi: str) -> tuple[str, str]:
@@ -347,16 +408,39 @@ def doi_format_edits(source: str, file: str = "") -> list[Edit]:
         if edit:
             edits.append(edit)
 
-    # "DOI: 10.x" / "doi 10.x" → "doi:10.x", but only where it really differs.
+    # A written-out DOI becomes the macro: JACoW style is \doi{10.xxxx/yyyy},
+    # not a "doi:" prefix. Measured against NAPAC2025, every editor who touched
+    # one of these wrote the macro, and the agent's prefix-only fix left work
+    # behind — which is why it showed up as disagreement rather than absence.
+    macro = has_doi_macro(source)
     for match in _DOI_PREFIX_RE.finditer(source):
         if source[max(0, match.start() - 6):match.start()].endswith("\\"):
             continue  # part of \doi{...}
         doi, trail = _trim_doi(match.group("doi"))
+        if macro:
+            # JACoW writes no full stop after the DOI, and it is the last
+            # element of a reference — so the trailing punctuation goes only
+            # when nothing follows it on the line. Anywhere else it is
+            # sentence punctuation and stays: removing that would be an edit
+            # about prose, not about the DOI.
+            rest = source[match.end():]
+            ends_the_entry = rest[:rest.find("\n") if "\n" in rest else None].strip() == ""
+            keep = "" if (ends_the_entry and trail in (".", "")) else trail
+            replacement = f"\\doi{{{doi}}}{keep}"
+            message = ("Write the DOI as \\doi{10.xxxx/yyyy}, which is the JACoW "
+                       "form and renders as a link.")
+        else:
+            # No \doi to call: normalise the prefix and leave the rest alone
+            # rather than emitting a macro that would not compile.
+            replacement = f"doi:{doi}{trail}"
+            message = ("Normalise the DOI prefix to lowercase 'doi:' with no "
+                       "space. (This paper does not provide \\doi{...}, which "
+                       "is the preferred form.)")
         edit = make_edit(
-            source, match, f"doi:{doi}{trail}",
+            source, match, replacement,
             check_id="DOI-FMT-01",
             tier=Tier.AUTO,
-            message="Normalise the DOI prefix to lowercase 'doi:' with no space.",
+            message=message,
             rule=_DOI_RULE,
             file=file,
         )
@@ -469,12 +553,21 @@ def etal_edits(source: str, file: str = "") -> list[Edit]:
         if _blocked(spans, *match.span()):
             continue
         et, al = match.group("et"), match.group("al")
-        replacement = f"{et} {al}."
+        # House style italicises it. Not applied when the author has already
+        # wrapped it in an emphasis command, which would nest two of them.
+        preceding = source[max(0, match.start() - 12):match.start()]
+        already_emphasised = re.search(r"\\(?:emph|textit|textsl)\s*\{\s*$",
+                                       preceding) is not None
+        if already_emphasised:
+            replacement = f"{et} {al}."
+        else:
+            replacement = f"\\emph{{{et} {al}.}}"
         edit = make_edit(
             source, match, replacement,
             check_id="AUTH-02",
             tier=Tier.AUTO,
-            message="Normalise to 'et al.' — no full stop after 'et', one after 'al'.",
+            message=("Write it as \\emph{et al.} — italicised, no full stop "
+                     "after 'et', one after 'al'."),
             rule="JACoW Annex B: 'et al.' punctuation",
             file=file,
         )

@@ -186,17 +186,21 @@ OUT_OF_REACH: dict[str, str] = {
             "table or equation numbering",
     "TC08": "not implemented for figures and tables: only unresolved citations "
             "are found, not 'never referenced in the text'",
-    "TC09": "not implemented: Fig./Eq./Table abbreviation and capitalisation in "
-            "running text is deterministic and worth building",
+    "TC09": "out of scope: the correction runs both ways — JACoW wants "
+            "'Figure 1:' in a caption and 'Fig. 1' in running text — so a rule "
+            "would need to judge which context it is in. Measured over two "
+            "conferences the editors go each way about two to one, and a rule "
+            "that guessed would be wrong a third of the time. Left to them.",
     "TC10": "needs the rendered graphic",
     "TC11": "needs the rendered equation",
     "UT00": "a catch-all an editor chooses, not a check",
     "UT02": "needs the page geometry of the PDF",
 }
 
-#: The three above that need no PDF and no judgement — the roadmap this
-#: vocabulary hands us, in the order the tag usage suggests.
-BUILDABLE_NEXT = ("TC09", "TC07", "TC08")
+#: Codes that need no PDF and no judgement — the roadmap this vocabulary hands
+#: us. TC09 was here and was removed on the editors' own advice: a correction
+#: that runs in both directions depending on context is theirs, not ours.
+BUILDABLE_NEXT = ("TC07", "TC08")
 
 
 def tag_codes_for(check_ids) -> list[str]:

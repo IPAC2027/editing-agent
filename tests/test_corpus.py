@@ -135,12 +135,32 @@ def test_a_missing_index_says_what_to_run(tmp_path: Path):
 def test_the_tag_report_ranks_frequent_and_buildable_above_frequent_and_covered(
         conference: Path):
     corpus = load(conference)
-    corpus.papers[0].tags = ["TC09", "TC14"]      # buildable, and already covered
+    corpus.papers[0].tags = ["TC07", "TC14"]      # buildable, and already covered
 
     rows = tag_report(corpus)
     order = [r.code for r in rows]
 
-    assert order.index("TC09") < order.index("TC14")
+    assert order.index("TC07") < order.index("TC14")
+
+
+def test_a_correction_that_runs_both_ways_is_not_offered_as_buildable(
+        conference: Path):
+    """TC09 (Figure/Fig.) was on the roadmap and was taken off it.
+
+    JACoW wants 'Figure 1:' in a caption and 'Fig. 1' in running text, so the
+    editors correct in both directions and a rule would have to judge context.
+    On the editors' own advice it is theirs, not ours.
+    """
+    from src.indico_client import tags as vocabulary
+
+    assert "TC09" not in vocabulary.BUILDABLE_NEXT
+    assert "out of scope" in vocabulary.OUT_OF_REACH["TC09"]
+
+    corpus = load(conference)
+    corpus.papers[0].tags = ["TC09"]
+    row = {r.code: r for r in tag_report(corpus)}["TC09"]
+
+    assert row.status != "buildable"
 
 
 def test_a_code_that_is_only_half_implemented_is_not_called_covered(

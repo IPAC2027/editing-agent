@@ -173,7 +173,10 @@ def test_auto_tier_fixes_units_and_doi_presentation(submission: Path):
     assert "50~nm" in edited
     assert "10~\\%" in edited
     assert "\\doi{10.1103/PhysRevAccelBeams.24.063401}" in edited
-    assert "doi:10.18429/JACoW-IPAC2023-TEST002" in edited
+    # House style is the macro, not a "doi:" prefix — settled after measuring
+    # against two conferences, where every editor who touched one wrote \doi{}.
+    assert "\\doi{10.18429/JACoW-IPAC2023-TEST002}" in edited
+    assert "doi:10.18429" not in edited
     assert "[1, 2]" in edited                       # merged citation brackets
     assert "[3]" in edited                          # padding removed
 

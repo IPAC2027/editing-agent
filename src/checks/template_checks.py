@@ -65,15 +65,13 @@ def check_bibliography_style(paper: Paper) -> None:
     if not pt:
         return
     if pt.bibliography_env == "thebibliography" and not pt.uses_biblatex:
-        # A preference, not a defect, and reported under its own id so it does
-        # not share a heading with the classic-BibTeX problem below — which is
-        # a real defect, and which an editor must be able to tell apart at a
-        # glance.
-        _add(paper, "JACOW-CLS-03", Severity.INFO,
-             "The reference list is written out by hand. That is valid, but "
-             "BibLaTeX gives more consistent formatting and the JACoW template "
-             "has supported it since v2.10.",
-             suggested="Use \\documentclass[biblatex,...]{jacow} + \\addbibresource{<paper>.bib}")
+        # Deliberately silent. Whether the references live in a .bib read by
+        # BibLaTeX or are written out inside the .tex is the author's choice —
+        # the JACoW class supports both, by commenting the biblatex option in
+        # or out — and the editors do not treat either as a problem. Reporting
+        # a preference here only spent an editor's attention on a decision that
+        # was never theirs to make.
+        pass
     elif pt.bibliography_env == "bibtex" and not pt.uses_biblatex:
         _add(paper, "JACOW-CLS-02", Severity.ERROR,
              "The paper uses classic BibTeX with a traditional style. Styles like "
