@@ -271,6 +271,53 @@ three, which is a run nobody can describe afterwards. A model that cannot be
 reached is never silently swapped for another one either: asking for a model
 the server does not have is a failure that names what it does have.
 
+## 8b. House style, and one rule deliberately left narrow
+
+Four style questions were settled by the editors after the agent was measured
+against two real conferences (HIAT2025, 44 usable pairs; NAPAC2025, 209). Each
+was a case where the agent's fix was *incomplete* rather than wrong, which is
+why it showed up in the scoring as disagreement rather than as absence.
+
+| Question | Decision | Where it came from |
+|---|---|---|
+| A DOI | `\doi{10.xxxx/yyyy}` | every editor who touched one wrote the macro |
+| A measurement | `\qty{284.5}{ms}` | NAPAC's editors, 270 conversions to 27 |
+| *et al.* | `\emph{et al.}` | 64 unexplained corrections were this one thing |
+| BibLaTeX or a hand-written list | the author's choice, not a finding | the class supports both and the editors flag neither |
+
+Two capability facts from reading `jacow.cls` v3.01 constrain how those are
+applied, and both were found by looking rather than assuming:
+
+* **`\RequirePackage{siunitx}`, line 442, unconditional.** Every paper using
+  the class can render `\qty{}`, whether or not it asks for the package.
+* **`\doi` is defined inside `\def\thebibliography`, line 747** — the class's
+  own changelog says "a macro `\doi` to be used inside thebibliography
+  environment". It is not global. So `\doi{}` is emitted only for a match that
+  sits inside the reference list; in running text the safe `doi:` form is kept.
+  Writing a macro into a paper that cannot call it turns a formatting fix into
+  a build failure, which is the most expensive mistake this tool can make.
+
+### The narrow rule
+
+`FMT-UNIT-01` proposes `\qty{}` **only where the spacing or the unit case was
+already wrong.** It does not normalise measurements that are already correct.
+
+This is against the measured evidence and is a decision, not an oversight.
+NAPAC's editors converted 270 measurements to `\qty` or `\SI` against 27 to a
+plain `~`, and most of those 270 were on text that was already correct.
+Matching them would mean rewriting every measurement in every paper — thirty to
+sixty silent changes each, on papers with nothing wrong with them, and a diff
+against the author's file that no longer shows what was actually fixed. HIAT's
+editors went the other way, 43 to 6, which is the second reason not to chase
+either of them.
+
+The cost is accepted and visible: `FMT-UNIT-01` can never confirm well against
+a NAPAC-style editor, because the corrections they make most often are ones the
+agent declines to propose. **That rate is not a defect and must not be "fixed"
+by widening the rule.** `src/corpus/zones.py` already refuses to read a low
+confirmation rate in running text as evidence against a check; this is the
+clearest example of why.
+
 ## 9. The noise budget
 
 An editor should have to look at a handful of things per paper, not a wall.

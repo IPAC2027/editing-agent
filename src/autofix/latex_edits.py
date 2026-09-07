@@ -220,10 +220,23 @@ def unit_edits(source: str, file: str = "") -> list[Edit]:
 
         new_unit = canonical if needs_case else unit
         if siunitx:
-            # House style for a measurement is \qty{N}{unit}. Applied only
-            # where a fix was needed anyway: converting every already-correct
-            # "10~MeV" as well would put sixty edits on a paper that has
-            # nothing wrong with it.
+            # House style for a measurement is \qty{N}{unit} — but only where
+            # something was already wrong with the spacing or the case.
+            #
+            # This is a decision, not an oversight, and it is deliberately
+            # against the measured evidence. NAPAC2025's editors converted 270
+            # measurements to \qty or \SI against 27 to a plain "~", and most
+            # of those 270 were on text that was already correct. Matching them
+            # would mean rewriting every measurement in every paper: 30 to 60
+            # silent changes each, on papers with nothing wrong with them, and
+            # a diff against the author's file that no longer shows what was
+            # actually fixed. HIAT2025's editors went the other way 43 to 6,
+            # which is the second reason not to chase either of them.
+            #
+            # The cost is visible and accepted: FMT-UNIT-01's confirmation rate
+            # is structurally capped by this, because the corrections the
+            # editors made most often are ones the agent declines to propose.
+            # Do not "fix" that rate by widening the rule.
             replacement = f"\\qty{{{number}}}{{{new_unit}}}"
         else:
             new_sep = "~" if needs_space else separator

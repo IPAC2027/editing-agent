@@ -141,11 +141,36 @@ def test_an_ambiguous_unit_is_not_case_corrected_even_inside_qty():
 
 
 def test_a_measurement_that_is_already_correct_is_left_alone():
-    """Converting every correct '10~MeV' as well would put sixty edits on a
-    paper with nothing wrong with it."""
+    """The rule fires on broken spacing or case, never on correct text.
+
+    A decision taken against the evidence, and recorded here so it is not
+    quietly reversed. NAPAC2025's editors converted 270 measurements to \\qty
+    against 27 to a plain "~", and most of those 270 were already correct —
+    so matching them would mean rewriting every measurement in every paper.
+    HIAT2025's editors went the other way, 43 to 6. Neither is worth thirty to
+    sixty silent changes per paper, or a diff that no longer shows what was
+    actually fixed.
+
+    The price is that FMT-UNIT-01 can never confirm well against a
+    NAPAC-style editor. That is accepted; see src/autofix/latex_edits.py.
+    """
     source = f"{JACOW}{SIUNITX}a beam of 10~MeV protons\n"
 
     assert unit_edits(source) == []
+
+
+def test_a_thin_space_is_also_accepted_as_already_correct():
+    """HIAT and NAPAC editors both use \\, in places. It is not a defect."""
+    source = f"{JACOW}a beam of 10\\,MeV protons\n"
+
+    assert unit_edits(source) == []
+
+
+def test_only_the_broken_measurement_in_a_paragraph_is_touched():
+    source = (f"{JACOW}The 10~MeV beam met a 5\\,T field at 250 pC "
+              "per bunch.\n")
+
+    assert _pairs(unit_edits(source)) == [("250 pC", "\\qty{250}{pC}")]
 
 
 @pytest.mark.parametrize(("source", "available"), [
