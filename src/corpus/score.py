@@ -45,7 +45,7 @@ def _norm(text: str) -> str:
 
 
 def _loose(text: str) -> str:
-    """Normalised further, so a difference of spacing convention is not a
+    r"""Normalised further, so a difference of spacing convention is not a
     difference of opinion.
 
     ``X. Du`` and ``X.~Du`` are the same decision about a name; ``10~MeV`` and
