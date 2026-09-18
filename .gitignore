@@ -51,3 +51,6 @@ NAPAC2025/
 
 # Local editor settings, per machine.
 .claude/
+
+# The desk's per-folder preferences, written where the papers live.
+.aiagent_desk.json
