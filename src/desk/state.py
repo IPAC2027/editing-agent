@@ -286,17 +286,46 @@ def _read_json(path: Path) -> dict:
         return {}
 
 
+#: A conference pulled by ``indico-pull`` puts two revisions under each paper:
+#: ``<CODE>/original`` is what the author submitted and ``<CODE>/current`` is
+#: what the editors made of it. The desk reviews the author's, which is the one
+#: an editor would actually be handed.
+PULLED_MARKER = "index.json"
+AUTHOR_REVISION = "original"
+
+
+def is_pulled_conference(root: Path) -> bool:
+    return (root / PULLED_MARKER).is_file() and any(
+        (child / AUTHOR_REVISION).is_dir()
+        for child in root.iterdir() if child.is_dir())
+
+
 def submission_folders(root: Path) -> list[Path]:
-    """Submission folders under *root*, or *root* itself if it is one."""
+    """Submission folders under *root*, or *root* itself if it is one.
+
+    Understands two layouts. The ordinary one is a folder of submissions, each
+    holding ``Source_Files``. The other is a conference pulled from Indico for
+    measurement, where each paper holds two revisions — without this the desk
+    found nothing at all in a pulled folder, because a paper directory there
+    contains no source of its own.
+    """
     from src.workflow.prescreen import detect_source_format
 
     if detect_source_format(root) != "unknown":
         return [root]
-    found = [
+
+    if is_pulled_conference(root):
+        return [
+            child / AUTHOR_REVISION
+            for child in sorted(root.iterdir())
+            if child.is_dir()
+            and detect_source_format(child / AUTHOR_REVISION) != "unknown"
+        ]
+
+    return [
         child for child in sorted(root.iterdir())
         if child.is_dir() and detect_source_format(child) != "unknown"
     ]
-    return found
 
 
 def describe(folder: Path) -> PaperRow:
@@ -312,7 +341,7 @@ def describe(folder: Path) -> PaperRow:
 
     row = PaperRow(
         folder=str(folder),
-        name=folder.name,
+        name=_submission_name(folder),
         paper_id=paper_id,
         title=plain.readable_title(report.get("title", "")),
         kind=kind,
@@ -343,8 +372,19 @@ def describe(folder: Path) -> PaperRow:
     return row
 
 
+def _submission_name(folder: Path) -> str:
+    """What to call this submission in the worklist.
+
+    In a pulled conference the folder itself is called "original", which would
+    give every row in the list the same name.
+    """
+    if folder.name == AUTHOR_REVISION and folder.parent != folder:
+        return folder.parent.name
+    return folder.name
+
+
 def _guess_paper_id(folder: Path) -> str:
-    match = re.match(r"^([A-Za-z0-9]+)", folder.name)
+    match = re.match(r"^([A-Za-z0-9]+)", _submission_name(folder))
     return match.group(1) if match else folder.name
 
 

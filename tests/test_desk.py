@@ -631,3 +631,73 @@ def test_apply_honours_a_reverted_automatic_edit_from_a_decisions_file(
         paper_folder, decisions_path=path, compile=False)
 
     assert auto.id not in applied
+
+
+# ---------------------------------------------------------------------------
+# The desk on a conference pulled from Indico
+#
+# `indico-pull` writes <CODE>/original and <CODE>/current. Before this the desk
+# found nothing at all in such a folder, because a paper directory there holds
+# no source of its own — only two revisions of one.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def pulled(tmp_path: Path) -> Path:
+    """A conference in the shape `indico-pull` leaves behind."""
+    root = tmp_path / "NAPAC2025"
+    for code, original, current in (
+        ("MOP001", TEX, TEX.replace("5 mhz", "5 MHz")),
+        ("TUP002", TEX, TEX.replace("10 MeV", "10~MeV")),
+    ):
+        for role, text in (("original", original), ("current", current)):
+            folder = root / code / role / "Source_Files"
+            folder.mkdir(parents=True)
+            (folder / f"{code}.tex").write_text(text, encoding="utf-8")
+    (root / "index.json").write_text(
+        json.dumps({"event_id": 97, "papers": []}), encoding="utf-8")
+    return root
+
+
+def test_a_pulled_conference_is_recognised_and_listed(pulled: Path):
+    from src.desk.state import is_pulled_conference, submission_folders
+
+    assert is_pulled_conference(pulled) is True
+    assert [f.parent.name for f in submission_folders(pulled)] == ["MOP001", "TUP002"]
+
+
+def test_the_desk_reviews_the_authors_revision_not_the_editors(pulled: Path):
+    """`current` is what the editors already produced; reviewing that would be
+    marking their homework, not screening the submission."""
+    from src.desk.state import submission_folders
+
+    assert [f.name for f in submission_folders(pulled)] == ["original", "original"]
+
+
+def test_a_pulled_paper_is_named_after_the_paper_not_the_revision(pulled: Path):
+    """Every folder is called "original", so the worklist would otherwise show
+    the same name on every line."""
+    rows = worklist(pulled)
+
+    assert [r.name for r in rows] == ["MOP001", "TUP002"]
+    assert [r.paper_id for r in rows] == ["MOP001", "TUP002"]
+
+
+def test_an_ordinary_folder_of_submissions_is_unaffected(conference: Path):
+    from src.desk.state import is_pulled_conference
+
+    assert is_pulled_conference(conference) is False
+    assert sorted(r.name for r in worklist(conference)) == [
+        "AAA001-revision-1_author", "BBB002-revision-1_author"]
+
+
+def test_a_pulled_paper_can_be_prepared_and_opened(pulled: Path):
+    """The point of the whole thing: it has to work end to end, not just list."""
+    from src.desk.state import submission_folders
+
+    folder = submission_folders(pulled)[0]
+    prescreen(folder, compile=False, git=False)
+
+    data = view(folder)
+
+    assert data["screened"] is True
+    assert data["paper_id"] == "MOP001"
