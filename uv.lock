@@ -13,6 +13,7 @@ source = { editable = "." }
 dependencies = [
     { name = "bibtexparser" },
     { name = "httpx" },
+    { name = "jacow-reference-formatter" },
     { name = "openai" },
     { name = "pdfplumber" },
     { name = "pydantic" },
@@ -32,8 +33,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bibtexparser", specifier = ">=1.4" },
+    { name = "bibtexparser", specifier = ">=1.4,<2" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "jacow-reference-formatter", git = "https://github.com/IPAC2027/jacow-reference-formatter?rev=v1.0.0" },
     { name = "openai", specifier = ">=1.30" },
     { name = "pdfplumber", specifier = ">=0.11.9" },
     { name = "pydantic", specifier = ">=2" },
@@ -434,8 +436,8 @@ name = "httpcore2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "python_full_version < '3.12' or sys_platform != 'emscripten'" },
-    { name = "truststore", marker = "python_full_version < '3.12' or sys_platform != 'emscripten'" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/be/ad/f4f0e57345f1870f3e8cb624e058d7eca6e5a27d33bcc3311d9b618734cd/httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648", size = 67548, upload-time = "2026-08-18T13:22:08.211Z" }
 wheels = [
@@ -500,6 +502,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/72/34/14ca021ce8e5dfedc
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12", size = 7484, upload-time = "2025-10-18T21:55:41.639Z" },
 ]
+
+[[package]]
+name = "jacow-reference-formatter"
+version = "1.0.0"
+source = { git = "https://github.com/IPAC2027/jacow-reference-formatter?rev=v1.0.0#d4b3f088e1fb079c2603c895836dd6a400cc950a" }
 
 [[package]]
 name = "jiter"
