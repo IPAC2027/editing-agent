@@ -227,6 +227,8 @@ def indico_pull(
                               help="first-last, latest or all."),
     only: str = typer.Option("", "--only",
                              help="Comma-separated paper codes, e.g. MOX01,TUZ02."),
+    refresh: bool = typer.Option(False, "--refresh",
+                                 help="Ask Indico about every paper again, even those already downloaded."),
     dry_run: bool = typer.Option(False, "--dry-run",
                                  help="Say what would be fetched and how big it is."),
 ) -> None:
@@ -244,7 +246,15 @@ def indico_pull(
         client = IndicoClient(base_url=url, event_id=event, token=load_token(),
                               editable_type=editable_type, read_only=True)
         console.print(f"[dim]Reading event {event}…[/dim]")
-        plan = build_plan(client, which=which, only=codes)
+
+        def _reading(index: int, total: int) -> None:
+            if index == 1 or index % 50 == 0 or index == total:
+                console.print(f"[dim]  reading {index}/{total}[/dim]")
+
+        # Papers already fully downloaded are not asked about again, so a
+        # restarted pull starts downloading almost at once (--refresh: ask anyway).
+        plan = build_plan(client, which=which, only=codes,
+                          destination=None if refresh else destination, on_read=_reading)
     except IndicoError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
@@ -278,8 +288,15 @@ def indico_pull(
         raise typer.Exit(1)
 
     console.print(f"\n[green]Done.[/green] {destination}")
+    if plan.failures:
+        console.print(f"[yellow]{len(plan.failures)} file(s) could not be fetched "
+                      "(run again to retry them):[/yellow]")
+        for line in plan.failures[:20]:
+            console.print(f"  {line}")
     console.print("[dim]index.json lists every paper; each folder has a "
-                  "manifest.json with the editors' tags.[/dim]")
+                  "manifest.json with the editors' tags. File names Windows cannot "
+                  "store (e.g. with '*') are saved with '_' instead; manifest.json "
+                  "keeps the original name.[/dim]")
 
 
 @app.command()
@@ -520,6 +537,8 @@ def corpus_score(
     folder: Path = typer.Argument(..., help="A conference pulled by 'indico-pull'."),
     top: int = typer.Option(20, "--top", help="How many missed corrections to list."),
     only: str = typer.Option("", "--only", help="Comma-separated paper codes."),
+    json_out: Path | None = typer.Option(None, "--json",
+                                         help="Also write the zone and check scores as JSON."),
 ) -> None:
     """Score the agent's proposals against what the editors actually did.
 
@@ -576,6 +595,19 @@ def corpus_score(
                       str(zone.contradicted) or "", str(zone.corrections),
                       f"{zone.explained} ({zone.recall:.0%})")
     console.print(zones)
+    if json_out is not None:
+        import json as _json
+
+        payload = {
+            "papers": len(papers),
+            "zones": {z.zone: {"proposals": z.proposals, "confirmed": z.confirmed,
+                               "contradicted": z.contradicted, "rate": z.rate}
+                      for z in by_zone(scores)},
+            "checks": {c.check_id: {"proposals": c.proposals, "confirmed": c.confirmed,
+                                    "contradicted": c.contradicted, "rate": c.rate}
+                       for c in by_check(scores)},
+        }
+        json_out.write_text(_json.dumps(payload, indent=1), encoding="utf-8")
     console.print("[dim]A rate in a strict zone is evidence about the check. A "
                   "rate in running text is evidence about editorial appetite: "
                   "the editors disagree with each other there.[/dim]\n")
@@ -961,6 +993,36 @@ def _open(path: Path) -> None:
 
     webbrowser.open(path.resolve().as_uri())
 
+
+
+@app.command("finetune-data")
+def finetune_data(
+    corpus: Path = typer.Argument(..., help="A conference pulled with indico-pull."),
+    out: Path = typer.Option(Path("data/refs"), "--out", help="Where to write the JSONL files."),
+    lookups: bool = typer.Option(True, "--lookups/--offline",
+                                 help="Look references up, so added DOIs and pages are supported."),
+) -> None:
+    """Build training data for the reference model from editors' corrections."""
+    from src.finetune.dataset import build
+
+    counts = build(corpus, out, lookups=lookups)
+    console.print(counts)
+    console.print(f"Wrote {out}/train.jsonl, eval.jsonl and rejected.jsonl "
+                  "(the editor changes not used, with the reason).")
+
+
+@app.command("finetune-eval")
+def finetune_eval(
+    eval_jsonl: Path = typer.Argument(..., help="eval.jsonl from finetune-data."),
+    model: str = typer.Option("", "--model", help="Served model to score, e.g. jacow-refs."),
+    limit: int = typer.Option(0, "--limit", help="Score only the first N examples."),
+) -> None:
+    """Score the reference model against the editors, next to the rule-based formatter."""
+    from src.finetune.evaluate import evaluate
+
+    if model:
+        os.environ["LLM_ENABLED"] = "true"
+    console.print(evaluate(eval_jsonl, model or None, limit or None))
 
 if __name__ == "__main__":
     app()

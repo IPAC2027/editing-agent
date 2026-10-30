@@ -1,0 +1,292 @@
+[
+ {
+  "n": 1,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 2,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 3,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 4,
+  "tier": "suggest",
+  "after": "F. Nkemdirim, G. Petrova, and H. Castellanos, “Brightness of radiation from undulators and bending mag-nets”, J. Synchrotron Radiat., vol. 22, pp. 288-316, 2015. doi:10.5555/example.0002"
+ },
+ {
+  "n": 5,
+  "tier": "suggest",
+  "after": "I.-J. Ferreira, “Coherence properties of synchrotron radiation”, Nucl. Instrum. Methods Phys. Res. A, vol. 246, p. 71, 1986."
+ },
+ {
+  "n": 6,
+  "tier": "auto",
+  "after": "K. M. Yamashita and L. N. Oyelaran, “Generation of coherent radiation by a relativistic electron beam”, Part. Accel., vol. 10, pp. 207-216, 1980."
+ },
+ {
+  "n": 7,
+  "tier": "auto",
+  "after": "M. Mu, N. Nu, and O. Xi, “Collective instabilities in the high-gain regime”, Optics Comm., vol. 50, pp. 373-378, 1984."
+ },
+ {
+  "n": 8,
+  "tier": "auto",
+  "after": "P. Novak et al., “First lasing of an angstrom-wavelength free-electron laser”, Nat. Moretti., vol. 4, pp. 641-647, 2010. doi:10.5555/example.0003"
+ },
+ {
+  "n": 9,
+  "tier": "auto",
+  "after": "Q. Pi, R. Marchetti, S. Dubois, and T. Aaltonen, “Demonstration of large bandwidth hard X-ray pulses”, Phys. Rev. Letters., vol. 124, p. 074801, 2020."
+ },
+ {
+  "n": 10,
+  "tier": "suggest",
+  "after": "U.-V Upsilon et al., “Single-shot spectrometer for hard X-rays”, J. Sjoberg Radiat., vol. 32, p. 246, 2025."
+ },
+ {
+  "n": 11,
+  "tier": "auto",
+  "after": "W. Kowalczyk et al., “Updates on hard X-ray self-seeding”, Sjoberg Radiat. News, vol. 38, pp. 11-16, 2025."
+ },
+ {
+  "n": 12,
+  "tier": "auto",
+  "after": "X.-Y. Rahimi, “Generation of intense uv radiation by subharmonically seeded single-pass free-electron lasers”, Phys. Rev. A, vol. 44, pp. 5178-5193, 1991."
+ },
+ {
+  "n": 13,
+  "tier": "suggest",
+  "after": "Z. Tanaka, “Et al”, Science, vol. 289, pp. 932-934, 2000. doi:10.5555/example.0004"
+ },
+ {
+  "n": 14,
+  "tier": "suggest",
+  "after": "A. Mbeki et al., “Two-stage seeded soft-X-ray free-electron laser”, Nat. Photonics, vol. 7, p. 913, 2013."
+ },
+ {
+  "n": 15,
+  "tier": "auto",
+  "after": "B. Olsen et al., “Coherent soft X-ray pulses from echo-enabled harmonic generation”, Nat. Photonics, vol. 13, no. 8, pp. 555-561, 2019."
+ },
+ {
+  "n": 16,
+  "tier": "auto",
+  "after": "C. Rivera, D. Halvorsen, and E. Kaminski, “Diffraction-limited storage rings - a window to the science of tomorrow”, J. Sjoberg Radiat., vol. 21, pp. 837-842, 2014."
+ },
+ {
+  "n": 17,
+  "tier": "auto",
+  "after": "F. Duarte, “Sjoberg radiation facilities”, Nature Structural Biology, vol. 5, pp. 614-617, 1998. doi:10.5555/example.0005"
+ },
+ {
+  "n": 18,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 19,
+  "tier": "suggest",
+  "after": "G. Ishikawa et al., “A closer look into magnetism: Opportunities with synchrotron radiation”, IEEE Trans. Magnetics, vol. 45, pp. 15-57, 2009."
+ },
+ {
+  "n": 20,
+  "tier": "auto",
+  "after": "H. Bergmann et al., “Brilliant X-rays using a two-stage plasma insertion device”, Sci. Rep., vol. 7, p. 3985, 2017."
+ },
+ {
+  "n": 21,
+  "tier": "suggest",
+  "after": "I. Fontaine et al., “Short-wavelength free-electron laser sources and science: A review”, Rep. Prog. Phys., vol. 80, p. 115901, 2017."
+ },
+ {
+  "n": 22,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 23,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 24,
+  "tier": "suggest",
+  "after": "O. Moretti, P. Sandoval, Q. Takahashi, and R. Lemieux, “Inhomogeneous broadening in high-gain operation: A simple parametrization”, Il Nuovo Cimento D, vol. 11, pp. 393-404, 1989."
+ },
+ {
+  "n": 25,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 26,
+  "tier": "suggest",
+  "after": "T. Szabo, U. Okafor, and V. Delgado, “The general solution of the eigenvalue problem for a high-gain FEL”, Nucl. Instrum. Methods Phys. Res. A, vol. 475, pp. 86-91, 2001."
+ },
+ {
+  "n": 27,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 28,
+  "tier": "auto",
+  "after": "Z. Oyelaran, A. Hartmann, and B. Nakamura, “Coherence properties of the radiation from an X-ray free electron laser”, Opt. Comm., vol. 281, pp. 1179-1188, 2008."
+ },
+ {
+  "n": 29,
+  "tier": "auto",
+  "after": "C.-D. Oyelowo, “Characteristics of synchrotron radiation”, AIP Conf. Proc., vol. 184, pp. 565-632, 1989."
+ },
+ {
+  "n": 30,
+  "tier": "auto",
+  "after": "E. Maisonneuve et al., “Yamashita design for a laser-plasma-based free-electron-laser”, Phys. Rep., vol. 937, pp. 1-73, 2021."
+ },
+ {
+  "n": 31,
+  "tier": "auto",
+  "after": "F. Thorvaldsen and G. Grabowski, “Universal function for the brilliance of undulator radiation”, J. Sjoberg Radiat., vol. 16, pp. 380-386, 2009."
+ },
+ {
+  "n": 32,
+  "tier": "suggest",
+  "after": "H. Esposito and I. Watanabe, “Self-amplified spontaneous emission for short wavelength coherent radiation”, Nucl. Instrum. Methods Phys. Res. A, vol. 331, p. 359, 1993."
+ },
+ {
+  "n": 33,
+  "tier": "auto",
+  "after": "J. Lindgren, K. Barbosa, and L. Kuznetsov, “Output power and transverse coherence of X-ray free electron lasers”, Opt. Comm., vol. 281, pp. 4727-4734, 2008."
+ },
+ {
+  "n": 34,
+  "tier": "auto",
+  "after": "M. Alvarez, “Effect of finite pulse length and laser frequency chirp on seeding”, Phys. Rev. Special Topics Accel. Beams, vol. 15, p. 030702, 2011. doi:10.5555/example.0007"
+ },
+ {
+  "n": 35,
+  "tier": "auto",
+  "after": "N. Hamalainen et al., “Pulse duration of seeded free-electron lasers”, Phtys. Rev. X, vol. 7, p. 021043, 2017."
+ },
+ {
+  "n": 36,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 37,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 38,
+  "tier": "suggest",
+  "after": "P. Beaulieu et al., “Design strategies for a versatile offer to the user community”, Nucl. Instrum. Methods Phys. Res. A, vol. 1060, p. 169007, 2024."
+ },
+ {
+  "n": 39,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 40,
+  "tier": "suggest",
+  "after": "Q. Kristensen, R. Marchesi, S. Oduya, and T. Pettersson, “Lattice design for the example-II light source storage ring”, Phys. Rev. Accel. Beams, vol. 27, p. 110704, 2024."
+ },
+ {
+  "n": 41,
+  "tier": "suggest",
+  "after": "U. V. Lindqvist and W. X. Okonkwo, “Pushing storage ring brightness towards the limit of its magnetic lat-tice”, Nucl. Instrum. Methods Phys. Res. A, vol. 884, pp. 92-96, 2018."
+ },
+ {
+  "n": 42,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 43,
+  "tier": "auto",
+  "after": "Z. Vasquez et al., “Example light source upgrade lattice design”, Phys. Rev. Accel. Beams, vol. 26, p. 091601, 2023."
+ },
+ {
+  "n": 44,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 45,
+  "tier": "suggest",
+  "after": "A. Brennan et al., “EXAMPLE IV: The ultra-low emittance source project”, J. Synchrotron Radiat., vol. 25, pp. 1277-1290, 2018."
+ },
+ {
+  "n": 46,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 47,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 48,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 49,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 50,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 51,
+  "tier": "auto",
+  "after": "E. Castellanos, F. Ferreira, G. Yamashita, H. Oyelaran, and I. Novak, “Sensitivity of echo-enabled harmonic generation to seed power”, in Proc. FEL’23, Trieste, Italy, Aug. 2023. doi:10.5555/JACoW-FEL2022-TUP73"
+ },
+ {
+  "n": 52,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 53,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 54,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 55,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 56,
+  "tier": null,
+  "after": null
+ },
+ {
+  "n": 57,
+  "tier": "auto",
+  "after": "L. Aaltonen and M. Sjoberg, “Example hard X-ray FEL facility progress status”, in Proc. IPAC’24, Geneva, Switzerland, Jul. 2024. doi:10.5555/JACoW-IPAC2024-TUZN1"
+ },
+ {
+  "n": 58,
+  "tier": null,
+  "after": null
+ }
+]

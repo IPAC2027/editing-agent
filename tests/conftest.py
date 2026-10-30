@@ -1,16 +1,16 @@
-"""Shared pytest fixtures and offline guards for the src/refs/ tests."""
+"""Shared pytest fixtures and offline guards."""
 
 import os
 
-# Disable network-dependent loaders for the entire test run.  L1 (the
-# hand-curated JACoW journal table) is always available, so the
-# normalize_journal tests still cover the most important code path.
+# The whole suite runs offline: the reference formatter makes no lookups
+# (src.references reads AIAGENT_OFFLINE) and its abbreviation lists are not
+# downloaded.  Tests that need the network are marked and skipped.
+os.environ.setdefault("AIAGENT_OFFLINE", "1")
 os.environ.setdefault("AIAGENT_DISABLE_JABREF", "1")
 os.environ.setdefault("AIAGENT_DISABLE_LTWA", "1")
+os.environ.setdefault("JACOW_DISABLE_JABREF", "1")
 
-import pytest
-
-from src.refs.conference_db import JacoWConnector
+import pytest  # noqa: E402
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -22,9 +22,3 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         if "network" in item.keywords:
             item.add_marker(skip_network)
-
-
-@pytest.fixture
-def connector() -> JacoWConnector:
-    """Offline JacoWConnector (does not fetch jacow-events.bib)."""
-    return JacoWConnector(allow_network=False)

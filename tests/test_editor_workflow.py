@@ -74,11 +74,11 @@ def test_reported_edits_match_the_file_on_disk(submission: Path):
     out = submission / "aiagent_prescreen"
 
     editset = EditSet.read(out / "edits.json")
-    plan = json.loads((out / "repair_plan.json").read_text())
-    report = json.loads((out / "report.json").read_text())
-    original = (submission / "Source_Files" / "TEST001.tex").read_text()
-    edited = (out / f"{paper.paper_id}_edited.tex").read_text()
-    patch = (out / "changes.patch").read_text()
+    plan = json.loads((out / "repair_plan.json").read_text(encoding="utf-8"))
+    report = json.loads((out / "report.json").read_text(encoding="utf-8"))
+    original = (submission / "Source_Files" / "TEST001.tex").read_text(encoding="utf-8")
+    edited = (out / f"{paper.paper_id}_edited.tex").read_text(encoding="utf-8")
+    patch = (out / "changes.patch").read_text(encoding="utf-8")
 
     assert len(plan["repairs"]) == len(editset.edits)
     assert report["summary"]["edits"]["total"] == len(editset.edits)
@@ -97,11 +97,11 @@ def test_every_edit_has_its_own_applicable_patch(submission: Path):
     paper = _run(submission)
     out = submission / "aiagent_prescreen"
     editset = EditSet.read(out / "edits.json")
-    index = json.loads((out / "edits" / "index.json").read_text())
+    index = json.loads((out / "edits" / "index.json").read_text(encoding="utf-8"))
     assert len(index) == len(editset.edits)
     for entry in index:
         patch = out / entry["patch"]
-        assert patch.exists() and patch.read_text().strip()
+        assert patch.exists() and patch.read_text(encoding="utf-8").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ def test_apply_takes_only_the_accepted_subset(submission: Path):
     _run(submission)
     out = submission / "aiagent_prescreen"
     editset = EditSet.read(out / "edits.json")
-    original = (submission / "Source_Files" / "TEST001.tex").read_text()
+    original = (submission / "Source_Files" / "TEST001.tex").read_text(encoding="utf-8")
 
     suggested = editset.suggested
     assert suggested, "the fixture should produce at least one decision"
@@ -123,14 +123,14 @@ def test_apply_takes_only_the_accepted_subset(submission: Path):
     )
     assert not unknown
     assert chosen.id in applied
-    result = target.read_text()
+    result = target.read_text(encoding="utf-8")
     assert chosen.after in result
     # Every *other* suggestion stayed out.
     for other in suggested[1:]:
         assert result == result  # nothing asserted about text that may overlap
         assert other.id not in applied
     # The author's source is never touched unless asked.
-    assert (submission / "Source_Files" / "TEST001.tex").read_text() == original
+    assert (submission / "Source_Files" / "TEST001.tex").read_text(encoding="utf-8") == original
 
 
 def test_apply_from_a_decisions_file(submission: Path):
@@ -167,7 +167,7 @@ def test_apply_with_no_arguments_takes_only_the_auto_tier(submission: Path):
 def test_auto_tier_fixes_units_and_doi_presentation(submission: Path):
     _run(submission)
     out = submission / "aiagent_prescreen"
-    edited = (out / "TEST001_edited.tex").read_text()
+    edited = (out / "TEST001_edited.tex").read_text(encoding="utf-8")
 
     assert "\\qty{250}{pC}" in edited
     assert "\\qty{50}{nm}" in edited
@@ -183,7 +183,7 @@ def test_auto_tier_fixes_units_and_doi_presentation(submission: Path):
 
 def test_auto_tier_leaves_protected_regions_alone(submission: Path):
     _run(submission)
-    edited = (submission / "aiagent_prescreen" / "TEST001_edited.tex").read_text()
+    edited = (submission / "aiagent_prescreen" / "TEST001_edited.tex").read_text(encoding="utf-8")
 
     # A matrix index is not a citation.
     assert "A[1,2] must not be touched" in edited
@@ -255,7 +255,7 @@ def test_reorder_is_offered_as_a_single_structural_decision(submission: Path):
         submission, accept=[plan.reorder.id], compile=False,
     )
     assert plan.reorder.id in applied
-    edited = (out / "TEST001_edited.tex").read_text()
+    edited = (out / "TEST001_edited.tex").read_text(encoding="utf-8")
     keys = re.findall(r"\\bibitem\s*\{([^}]+)\}", edited)
     assert keys == ["first", "second"]
     # Reordering alone must not change a single character of entry text.
@@ -265,7 +265,7 @@ def test_reorder_is_offered_as_a_single_structural_decision(submission: Path):
 def test_review_html_offers_one_decision_per_suggestion(submission: Path):
     _run(submission)
     out = submission / "aiagent_prescreen"
-    html = (out / "review.html").read_text()
+    html = (out / "review.html").read_text(encoding="utf-8")
     editset = EditSet.read(out / "edits.json")
     from src.autofix.structural import StructuralPlan
 

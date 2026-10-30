@@ -1,0 +1,532 @@
+{
+  "schema_version": "1.0",
+  "id": "jacow",
+  "version": "1.1.0",
+  "title": "JACoW LaTeX and Annex B editorial rules",
+  "description": "Initial agent-operational rule pack for JACoW/IPAC papers. Rules preserve source provenance and distinguish deterministic actions from editor judgement.",
+  "sources": [
+    {
+      "id": "jacow_latex",
+      "title": "JACoW Writing a paper in LaTeX resources",
+      "url": "https://ipac-docs.jacow.org/Paper/Writing/latex/",
+      "retrieved_on": "2026-07-16"
+    },
+    {
+      "id": "annex_b_local",
+      "title": "JACoW MS Word Style Guide, Annex B operational transcription",
+      "url": "jacow_reference_rules_appendixB.md",
+      "retrieved_on": "repository snapshot"
+    },
+    {
+      "id": "style_guide",
+      "title": "Style Guide for JACoW Conference Papers (MS Word version)",
+      "url": "https://www.jacow.org",
+      "retrieved_on": "2026-10-19"
+    },
+    {
+      "id": "jacow_paper_formatting_skill",
+      "title": "jacow-paper-formatting skill (team-supplied rule reference and audit script)",
+      "url": "src/knowledge/jacow-paper-formatting-skill/SKILL.md",
+      "retrieved_on": "2026-10-23"
+    }
+  ],
+  "rules": [
+    {
+      "id": "JACOW-TEMPLATE-01",
+      "title": "Use the current JACoW class file",
+      "category": "template",
+      "applies_to": [
+        "latex"
+      ],
+      "summary": "Use the current jacow.cls supplied by JACoW rather than an older distribution copy.",
+      "agent_guidance": {
+        "action": "Compare the detected template version with the configured current version and report evidence.",
+        "automation": "report_only",
+        "escalate_when": "the source does not expose a version or updating the class could change layout"
+      },
+      "sources": [
+        "jacow_latex"
+      ],
+      "tags": [
+        "class",
+        "template",
+        "version"
+      ]
+    },
+    {
+      "id": "JACOW-TITLE-01",
+      "title": "Protect intentional lowercase title text",
+      "category": "template",
+      "applies_to": [
+        "latex"
+      ],
+      "summary": "JACoW title and section commands uppercase their content; preserve intentional lowercase acronyms or units with \\NoCaseChange.",
+      "agent_guidance": {
+        "action": "Flag only unprotected tokens that must preserve mixed or lowercase rendering, such as acronyms, model names, or units; ordinary source title case is rendered uppercase by the class.",
+        "automation": "suggest_only",
+        "escalate_when": "the agent cannot distinguish a proper noun from ordinary title-case prose"
+      },
+      "sources": [
+        "jacow_latex"
+      ],
+      "tags": [
+        "title",
+        "section",
+        "NoCaseChange"
+      ]
+    },
+    {
+      "id": "JACOW-UNIT-01",
+      "title": "Typeset quantities with a non-breaking thin space",
+      "category": "units",
+      "applies_to": [
+        "latex",
+        "references"
+      ],
+      "summary": "Write the number before the unit and separate them with \\, or a siunitx quantity command such as \\qty or \\SI; do not split a quantity across a line break.",
+      "agent_guidance": {
+        "action": "Detect adjacent number-unit pairs and validate spacing, order, and unit casing.",
+        "automation": "safe_fix_when_the_unit_token_is_unambiguous",
+        "escalate_when": "the expression is mathematical, uses an ambiguous symbol, or contains temperature or angle exceptions"
+      },
+      "sources": [
+        "jacow_latex"
+      ],
+      "tags": [
+        "siunitx",
+        "spacing",
+        "quantity"
+      ]
+    },
+    {
+      "id": "JACOW-EQUATION-01",
+      "title": "Use equation-aware references",
+      "category": "template",
+      "applies_to": [
+        "latex"
+      ],
+      "summary": "Prefer \\eqref{label} for equation references so numbering is rendered with parentheses.",
+      "agent_guidance": {
+        "action": "Identify parenthesized \\ref references that target equation labels and offer \\eqref as a candidate.",
+        "automation": "suggest_only",
+        "escalate_when": "the label type cannot be determined from the source"
+      },
+      "sources": [
+        "jacow_latex"
+      ],
+      "tags": [
+        "equation",
+        "cross-reference"
+      ]
+    },
+    {
+      "id": "ANNEXB-REFERENCE-01",
+      "title": "Maintain a numbered REFERENCES section",
+      "category": "references",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "References are numbered, begin at one, and are presented under a REFERENCES heading; in-text citations use bracketed ascending numbers.",
+      "agent_guidance": {
+        "action": "Check section presence, citation-link integrity, numbering, order, and bracket syntax deterministically.",
+        "automation": "safe_fix_for_bracket_spacing_and_known_bibitem_reordering_only",
+        "escalate_when": "renumbering would require changing ambiguous free-text citations"
+      },
+      "sources": [
+        "annex_b_local",
+        "jacow_latex"
+      ],
+      "tags": [
+        "citation",
+        "numbering",
+        "references"
+      ]
+    },
+    {
+      "id": "ANNEXB-AUTHOR-01",
+      "title": "Format reference author lists consistently",
+      "category": "references",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "Use initials and surnames; use a serial comma for three or more authors and et al. for more than six authors.",
+      "agent_guidance": {
+        "action": "Validate punctuation and author-count conventions after parsing an author list.",
+        "automation": "safe_fix_for_unambiguous_et_al_punctuation_and_serial_comma_only",
+        "escalate_when": "author boundaries or the intended author roster are uncertain"
+      },
+      "sources": [
+        "annex_b_local",
+        "jacow_latex"
+      ],
+      "tags": [
+        "authors",
+        "et al",
+        "punctuation"
+      ]
+    },
+    {
+      "id": "ANNEXB-TITLE-01",
+      "title": "Use sentence case for referenced paper titles",
+      "category": "references",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "Titles of cited papers use sentence case while retaining proper nouns and acronyms.",
+      "agent_guidance": {
+        "action": "Use a deterministic title-case heuristic, then request an LLM or editor review only for proposed conversion.",
+        "automation": "never_auto_fix_without_preserving_proper_nouns_and_acronyms",
+        "escalate_when": "capitalization could change a proper noun, acronym, chemical name, or product name"
+      },
+      "sources": [
+        "annex_b_local",
+        "jacow_latex"
+      ],
+      "tags": [
+        "title",
+        "sentence case"
+      ]
+    },
+    {
+      "id": "ANNEXB-PROCEEDINGS-01",
+      "title": "Require key proceedings fields",
+      "category": "references",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "Published proceedings references identify Proc. CONF’YY, venue, month and year, and page range; DOI follows when known.",
+      "agent_guidance": {
+        "action": "Classify proceedings records and report missing required fields with the parsed evidence.",
+        "automation": "format_existing_fields_only",
+        "escalate_when": "venue, date, pages, paper ID, or DOI would need external metadata"
+      },
+      "sources": [
+        "annex_b_local",
+        "jacow_latex"
+      ],
+      "tags": [
+        "proceedings",
+        "pages",
+        "venue"
+      ]
+    },
+    {
+      "id": "ANNEXB-DOI-01",
+      "title": "Normalize DOI presentation without inventing identifiers",
+      "category": "references",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "When a verified DOI exists, present it as one atomic doi:<identifier> token at the end of the entry; retain a URL only when a DOI is unavailable.",
+      "agent_guidance": {
+        "action": "Normalize DOI prefixes and DOI URLs; use lookup results only when provenance and title/author matching are recorded.",
+        "automation": "safe_fix_existing_doi_format_only",
+        "escalate_when": "a DOI is missing, lookup candidates disagree, or the reference identity is uncertain"
+      },
+      "sources": [
+        "annex_b_local",
+        "jacow_latex"
+      ],
+      "tags": [
+        "doi",
+        "url",
+        "metadata"
+      ]
+    },
+    {
+      "id": "JACOW-BIBLATEX-01",
+      "title": "Prefer BibLaTeX/Biber for generated bibliographies",
+      "category": "references",
+      "applies_to": [
+        "latex"
+      ],
+      "summary": "JACoW guidance recommends BibLaTeX with BibTeX or Biber when its generated bibliography can achieve the requested formatting.",
+      "agent_guidance": {
+        "action": "Detect bibliography mode and explain the benefits and migration impact of BibLaTeX.",
+        "automation": "report_only",
+        "escalate_when": "migration would require changing a submission's bibliography workflow"
+      },
+      "sources": [
+        "jacow_latex"
+      ],
+      "tags": [
+        "biblatex",
+        "biber",
+        "bibliography"
+      ]
+    },
+    {
+      "id": "JACOW-JOURNAL-01",
+      "title": "Use ISO-4 journal abbreviations",
+      "category": "references",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "Use ISO-4 journal abbreviations and, for BibLaTeX data, keep the abbreviated form in shortjournal where appropriate.",
+      "agent_guidance": {
+        "action": "Normalize only when an authoritative abbreviation mapping is available and retain the original title as evidence.",
+        "automation": "safe_fix_when_the_mapping_is_unambiguous",
+        "escalate_when": "multiple journals share a similar title or no authoritative mapping is available"
+      },
+      "sources": [
+        "jacow_latex",
+        "annex_b_local"
+      ],
+      "tags": [
+        "journal",
+        "ISO-4",
+        "shortjournal"
+      ]
+    },
+    {
+      "id": "JACOW-PDF-01",
+      "title": "Use the JACoW page size and margins, without page numbers",
+      "category": "layout",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "Pages are 595 x 792 pt; margins are 19 mm top and bottom and 20 mm left and right; papers carry no page numbers.",
+      "agent_guidance": {
+        "action": "Measure page size, the extent of text and images, and lone numbers in the head or foot of each page of the author's PDF (PDF-SIZE-01, PDF-MARGIN-01, PDF-PAGENUM-01).",
+        "automation": "report_only",
+        "escalate_when": "the PDF cannot be read, which is reported as NOT CHECKED (PDF-00)"
+      },
+      "sources": [
+        "style_guide"
+      ],
+      "tags": [
+        "page size",
+        "margins",
+        "page numbers",
+        "pdf"
+      ]
+    },
+    {
+      "id": "JACOW-FONT-01",
+      "title": "Embed every font and avoid bitmap fonts",
+      "category": "layout",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "All fonts, including those inside figures, are embedded; Type 3 bitmap fonts are avoided.",
+      "agent_guidance": {
+        "action": "Inspect the fonts used on each page and inside figure form objects (PDF-FONT-01, PDF-FONT-02).",
+        "automation": "report_only",
+        "escalate_when": "a font is listed but draws no glyphs"
+      },
+      "sources": [
+        "style_guide"
+      ],
+      "tags": [
+        "fonts",
+        "embedding",
+        "pdf"
+      ]
+    },
+    {
+      "id": "JACOW-LINK-01",
+      "title": "Hyperlink DOIs only",
+      "category": "references",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "DOIs are hyperlinked; other URLs may appear as plain text but must not be hyperlinked.",
+      "agent_guidance": {
+        "action": "List web hyperlinks in the author's PDF that do not point to doi.org (PDF-LINK-01), and DOIs split across two lines (PDF-DOI-01).",
+        "automation": "report_only",
+        "escalate_when": "the link is part of a figure or an author e-mail address"
+      },
+      "sources": [
+        "style_guide",
+        "annex_b_local"
+      ],
+      "tags": [
+        "doi",
+        "url",
+        "hyperlink"
+      ]
+    },
+    {
+      "id": "JACOW-TEXT-01",
+      "title": "Cite figures, tables and equations in the JACoW forms; keep the abstract free of citations",
+      "category": "text",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "Fig. 1 mid-sentence and Figure 1 at the start of a sentence; Table 1 is never abbreviated; Eq. (1) mid-sentence; the abstract cites no references.",
+      "agent_guidance": {
+        "action": "Match callouts in the body text and citations in the abstract (TXT-CITE-01, TXT-TAB-01, TXT-FIG-01, TXT-EQ-01, TXT-ABS-01).",
+        "automation": "suggest_only",
+        "escalate_when": "the match sits inside a quotation, code or a figure label"
+      },
+      "sources": [
+        "style_guide"
+      ],
+      "tags": [
+        "callout",
+        "figure",
+        "table",
+        "equation",
+        "abstract"
+      ]
+    },
+    {
+      "id": "ANNEXB-FORMS-01",
+      "title": "Cite unpublished and submitted papers in their Annex B forms",
+      "category": "references",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "An unpublished paper is 'presented at …, unpublished' without 'in Proc.'; a submitted paper does not name the journal; papers with more than six authors use 'et al.'.",
+      "agent_guidance": {
+        "action": "Reformat through the reference formatter (Word and \\bibitem references, FMT-REF-01, FMT-REF-02 and FMT-REF-03), and match the unpublished and submitted forms in .bib-driven references (REF-FORM-01, REF-FORM-02).",
+        "automation": "suggest_only",
+        "escalate_when": "the reference type is ambiguous"
+      },
+      "sources": [
+        "annex_b_local"
+      ],
+      "tags": [
+        "unpublished",
+        "submitted",
+        "et al."
+      ]
+    },
+    {
+      "id": "JACOW-WORD-FRONT-01",
+      "title": "Title in capitals, authors as initials and surnames, units joined by a non-breaking space",
+      "category": "formatting",
+      "applies_to": [
+        "word"
+      ],
+      "summary": "The title is 14 pt bold uppercase, keeping the case of units and names (GeV, SwissFEL); authors are 'Initials Surname' separated by commas; a non-breaking space precedes each unit, written with its standard symbol.",
+      "agent_guidance": {
+        "action": "Read the title, author line and body paragraphs of the Word file (FMT-TITLE-02, WORD-TITLE-01, FMT-AUTH-01, WORD-AUTH-02, WORD-UNIT-01, WORD-UNIT-02).",
+        "automation": "report_only",
+        "escalate_when": "a unit spelling is ambiguous (mV/MV, mT/MT), which is never case-corrected"
+      },
+      "sources": [
+        "style_guide"
+      ],
+      "tags": [
+        "title",
+        "authors",
+        "units",
+        "word"
+      ]
+    },
+    {
+      "id": "ANNEXB-INTEGRITY-01",
+      "title": "Every reference exists and its DOI is its own",
+      "category": "references",
+      "applies_to": [
+        "latex",
+        "word"
+      ],
+      "summary": "A cited DOI must resolve to the cited work; a reference no index carries is checked by hand. Unconfirmed references are normal for theses and reports.",
+      "agent_guidance": {
+        "action": "Report the reference formatter's integrity verdict for each reference (REF-INT-01 doi_mismatch, REF-INT-02 suspected_fabricated, REF-INT-03 unverifiable, the last only when lookups ran).",
+        "automation": "report_only",
+        "escalate_when": "always, for doi_mismatch and suspected_fabricated"
+      },
+      "sources": [
+        "annex_b_local"
+      ],
+      "tags": [
+        "doi",
+        "integrity",
+        "references"
+      ]
+    },
+    {
+      "id": "JACOW-WORD-TEXT-01",
+      "title": "Main text of Word papers: headings, captions, callouts, units, acronyms",
+      "category": "text",
+      "applies_to": [
+        "word"
+      ],
+      "summary": "Unnumbered headings, Title Case subsections, 'Figure 1:' captions ending with a full stop, heading-style table captions without one, callouts and units as in the LaTeX rules, acronyms expanded at first use.",
+      "agent_guidance": {
+        "action": "Write mechanical fixes as tracked changes (WORD-UNIT-01, TXT-CITE-01, TXT-TAB-01, TXT-FIG-01 automatically; WORD-UNIT-02, TXT-EQ-01, WORD-TITLE-01, WORD-HEAD-01, WORD-HEAD-02, WORD-CAP-01, WORD-CAP-02, WORD-CAP-03 as suggestions) and report WORD-STYLE-01 and TXT-ACR-01.",
+        "automation": "suggest_only",
+        "escalate_when": "the paragraph contains a hyperlink, field, equation or tracked change; it is then reported, never rewritten"
+      },
+      "sources": [
+        "style_guide"
+      ],
+      "tags": [
+        "word",
+        "headings",
+        "captions",
+        "units",
+        "acronyms"
+      ]
+    },
+    {
+      "id": "JACOW-WORD-LAYOUT-01",
+      "title": "Paragraph and heading layout in Word",
+      "category": "layout",
+      "applies_to": [
+        "word"
+      ],
+      "summary": "Body paragraphs 10 pt, justified, first line indented 0.33 cm, widow/orphan control on; subsection headings 12 pt italic, left aligned; no column break after a heading; third-level headings run in.",
+      "agent_guidance": {
+        "action": "Tracked formatting changes: WORD-PARA-01, WORD-PARA-02 and WORD-HEAD-03 automatically; WORD-PARA-03, WORD-PARA-04 and WORD-HEAD-05 as suggestions. Report WORD-HEAD-04 and the skill audit (WORD-LAYOUT-01, WORD-FONT-01, WORD-LINK-01, WORD-REFSPACE-01 and others).",
+        "automation": "suggest_only",
+        "escalate_when": "the paragraph is a caption, list item or equation"
+      },
+      "sources": [
+        "style_guide",
+        "jacow_paper_formatting_skill"
+      ],
+      "tags": [
+        "layout",
+        "paragraphs",
+        "headings",
+        "word"
+      ]
+    }
+  ],
+  "common_editor_decisions": [
+    {
+      "id": "EDITOR-DECISION-01",
+      "decision": "Do not invent bibliographic metadata.",
+      "policy": "Missing authors, dates, venue, pages, paper IDs, and DOI values require an evidence-backed lookup or human review.",
+      "sources": [
+        "annex_b_local"
+      ]
+    },
+    {
+      "id": "EDITOR-DECISION-02",
+      "decision": "Deterministic evidence overrides an unsupported model suggestion.",
+      "policy": "The agent may propose an LLM-assisted repair only when it cites the applicable rule and source evidence; otherwise leave it pending editor review.",
+      "sources": [
+        "annex_b_local"
+      ]
+    },
+    {
+      "id": "EDITOR-DECISION-03",
+      "decision": "Only retain repairs that preserve build validity.",
+      "policy": "A repair batch remains pending until the edited source is compiled when compilation is available; compile failures must be surfaced with the repair evidence.",
+      "sources": [
+        "jacow_latex"
+      ]
+    }
+  ],
+  "extension_guide": {
+    "add_a_version": "Copy this file to the next semantic version, retain prior rule IDs when their meaning is unchanged, and add source provenance for every changed rule.",
+    "add_a_rule": "Use a stable ID, narrow applicability, an operational summary, deterministic action guidance, automation policy, escalation condition, and source IDs.",
+    "avoid": "Do not store unsourced model advice as a rule or convert editor decisions into automatic fixes without validation."
+  }
+}

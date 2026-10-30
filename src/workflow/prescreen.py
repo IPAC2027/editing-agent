@@ -23,6 +23,7 @@ Two invariants hold by construction, and are asserted by the test suite:
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -278,11 +279,35 @@ def prescreen(
     reference_checks.run_all(paper)
     formatting_checks.run_all(paper)
 
+    # Body text and reference forms (shared with the Word path).
+    from src.checks import body_checks
+    try:
+        tex_source = paper.source_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        tex_source = ""
+    if tex_source:
+        abstract = body_checks.latex_abstract(tex_source)
+        body = body_checks.latex_to_text(body_checks.latex_body(tex_source))
+        paper.findings.extend(body_checks.check_body_text(
+            re.split(r"\n\s*\n", body),
+            body_checks.latex_to_text(abstract) if abstract else None,
+        ))
+    paper.findings.extend(body_checks.check_reference_forms(
+        ((ref.n, ref.raw_text or "") for ref in paper.references),
+        attach_to_reference=False,
+    ))
+
+    # The author's own PDF: page size, margins, fonts, links, page numbers.
+    from src.checks.pdf_checks import find_author_pdf, run_pdf_checks
+    author_pdf = find_author_pdf(folder)
+    if author_pdf is not None:
+        paper.findings.extend(run_pdf_checks(author_pdf))
+
     # --- Edits (things the tool can do to the bytes) ---------------------
     from src.autofix.latex_edits import all_source_edits
     from src.autofix.reference_edits import bib_field_edits, bibitem_rewrite_edits
     from src.autofix.structural import StructuralPlan, plan_reorder
-    from src.refs.text_utils import lowercase_evidence
+    from src.references import lowercase_evidence
 
     parsed = paper.__dict__.get("_pt")
     evidence_words = lowercase_evidence(source)

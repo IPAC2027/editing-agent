@@ -42,6 +42,9 @@ class WordReference:
     # paragraph rewrite, and is reported instead of guessed at.
     paragraph_index: int = -1
     paragraph_count: int = 1
+    # Further paragraphs of the same entry — usually its DOI or URL on a line
+    # of its own — as (paragraph index, exact text).
+    continuations: list = field(default_factory=list)
     # The paragraph's text exactly as python-docx reports it, tabs and all.
     # ``raw_text`` is cleaned (tabs collapsed, non-breaking spaces normalised),
     # which is right for parsing and wrong for writing revisions: a tracked
@@ -105,11 +108,18 @@ def _is_ref_style(style_name: str) -> bool:
 
 
 def _is_ref_paragraph(style_name: str, text: str) -> bool:
-    """Return True if this paragraph looks like a reference entry."""
-    if _is_ref_style(style_name):
+    """Return True if this paragraph STARTS a reference entry.
+
+    A paragraph in a reference style but without "[n]" is the continuation of
+    the reference above — typically its DOI or URL on a line of its own
+    (one test paper: every reference had its link in the next paragraph).  Treating
+    the style alone as a new entry dropped those links: the entry could not
+    be parsed and was discarded.
+    """
+    if _REF_NUM_RE.match(text.strip()):
         return True
-    # Fallback: text starts with [n] pattern even if style is wrong
-    return bool(_REF_NUM_RE.match(text.strip()))
+    # A reference-styled paragraph in a list that is not numbered at all
+    return _is_ref_style(style_name) and not re.match(r"^(?:https?://|doi:|www\.)", text.strip(), re.I)
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +174,7 @@ def parse_word(doc_path: Path) -> ParsedWord:
 
     raw_ref_lines: list[tuple[int, str]] = []  # (para_idx, text)
     para_counts: list[int] = []                # paragraphs merged into each entry
+    para_extra: list[list] = []                # continuation paragraphs of each entry
     for i in range(ref_section_idx + 1, len(paragraphs)):
         para = paragraphs[i]
         txt = para.text.strip()
@@ -179,6 +190,7 @@ def parse_word(doc_path: Path) -> ParsedWord:
         if _is_ref_paragraph(style, txt):
             raw_ref_lines.append((i, txt))
             para_counts.append(1)
+            para_extra.append([])
             result.ref_paragraphs.append((i, txt))
         elif raw_ref_lines:
             # Continuation of previous reference (no [n] prefix, same section)
@@ -186,14 +198,16 @@ def parse_word(doc_path: Path) -> ParsedWord:
             prev_idx, prev_txt = raw_ref_lines[-1]
             raw_ref_lines[-1] = (prev_idx, prev_txt + " " + txt)
             para_counts[-1] += 1
+            para_extra[-1].append((i, para.text))
             result.ref_paragraphs[-1] = (prev_idx, prev_txt + " " + txt)
 
     # --- Pass 4: parse each reference entry ---
-    for (para_idx, raw), count in zip(raw_ref_lines, para_counts):
+    for (para_idx, raw), count, extra in zip(raw_ref_lines, para_counts, para_extra):
         ref = _parse_reference_entry(raw)
         if ref is not None:
             ref.paragraph_index = para_idx
             ref.paragraph_count = count
+            ref.continuations = extra
             ref.paragraph_text = paragraphs[para_idx].text
             result.references.append(ref)
 

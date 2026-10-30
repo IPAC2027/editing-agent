@@ -188,8 +188,17 @@ def unit_edits(source: str, file: str = "") -> list[Edit]:
     spans = protected_spans(source)
     edits: list[Edit] = []
 
-    siunitx = has_siunitx(source)
+    # House style decides between \qty{}{} and "~" (see src/house_style.py).
+    from src.house_style import load_house_style
+    units_style = load_house_style().units
+    siunitx = has_siunitx(source) if units_style != "tilde" else False
+    # Reference entries are rewritten whole by the reference engine; a unit
+    # edit inside one would overlap that rewrite and, being narrower, win —
+    # losing the reference fix ("in Proc. … unpublished" → "presented at").
+    bib = re.search(r"\\begin\{thebibliography\}.*?\\end\{thebibliography\}", source, re.DOTALL)
     for match in _NUMBER_UNIT_RE.finditer(source):
+        if bib and bib.start() <= match.start() < bib.end():
+            continue
         if _blocked(spans, *match.span()):
             continue
         unit = match.group("unit")

@@ -90,6 +90,21 @@ def test_every_check_the_agent_emits_has_plain_english():
         # "Needs a look" fallback without any test noticing.
         "CITE-ORDER-01", "CITE-TEXT-02", "TITLE-01", "AUTH-01", "DOI-REQ-01",
         "PROC-REQ-01", "PROC-REQ-02", "PROC-REQ-03",
+        # Shared PDF checks (Word and LaTeX)
+        "PDF-00", "PDF-SIZE-01", "PDF-MARGIN-01", "PDF-PAGENUM-01",
+        "PDF-FONT-01", "PDF-FONT-02", "PDF-LINK-01", "PDF-DOI-01",
+        # Shared body-text and reference-form checks
+        "TXT-ABS-01", "TXT-CITE-01", "TXT-TAB-01", "TXT-FIG-01", "TXT-EQ-01",
+        "REF-FORM-01", "REF-FORM-02",
+        # The reference engine (src/references.py)
+        "FMT-REF-02", "FMT-REF-03", "REF-INT-01", "REF-INT-02", "REF-INT-03",
+        # Word title, author and unit checks
+        "WORD-TITLE-01", "WORD-AUTH-02", "WORD-UNIT-01", "WORD-UNIT-02",
+        # Word main-text corrections and checks
+        "WORD-HEAD-01", "WORD-HEAD-02", "WORD-STYLE-01", "WORD-CAP-01",
+        "WORD-CAP-02", "WORD-CAP-03", "TXT-ACR-01",
+        # Paragraph/heading layout and the jacow-paper-formatting skill audit
+        "WORD-PARA-01", "WORD-PARA-02", "WORD-PARA-03", "WORD-PARA-04", "WORD-HEAD-03", "WORD-HEAD-04", "WORD-HEAD-05", "WORD-LAYOUT-01", "WORD-FONT-01", "WORD-FONT-02", "WORD-FONT-03", "WORD-LINK-01", "WORD-LINK-02", "WORD-PAGENUM-01", "WORD-FOOTNOTE-01", "WORD-REFSPACE-01", "WORD-TITLE-03", "WORD-AUDIT-01",
     }
     missing = sorted(emitted - set(plain.EXPLANATIONS))
     assert not missing, f"no plain-English explanation for: {missing}"
@@ -242,7 +257,7 @@ def test_the_letter_is_signed_with_the_name_from_the_desk(paper_folder: Path):
 def test_an_editor_works_through_a_paper_and_closes_it(paper_folder: Path):
     from src.edits import EditSet
 
-    original = (paper_folder / "Source_Files" / "AAA001.tex").read_text()
+    original = (paper_folder / "Source_Files" / "AAA001.tex").read_text(encoding="utf-8")
     editset = EditSet.read(paper_folder / "aiagent_prescreen" / "edits.json")
     suggestions = view(paper_folder)["decisions"]
     assert len(suggestions) >= 2, "the fixture should offer several decisions"
@@ -301,22 +316,22 @@ def test_an_editor_works_through_a_paper_and_closes_it(paper_folder: Path):
     assert "review_summary.md" in outcome["written"]
 
     out_dir = paper_folder / "aiagent_prescreen"
-    final = (out_dir / "AAA001_final.tex").read_text()
+    final = (out_dir / "AAA001_final.tex").read_text(encoding="utf-8")
     assert final == result
 
-    letter = (out_dir / "author_letter.txt").read_text()
+    letter = (out_dir / "author_letter.txt").read_text(encoding="utf-8")
     assert "Figure 2 axis labels are unreadable" in letter
     assert "A. Editor" in letter
     assert "\\includegraphics" not in letter, "the letter must not contain markup"
     assert "FMT-" not in letter, "the letter must not contain check ids"
 
-    summary = (out_dir / "review_summary.md").read_text()
+    summary = (out_dir / "review_summary.md").read_text(encoding="utf-8")
     assert "author confirmed their spelling is deliberate" in summary
     assert "Waiting on author" in summary
     assert "house style" in summary
 
     # --- the author's own file was never touched ----------------------
-    assert (paper_folder / "Source_Files" / "AAA001.tex").read_text() == original
+    assert (paper_folder / "Source_Files" / "AAA001.tex").read_text(encoding="utf-8") == original
 
     # --- and it shows up in the worklist as finished-with-the-author --
     row = next(r for r in worklist(paper_folder.parent) if r.paper_id == "AAA001")

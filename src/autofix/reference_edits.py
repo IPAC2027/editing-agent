@@ -13,7 +13,7 @@ here.
 **Whole-reference rewrites used to be unguarded.**  A reference was re-parsed
 into fields and re-emitted from a template, checked only for a handful of
 missing markers.  Every rewrite now goes through
-:func:`src.refs.verify.check_rewrite`, and a rewrite that fails is discarded
+:func:`jacow_formatter.check_rewrite`, and a rewrite that fails is discarded
 with the reason recorded as a finding — the editor is told the reference looks
 wrong *and* why the agent would not touch it, which is more useful than a
 damaged reference.
@@ -24,9 +24,8 @@ from __future__ import annotations
 import re
 
 from src.edits import Confidence, Edit, Evidence, Tier, make_edit
-from src.models import Finding, Paper, Reference, Severity
-from src.refs.text_utils import sent_case_report
-from src.refs.verify import check_rewrite, proper_noun_risk
+from src.models import Finding, Paper, Severity
+from src.references import check_rewrite, sent_case_report
 
 def _case_report(text: str, *, evidence: set[str] | None = None):
     """Sentence-case *text*, letting a model resolve abstentions if configured.
@@ -280,16 +279,16 @@ def bibitem_rewrite_edits(
     *,
     file: str = "",
     evidence_words: set[str] | None = None,
+    offline: bool = False,
 ) -> tuple[list[Edit], list[Finding]]:
     """Offer a JACoW-formatted rewrite of each ``\\bibitem`` body.
 
-    Always :attr:`Tier.SUGGEST` — a whole-reference rewrite is never applied
-    without a human looking at it — and always verified by
-    :func:`src.refs.verify.check_rewrite` first.  When verification fails the
-    rewrite is dropped and a finding explains what the formatter would have
-    damaged, so the editor knows to look at the reference themselves.
+    Every body goes through :func:`src.references.screen_reference` — the
+    same engine and the same tiers as a Word reference — after conversion to
+    plain text; the result is converted back with DOIs as ``\\doi{…}``.
+    A rewrite that fails ``check_rewrite`` is dropped and reported.
     """
-    from src.refs import JacoWConnector, format_ref, normalize_journal
+    from src.references import latex_to_plain, plain_to_latex, screen_reference
 
     edits: list[Edit] = []
     findings: list[Finding] = []
@@ -297,75 +296,17 @@ def bibitem_rewrite_edits(
     if not parsed or parsed.bibliography_env != "thebibliography":
         return edits, findings
 
-    by_key = {ref.key: ref for ref in paper.references if getattr(ref, "key", None)}
-    if not by_key:
-        return edits, findings
-
-    connector = JacoWConnector(allow_network=False)
-
-    for key, body_start, body_end in bibitem_spans(source):
-        reference = by_key.get(key)
-        if reference is None:
-            continue
-        record = _reference_to_record(reference, evidence_words)
-        if not record:
-            continue
-
-        if record.get("conference") and record.get("year"):
-            record = connector.complete_record(record, [])
-        substitutions: list[tuple[str, str]] = []
-        if record.get("journal"):
-            normalised = normalize_journal(record["journal"])
-            if normalised and normalised != record["journal"]:
-                # ISO-4 abbreviation is required by JACoW, so declare it rather
-                # than letting the verifier read it as dropped words.
-                substitutions.append((record["journal"], normalised))
-                record["journal"] = normalised
-
-        try:
-            formatted = format_ref(record, record.get("ref_type", "journal"))
-        except Exception as exc:  # noqa: BLE001
-            findings.append(Finding(
-                check_id="FMT-REF-01",
-                severity=Severity.INFO,
-                message=(
-                    f"Reference {{{key}}} could not be reformatted automatically "
-                    f"({type(exc).__name__}); left exactly as submitted."
-                ),
-            ))
-            continue
-
+    for number, (key, body_start, body_end) in enumerate(bibitem_spans(source), start=1):
         original_body = source[body_start:body_end]
-        original = original_body.strip()
-        rewritten = (formatted or "").strip()
-        if not rewritten or rewritten == original:
+        plain = latex_to_plain(original_body)
+        if not plain:
+            continue
+        result = screen_reference(plain, label=f"Reference {{{key}}}", offline=offline)
+        findings.extend(result.findings)
+        if result.after is None or result.tier is None:
             continue
 
-        verdict = check_rewrite(
-            original,
-            rewritten,
-            allow_case_change=False,
-            unsure_tokens=record.get("_unsure_tokens", ()),
-            allowed_substitutions=substitutions,
-        )
-        if not verdict.ok:
-            risky = proper_noun_risk(original, rewritten)
-            detail = verdict.reason
-            if risky:
-                detail += f" (words at risk: {', '.join(risky[:4])})"
-            findings.append(Finding(
-                check_id="FMT-REF-01",
-                severity=Severity.INFO,
-                message=(
-                    f"Reference {{{key}}}: a JACoW-style rewrite was computed but "
-                    f"rejected because it would have {detail}. The reference is "
-                    "unchanged — check it by hand if the formatting looks wrong."
-                ),
-                original=original[:240],
-            ))
-            continue
-
-        # Preserve the surrounding whitespace so the diff stays a body change.
+        rewritten = plain_to_latex(result.after)
         leading = original_body[: len(original_body) - len(original_body.lstrip())]
         trailing = original_body[len(original_body.rstrip()):]
         after = f"{leading}{rewritten}{trailing}"
@@ -374,6 +315,8 @@ def bibitem_rewrite_edits(
 
         edits.append(Edit(
             check_id="FMT-REF-01",
+            # A whole-reference rewrite of LaTeX source is always a decision:
+            # the conversion back to LaTeX is ours, not the author's.
             tier=Tier.SUGGEST,
             confidence=Confidence.LIKELY,
             file=file,
@@ -381,90 +324,16 @@ def bibitem_rewrite_edits(
             end=body_end,
             before=original_body,
             after=after,
-            message=(
-                f"Reference {{{key}}} reformatted to JACoW Annex B style. "
-                "Verified to preserve every number, DOI, word and capital in the original."
-            ),
+            message=result.message,
             rule="JACoW Annex B: reference layout",
-            evidence=Evidence(source="local-rule", detail="deterministic formatter"),
+            evidence=Evidence(
+                source=result.evidence_source if result.added_from else "local-rule",
+                detail=(f"added from {result.added_from}" if result.added_from
+                        else "jacow_formatter, verified by check_rewrite"),
+            ),
         ))
 
     return edits, findings
-
-
-def _reference_to_record(
-    reference: Reference,
-    evidence_words: set[str] | None = None,
-) -> dict | None:
-    """Map a :class:`Reference` onto the formatter's record dict.
-
-    Returns ``None`` when the minimum fields (authors, title, year) are absent —
-    the formatter has nothing to work with and guessing is exactly what this
-    codebase must not do.
-    """
-    authors_raw = " and ".join(reference.authors) if reference.authors else ""
-    if not authors_raw:
-        return None
-    title = (reference.title or "").strip()
-    if not title:
-        return None
-
-    date = reference.date or ""
-    month = ""
-    year = ""
-    match = re.match(r"^(\S+)\s+(\d{4})$", date)
-    if match:
-        month, year = match.group(1), match.group(2)
-    else:
-        found = re.search(r"\d{4}", date)
-        year = found.group(0) if found else ""
-    if not year:
-        return None
-
-    casing = _case_report(title, evidence=evidence_words)
-    record: dict = {
-        "authors_raw": authors_raw,
-        "title": casing.text if not casing.unsure else title,
-        "year": year,
-        "_unsure_tokens": casing.unsure,
-    }
-    if month:
-        record["month"] = month
-    if reference.ref_type:
-        record["ref_type"] = reference.ref_type
-
-    container = reference.container_title
-    ref_type = (reference.ref_type or "").lower()
-    if container:
-        if ref_type in ("journal", "journal_accepted", "journal_submitted"):
-            record["journal"] = container
-        elif ref_type in ("book", "book_chapter"):
-            record["booktitle"] = container
-        elif ref_type.startswith(("proceedings", "conference")):
-            record["conference"] = container
-
-    if reference.venue_location:
-        parts = [part.strip() for part in reference.venue_location.split(",", 1)]
-        if parts:
-            record["city"] = parts[0]
-        if len(parts) > 1:
-            record["country"] = parts[1]
-
-    for key in ("doi", "url", "volume", "issue", "pages"):
-        value = getattr(reference, key, None)
-        if value:
-            record[key] = value
-
-    if ref_type == "arxiv" and not record.get("doi"):
-        found = re.search(
-            r"arXiv:\s*([\w.\-]+/?\d+|\d{4}\.\d{4,5})",
-            reference.raw_text or "",
-            re.IGNORECASE,
-        )
-        if found:
-            record["arxiv_id"] = found.group(1)
-
-    return record
 
 
 # ---------------------------------------------------------------------------

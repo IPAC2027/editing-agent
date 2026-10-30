@@ -1,0 +1,10 @@
+# GPU machine only — not installed with the agent.  Versions are minimums known
+# to support Qwen3 and prompt/completion training; pin exact versions once a
+# run works on your machine.
+torch>=2.4
+transformers>=4.51
+peft>=0.15
+trl>=0.19
+bitsandbytes>=0.45
+accelerate>=1.6
+datasets>=3.0

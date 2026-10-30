@@ -54,6 +54,8 @@ PAGE = r"""<!DOCTYPE html>
   --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 26px -18px rgba(0,0,0,.8);
 }}
 *{box-sizing:border-box}
+.toplink{color:var(--accent);text-decoration:none;font-size:14px;margin-left:18px}
+.toplink:hover{text-decoration:underline}
 html,body{margin:0;padding:0}
 body{background:var(--paper);color:var(--ink);font:15px/1.55 var(--sans);
      -webkit-font-smoothing:antialiased}
@@ -314,6 +316,7 @@ kbd{font-family:var(--mono);font-size:.75rem;border:1px solid var(--rule);
 
 <div class="top"><div class="top-in">
   <div class="brand">JACoW review desk<small id="rootName">&nbsp;</small><small id="llmBadge" hidden></small></div>
+  <a class="toplink" href="/references">Check a reference list</a>
   <div class="top-spacer"></div>
   <label class="who">Your name
     <input id="editorName" type="text" placeholder="e.g. A. Editor" autocomplete="name">

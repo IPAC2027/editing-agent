@@ -9,7 +9,7 @@ Configuration (environment / .env)
 -----------------------------------
 LLM_ENABLED   = false          # set true to enable
 LLM_BASE_URL  = http://localhost:11434/v1
-LLM_MODEL     = llama3
+LLM_MODEL     = qwen3:14b
 LLM_API_KEY   = ollama
 """
 
@@ -29,6 +29,17 @@ def _get_client() -> OpenAI:
 
 def is_enabled() -> bool:
     return os.environ.get("LLM_ENABLED", "false").lower() in ("1", "true", "yes")
+
+
+def no_think(model: str, system: str) -> str:
+    """Switch off Qwen3's step-by-step "thinking" for these short classification
+    calls: it is slower and its reasoning text would only get in the way of the
+    JSON answer.  Qwen3 reads the "/no_think" tag in the system prompt; other
+    models never see it.
+    """
+    if "qwen3" in (model or "").lower() and "/no_think" not in system:
+        return system.rstrip() + "\n/no_think"
+    return system
 
 
 def chat(
@@ -55,11 +66,11 @@ def chat(
     if not is_enabled():
         raise RuntimeError("LLM is disabled. Set LLM_ENABLED=true to use LLM features.")
     client = _get_client()
-    name = model or os.environ.get("LLM_MODEL", "llama3")
+    name = model or os.environ.get("LLM_MODEL", "qwen3:14b")
     kwargs: dict = {
         "model": name,
         "messages": [
-            {"role": "system", "content": system},
+            {"role": "system", "content": no_think(name, system)},
             {"role": "user", "content": user},
         ],
         "temperature": 0.0 if temperature is None else temperature,
@@ -81,7 +92,7 @@ def settings() -> dict:
     return {
         "enabled": is_enabled(),
         "base_url": os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1"),
-        "model": os.environ.get("LLM_MODEL", "llama3"),
+        "model": os.environ.get("LLM_MODEL", "qwen3:14b"),
     }
 
 

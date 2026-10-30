@@ -170,6 +170,11 @@ def _rewrite_paragraph(paragraph, rewrite: ParagraphRewrite) -> int:
 
     formats = _char_formats(paragraph)
     original = "".join(run.text for run in paragraph.runs)
+    if original != rewrite.before and paragraph._element.findall(qn("w:hyperlink")):
+        # A paragraph holding a hyperlink (a reference's DOI or URL on its own
+        # line): python-docx's runs omit the link text, so it is handled as a
+        # whole — the old text deleted, the new inserted, a DOI kept linked.
+        return _rewrite_link_paragraph(paragraph, rewrite)
     if original != rewrite.before:
         # The paragraph is not what we diffed against; refuse rather than
         # scramble the document.
@@ -233,6 +238,55 @@ def _rewrite_paragraph(paragraph, rewrite: ParagraphRewrite) -> int:
     return revisions
 
 
+def _rewrite_link_paragraph(paragraph, rewrite: ParagraphRewrite) -> int:
+    """Tracked replacement of a paragraph that contains a hyperlink.
+
+    Used for a reference's link line ("https://doi.org/10.23731/…" becoming
+    "doi:10.23731/…").  The new text is a DOI hyperlink when it is a DOI —
+    JACoW wants DOIs linked — and plain text otherwise, since other URLs must
+    not be linked.
+    """
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.oxml import OxmlElement
+
+    if paragraph.text != rewrite.before:
+        return 0
+    first_run = paragraph._element.find(".//" + qn("w:r"))
+    rpr = first_run.find(qn("w:rPr")) if first_run is not None else None
+    plain_rpr = copy.deepcopy(rpr) if rpr is not None else None
+    if plain_rpr is not None:
+        for style in plain_rpr.findall(qn("w:rStyle")):
+            plain_rpr.remove(style)
+
+    for child in list(paragraph._element):
+        if child.tag != qn("w:pPr"):
+            paragraph._element.remove(child)
+
+    paragraph._element.append(_wrap_revision(
+        "w:del", [_make_run(rewrite.before, rpr, deleted=True)], rewrite.author))
+
+    lead = rewrite.after[: len(rewrite.after) - len(rewrite.after.lstrip())]
+    core = rewrite.after.strip()
+    trail = rewrite.after[len(rewrite.after.rstrip()):]
+    inserted = _wrap_revision("w:ins", [_make_run(core, rpr, deleted=False)], rewrite.author)
+    doi = re.match(r"^doi:(10\.\S+?)[.,;]?$", core, re.IGNORECASE)
+    if doi:
+        r_id = paragraph.part.relate_to(f"https://doi.org/{doi.group(1)}",
+                                        RT.HYPERLINK, is_external=True)
+        link = OxmlElement("w:hyperlink")
+        link.set(qn("r:id"), r_id)
+        link.append(inserted)
+        inserted = link
+    if lead:
+        paragraph._element.append(_wrap_revision(
+            "w:ins", [_make_run(lead, plain_rpr, deleted=False)], rewrite.author))
+    paragraph._element.append(inserted)
+    if trail:
+        paragraph._element.append(_wrap_revision(
+            "w:ins", [_make_run(trail, plain_rpr, deleted=False)], rewrite.author))
+    return 2
+
+
 def _enable_revision_view(document) -> None:
     """Ask Word to show the reviewing pane when the file opens."""
     from docx.oxml import OxmlElement
@@ -247,6 +301,7 @@ def write_tracked_docx(
     source_docx: Path,
     out_path: Path,
     rewrites: list[ParagraphRewrite],
+    formats: list[tuple[int, dict, str]] = (),
 ) -> tuple[Path, int, list[ParagraphRewrite]]:
     """Copy *source_docx* to *out_path* with *rewrites* as tracked changes.
 
@@ -273,6 +328,13 @@ def write_tracked_docx(
         _enable_revision_view(document)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Formatting changes (style, indent, keep-with-next…) after the text, so
+    # the runs a text rewrite created get the same treatment.
+    if formats:
+        from src.autofix.word_format_fixes import apply_format_fix
+        for index, spec, author in formats:
+            if 0 <= index < len(paragraphs):
+                written += 1 if apply_format_fix(paragraphs[index], spec, author) else 0
     document.save(str(out_path))
     return out_path, written, skipped
 

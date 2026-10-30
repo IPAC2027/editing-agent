@@ -28,7 +28,9 @@ aiagent desk <folder-of-submissions>        # what the launcher runs
 ```
 
 The desk serves a page on your own computer. Nothing is uploaded, nothing is
-installed, and the files the author sent are never modified.
+installed, and the files the author sent are never modified. It answers only
+requests addressed to `127.0.0.1` and only accepts changes made from its own
+page, so another website open in the same browser cannot drive it.
 
 | Screen | What you do there |
 |---|---|
@@ -39,6 +41,7 @@ installed, and the files the author sent are never modified.
 | **The paper** | The paper with your accepted corrections in place. Click any line to edit it yourself. Jump to the title, authors, body, references, or the first change. |
 | **Letter to the author** | Drafted from your decisions and notes. Edit, save, copy. |
 | **Files** | The corrected PDF, the author's original, the Word tracked-changes file. |
+| **Check a reference list** | Linked from the header. Paste any bibliography; each reference comes back formatted, looked up and checked by the same engine as the papers. Replaces the formatter's separate Streamlit app. |
 
 **Finish this paper** writes the reviewed source, the letter and a summary of
 every decision, then offers the next unfinished paper. A finished paper can be
@@ -180,6 +183,49 @@ is written and the original is untouched.
 On the 34 LaTeX example submissions, per paper: **8.1 automatic changes, 1.0
 decisions, 0.2 problems needing a human.**
 
+## References: one engine
+
+Every reference — a Word paragraph, a `\bibitem` body, a reference pasted into
+the desk — is formatted, looked up and integrity-checked by
+[jacow-reference-formatter](https://github.com/IPAC2027/jacow-reference-formatter),
+pinned to a release tag in `pyproject.toml`. `src/references.py` is the only
+module that talks to it, and turns its answer into the agent's tiers:
+
+| Formatter result | Agent |
+|---|---|
+| Only presentation changes (`DOI:` → `doi:`, "et al" punctuation, serial comma, quotes, dashes) | **auto** |
+| Full reformat that passes `check_rewrite` and adds nothing from a lookup | **suggest** |
+| Reformat that fills in or corrects fields from Crossref, DataCite or JACoW | **suggest**; the card lists each value and its source: "DOI and pages added from Crossref; volume corrected from Crossref (25 → 26)" |
+| `doi_mismatch` | flag REF-INT-01: the cited DOI belongs to another paper |
+| `suspected_fabricated` | flag REF-INT-02: no index has it, check by hand |
+| `unverifiable` | REF-INT-03, NOT CHECKED (only when lookups ran) |
+| Rewrite fails `check_rewrite`, or a value was defaulted | rewrite discarded, author's text kept |
+
+`check_rewrite` lives in the formatter, so its own command line and web page
+are protected by the same guard. It protects the author's information, not
+the author's wording: every value an authoritative source added or corrected
+is declared to it from the formatter's provenance record, so lookups reach the
+editor, while anything lost or invented with no source behind it — a dropped
+journal name, a guessed year, a lost "unpublished", an acronym's capitals —
+still discards the rewrite. Set `REFERENCE_CORRECTIONS=false` to let lookups
+fill gaps only, never change a value the author gave. Word and LaTeX differ only in the output:
+tracked changes for Word, source edits for LaTeX.
+
+### House style
+
+Choices the Style Guide leaves open are a per-conference profile
+(`src/house_style.py`), chosen with `HOUSE_STYLE` in `.env`:
+
+| Profile | Units in LaTeX | Page ranges | Label | Applied Physics |
+|---|---|---|---|---|
+| `jacow` (default) | `\qty` when siunitx is loaded | `pp. 57-59` | `IPAC’23` | `App.` (Annex C) |
+| `napac` | `\qty` | as `jacow` | as `jacow` | as `jacow` |
+| `hiat` | `~` | as `jacow` | as `jacow` | as `jacow` |
+| `iso4` | as `jacow` | `pp. 57–59` | `IPAC'23` | `Appl.` (ISO 4) |
+
+Any single setting can be overridden: `HOUSE_STYLE_UNITS`,
+`HOUSE_STYLE_PAGE_DASH`, `HOUSE_STYLE_APOSTROPHE`, `HOUSE_STYLE_APPLIED`.
+
 ## What it checks
 
 **References** — citation order and first-appearance numbering; `\cite` ↔ entry
@@ -192,8 +238,47 @@ directly, which is safer than rewriting LaTeX prose.
 `Initials Surname`; non-breaking space and case for SI units; figure and table
 files resolving (including inside `.zip` archives); the JACoW class version.
 
+**Main text of Word papers, as tracked changes** — non-breaking spaces before
+units, "[8][9]" → "[8, 9]", "Tab. 1" → "Table 1" and "Fig." → "Figure" at the
+start of a sentence are applied automatically; "equation 1" → "Eq. (1)", unit
+symbols, title capitals, author lists, numbered headings, subsection Title
+Case and caption form ("Figure 1:", final full stop) are suggestions. Each is
+decided on the desk; the reviewed Word file carries only what was accepted.
+Body text in a heading style and acronyms not expanded at first use are
+reported. Paragraphs with hyperlinks, fields or equations are reported, never
+rewritten.
+
+**Paragraph and heading layout of Word papers, as tracked formatting
+changes** — first-line indents restored to 0.33 cm, widow/orphan control on
+and headings kept with their text are applied automatically; body text in
+"Normal" or a heading style moved to the body-text style, and direct fonts
+on headings and body text removed, are suggestions. Third-level headings on
+a line of their own are reported. The team's `jacow-paper-formatting` skill
+(kept in `src/knowledge/jacow-paper-formatting-skill/`) supplies the document
+audit: page size, margins, columns, fonts, hyperlinks, reference spacing.
+
+**Front matter** (Word) — the title in capitals with units and names in their
+own case (GeV, SwissFEL), no closing punctuation; authors as `Initials Surname`
+separated by commas, without "and"; values joined to units by a non-breaking
+space, with the standard unit symbol. LaTeX papers get the same rules from the
+existing title, author and unit checks.
+
+**Body text** (Word and LaTeX) — citations in the abstract; `Tab. 1` (never
+abbreviated); `Fig. 1` at the start of a sentence; `equation 1` / `Eq. 1`
+instead of `Eq. (1)`; unpublished papers cited `in Proc.`; submitted papers that
+name the journal.
+
+**The author's PDF** (Word and LaTeX) — the JACoW page size (595 × 792 pt) and
+margins; page numbers; fonts that are not embedded, including inside figures;
+Type 3 bitmap fonts; hyperlinks on URLs that are not DOIs; DOIs split across
+two lines. An unreadable PDF is
+reported as NOT CHECKED, never as clean.
+
 **Build** — the edited source is compiled, so every automatic change is known
-not to break the build. Page-limit checks run on the resulting PDF.
+not to break the build. Page-limit checks run on the resulting PDF; the limit is a conference setting
+(`JACOW_BODY_PAGES` in `.env`, default 3). The build
+treats the submission as untrusted: `latexmk` runs with `-norc` and shell escape
+off, and any `latexmkrc` that arrived with the paper is deleted first.
 
 ## Reliability guarantees
 
@@ -213,17 +298,33 @@ not to break the build. Page-limit checks run on the resulting PDF.
 
 ## Optional local model
 
-Off by default. `--llm` enables the four uses in `src/llm/classify.py`, all of
-them mechanically checkable, none of them able to author a fact:
+**Fine-tuned reference model.** `docs/finetune.md` describes training Qwen3-14B
+on your editors' reference corrections (`finetune-data`, `scripts/finetune/`,
+`finetune-eval`) and switching it on with `REFERENCE_MODEL=jacow-refs`. Its
+answers pass the same damage check as any rewrite and are always decisions.
 
-- **Proper-noun labelling** for sentence case — the one place the deterministic
-  path structurally cannot finish the job. One label per token; the text is
-  rebuilt in code.
-- **Reference-type classification** — one token from a closed set.
-- **Field segmentation** under a verbatim-substring constraint, so invention is
-  impossible rather than discouraged.
-- **False-positive suppression** — used only to *hide* findings, never to add
-  them.
+The team's chosen model is **Qwen3 14B** (Apache 2.0): `ollama pull qwen3:14b`,
+about 9 GB on disk, comfortable on a 16–24 GB GPU or an Apple-silicon Mac with
+24 GB or more. One shared machine can serve every editor: point `LLM_BASE_URL`
+at it. Qwen3's "thinking" mode is switched off automatically for the agent's
+short classification calls (the `/no_think` tag), which keeps them fast.
+
+
+Off by default. One model, configured once in `.env`, serves both the agent
+and the reference formatter. Every use is mechanically checkable and none can
+author a fact — DOIs, years, volumes, pages, authors and titles come only from
+Crossref, DataCite, refs.jacow.org or the author's own text:
+
+| Where | What the model does | Kept in check by |
+|---|---|---|
+| Agent: titles of every reference (`.bib`, `\bibitem`, Word) | Labels the words sentence case left as written: proper noun or ordinary word | One label per word, unanimous samples, text rebuilt in code, damage check rerun; always a suggestion |
+| Agent: LaTeX findings | Hides a finding it judges a false positive | May only hide, never add; the report counts what was hidden |
+| Agent: `llm_suggestions.md` | Advisory review notes | A separate file; never an edit or a finding |
+| Formatter: run-on citations | Points at where authors end and the title begins | Every span must be an exact substring of the citation, in order |
+| Formatter: titles | Decides whether a hyphen is a line-break leftover | Labels only |
+
+The formatter's `llm_enrichment` tasks (guessing a conference city, or a
+journal abbreviation) are never switched on by the agent.
 
 Every classification is sampled three times and must be **unanimous**; JSON mode
 is requested so a malformed answer is a parse failure; `UNSURE` propagates to
@@ -231,15 +332,15 @@ the report as a flag for a human.
 
 ```bash
 # Ollama — the default backend; nothing to configure but the model name
-ollama pull llama3.1:8b
-uv run python main.py prescreen <folder> --llm --model llama3.1:8b
+ollama pull qwen3:14b
+uv run python main.py prescreen <folder> --llm --model qwen3:14b
 
 # LM Studio exposes the same OpenAI-compatible interface
 uv run python main.py prescreen <folder> --llm \
     --model local-model --base-url http://localhost:1234/v1
 
 # The desk takes the same three options
-uv run python main.py desk <folder> --llm --model llama3.1:8b
+uv run python main.py desk <folder> --llm --model qwen3:14b
 ```
 
 On the 48 example submissions the deterministic pass abstains on about **two
@@ -251,12 +352,12 @@ batch.** `desk --llm` asks the server which models it has before it prints its
 address, and says which of three things is true:
 
 ```
-  Model:    llama3.1:8b at http://localhost:11434/v1
+  Model:    qwen3:14b at http://localhost:11434/v1
   Model:    NOT USED — could not reach a model server at http://localhost:11434/v1
             (APIConnectionError). Is Ollama running? Papers are screened
             without it; every check that does not need a model still runs.
   Model:    NOT USED — http://localhost:11434/v1 answered, but has no model
-            called 'qwen3.8:27b-mlx'. It offers: llama3.1:8b, qwen2.5:14b.
+            called 'qwen3.8:27b-mlx'. It offers: qwen3:14b, qwen2.5:14b.
 ```
 
 A model that is not there degrades the run to the deterministic path; it never
@@ -267,12 +368,15 @@ so an editor can always tell which kind of run they are looking at.
 ## Configuration
 
 `cp .env.example .env` and edit. Everything is optional: with no `.env` the
-agent runs fully deterministically.
+agent runs fully deterministically. One file configures both tools: the
+reference formatter takes its Crossref address, lookup cache
+(`AIAGENT_CACHE_DIR`), model server and house style from these settings, and
+`AIAGENT_OFFLINE=1` switches its lookups off.
 
 ```
 LLM_ENABLED=false
 LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL=llama3.1:8b
+LLM_MODEL=qwen3:14b
 LLM_API_KEY=ollama
 LLM_SAMPLES=3                    # samples that must agree before a label is used
 LLM_TEMPERATURE=                 # default 0.3; see below
@@ -317,10 +421,8 @@ src/
 │   ├── latex_edits.py        span-anchored edit generators for LaTeX source
 │   ├── reference_edits.py    .bib fields and \bibitem bodies
 │   └── structural.py         reference-list reordering (applied after span edits)
-├── refs/
-│   ├── verify.py             mechanical damage checks on a rewrite
-│   ├── text_utils.py         sentence case with abstention
-│   └── …                     formatters, journal abbreviation, conference DB
+├── references.py             the only door to jacow_formatter: tiers, settings, LaTeX round trip
+├── house_style.py            per-conference presentation choices
 ├── llm/
 │   ├── classify.py           the only sanctioned uses of a model
 │   └── prompts.py            advisory review prompts
@@ -333,10 +435,30 @@ src/
     └── word_prescreen.py     Word end to end
 ```
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs the suite on Linux and Windows against the
+pinned formatter release, and runs the formatter's test bibliography through
+the agent (`tests/test_shared_bibliography.py`), comparing every decision with
+`tests/data/shared_bibliography_decisions.json`. The formatter's own
+`agent-contract.yml` runs this suite against each formatter commit, so a change
+there that alters what editors are offered fails before it is released.
+
+The measurement against real editors runs by hand on a self-hosted runner
+labelled `jacow-corpus`, with the repository variable `JACOW_CORPUS` set to a
+conference pulled with `indico-pull`: `corpus-score --json` then
+`scripts/confirmation_gate.py`, which fails if a zone's confirmation rate falls
+by more than three points or its contradictions rise. The first run records
+`scripts/confirmation_baseline.json`; commit it.
+
+Upgrading the formatter: tag a release there, change the tag in
+`pyproject.toml`, `uv lock`, and run the suite; accept intended decision
+changes with `UPDATE_SNAPSHOT=1`.
+
 ## Tests
 
 ```bash
-uv run pytest -q          # 323 tests
+uv run --extra dev pytest -q   # 359 tests; the reference engine's 870 are in the formatter
 ```
 
 `tests/test_desk.py` walks the whole editor journey — open, decide, note, hand
@@ -362,7 +484,9 @@ prevent.
 | Corpus pulled from Indico; per-check scoring against real editorial diffs | done |
 | Editor's own credential against the Indico editing API (reads) | done |
 | Writing results back to Indico from the desk | next |
-| Per-conference house style (`~` vs `\qty{}`, `\emph{et al.}`, `\midrule`) | next |
+| One reference engine (jacow-reference-formatter) for Word and LaTeX | done |
+| Per-conference house style (units, page-range dash, label apostrophe, App./Appl.) | done |
+| House style for `\emph{et al.}` and `\midrule` | next |
 | Tier derived from measured confirmation, per zone | next |
 | TC07/TC08: figure, table and equation numbering, and "never referenced" | next |
 

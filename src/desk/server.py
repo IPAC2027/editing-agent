@@ -127,12 +127,49 @@ class DeskHandler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    # -- who may talk to the desk ----------------------------------------
+    # The desk listens on 127.0.0.1, but any web page the editor visits can
+    # still send requests to it.  Two checks close that door:
+    #   * Host must name this server, which defeats DNS rebinding (a hostile
+    #     domain re-pointed at 127.0.0.1 sends its own name as Host);
+    #   * a write must be a JSON request from this page.  A cross-site page
+    #     can only send JSON after a CORS preflight, which the desk never
+    #     approves, and browsers label its requests with a foreign Origin.
+    def _allowed_hosts(self) -> set[str]:
+        addr, port = self.server.server_address[:2]
+        hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        if addr not in ("", "0.0.0.0", "::"):
+            hosts.add(f"{addr}:{port}")
+        return hosts
+
+    def _refusal(self, *, write: bool) -> str | None:
+        hosts = self._allowed_hosts()
+        host = (self.headers.get("Host") or "").strip().lower()
+        if host not in hosts:
+            return "The review desk only answers requests addressed to this computer."
+        if write:
+            origin = self.headers.get("Origin")
+            if origin is not None and origin.strip().lower() not in {f"http://{h}" for h in hosts}:
+                return "The review desk only accepts changes made from its own page."
+            ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype != "application/json":
+                return "The review desk only accepts changes made from its own page."
+        return None
+
     def _json(self, payload, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, default=str).encode("utf-8")
         self._send(status, body, "application/json; charset=utf-8")
 
     def _error(self, message: str, status: HTTPStatus = HTTPStatus.BAD_REQUEST) -> None:
         self._json({"error": message}, status)
+
+    def _drain(self, limit: int = 1 << 20) -> None:
+        try:
+            length = min(int(self.headers.get("Content-Length") or 0), limit)
+        except ValueError:
+            return
+        if length > 0:
+            self.rfile.read(length)
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
@@ -174,6 +211,10 @@ class DeskHandler(BaseHTTPRequestHandler):
 
     # -- routing --------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802
+        refusal = self._refusal(write=False)
+        if refusal:
+            self._error(refusal, HTTPStatus.FORBIDDEN)
+            return
         parsed = urlparse(self.path)
         route = parsed.path
         query = parse_qs(parsed.query)
@@ -182,6 +223,11 @@ class DeskHandler(BaseHTTPRequestHandler):
                 from src.desk.ui import PAGE
 
                 self._send(HTTPStatus.OK, PAGE.encode("utf-8"),
+                           "text/html; charset=utf-8")
+            elif route == "/references":
+                from src.desk.references_page import PAGE as REFERENCES_PAGE
+
+                self._send(HTTPStatus.OK, REFERENCES_PAGE.encode("utf-8"),
                            "text/html; charset=utf-8")
             elif route == "/api/setup":
                 self._json({
@@ -217,6 +263,14 @@ class DeskHandler(BaseHTTPRequestHandler):
                         HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def do_POST(self) -> None:  # noqa: N802
+        refusal = self._refusal(write=True)
+        if refusal:
+            # Read (and discard) the request body before answering: closing
+            # with unread data makes Windows reset the connection, so the
+            # sender saw "connection aborted" instead of the 403.
+            self._drain()
+            self._error(refusal, HTTPStatus.FORBIDDEN)
+            return
         route = urlparse(self.path).path
         body = self._body()
         try:
@@ -234,6 +288,7 @@ class DeskHandler(BaseHTTPRequestHandler):
                 "/api/prepare": self._prepare,
                 "/api/close": self._close,
                 "/api/reopen": self._reopen,
+                "/api/format-references": self._format_references,
             }.get(route)
             if handler is None:
                 self._error("unknown address", HTTPStatus.NOT_FOUND)
@@ -249,6 +304,14 @@ class DeskHandler(BaseHTTPRequestHandler):
                         HTTPStatus.INTERNAL_SERVER_ERROR)
 
     # -- actions --------------------------------------------------------
+    def _format_references(self, body: dict) -> None:
+        from src.desk.references_page import check_reference_list
+
+        text = str(body.get("text") or "")
+        if not text.strip():
+            raise ValueError("paste at least one reference")
+        self._json(check_reference_list(text, lookups=bool(body.get("lookups", True))))
+
     def _view(self, folder: Path) -> dict:
         return paper_module.view(
             folder, default_editor=self._config().get("editor", ""),

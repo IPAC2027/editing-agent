@@ -35,6 +35,7 @@ already understands, so a pulled paper can be screened where it lies::
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,6 +50,27 @@ def _safe(name: str) -> str:
     """A folder name from a paper code, with no surprises in it."""
     keep = [c if (c.isalnum() or c in "-_") else "-" for c in name.strip()]
     return "".join(keep).strip("-") or "paper"
+
+
+_ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_RESERVED = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$", re.IGNORECASE)
+
+
+def safe_filename(name: str) -> str:
+    """A file name that is valid on Windows, macOS and Linux, and stays in its folder.
+
+    Authors upload names such as "MOPA001*.pdf"; "*" (and < > : " | ? \\ /)
+    cannot be part of a Windows file name, and writing one stopped the pull.
+    Only the last path component is kept, so a name like "../x" cannot
+    escape the paper's folder.  The original name stays in manifest.json.
+    """
+    base = re.split(r"[/\\]", name or "")[-1]
+    cleaned = _ILLEGAL.sub("_", base).strip().rstrip(". ")
+    if not cleaned or cleaned in (".", ".."):
+        cleaned = "file"
+    if _RESERVED.match(cleaned):
+        cleaned = "_" + cleaned
+    return cleaned[:200]
 
 
 def _human(size: int) -> str:
@@ -79,6 +101,9 @@ class PaperPlan:
     row: ContributionRow
     revisions: list[RevisionPlan] = field(default_factory=list)
     note: str = ""                # why nothing will be fetched, when nothing will
+    done: dict | None = None      # manifest of a paper already fully downloaded
+    which: str = "first-last"
+    complete: bool = False        # every planned file is on disk
 
     @property
     def folder(self) -> str:
@@ -94,6 +119,7 @@ class Plan:
     """The whole conference, costed."""
 
     papers: list[PaperPlan] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)   # files that could not be fetched
 
     @property
     def fetchable(self) -> list[PaperPlan]:
@@ -107,15 +133,65 @@ class Plan:
     def files(self) -> int:
         return sum(len(r.revision.files) for p in self.papers for r in p.revisions)
 
+    def summary_failures(self) -> str:
+        return "\n".join(self.failures)
+
     def summary(self) -> str:
         skipped = len(self.papers) - len(self.fetchable)
+        edited = sum(1 for p in self.papers
+                     if any(r.role == "current" for r in p.revisions)
+                     or (p.done and any(r.get("role") == "current"
+                                        for r in p.done.get("revisions") or [])))
+        finished = sum(1 for p in self.papers if p.done is not None)
         return (f"{len(self.fetchable)} paper(s), {self.files} file(s), "
-                f"{_human(self.bytes)}"
-                + (f"; {skipped} with nothing to fetch" if skipped else ""))
+                f"{_human(self.bytes)}; {edited} with an edited version"
+                + (f"; {finished} already downloaded" if finished else "")
+                + (f"; {skipped - finished} with nothing to fetch" if skipped - finished else ""))
+
+
+def _already_complete(folder: Path, which: str) -> dict | None:
+    """The manifest of a paper already fully downloaded, or None.
+
+    Lets a restarted pull skip asking Indico about papers it has finished —
+    on a large conference that reading took longer than the downloads left.
+    A paper counts as finished when every file its manifest lists is on disk
+    at the listed size, and either the manifest says so, or it has an edited
+    ("current") version, or there was never more than the author's one.
+    Manifests from before the edited-version fix (author's file only although
+    there were later revisions) are not finished, so those papers are read
+    again and their edited versions fetched.
+    """
+    path = folder / "manifest.json"
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if manifest.get("which", which) != which:
+        return None
+    revisions = manifest.get("revisions") or []
+    for revision in revisions:
+        for f in revision.get("files") or []:
+            names = {f.get("saved_as"), safe_filename(f.get("filename", "")),
+                     re.sub(r'[<>:"|?*\x00-\x1f]', "", f.get("filename", "")), f.get("filename")}
+            here = [folder / revision.get("role", "") / "Source_Files" / n for n in names if n]
+            if not any(p.is_file() and (not f.get("size") or p.stat().st_size == f["size"])
+                       for p in here):
+                return None
+    if manifest.get("complete"):
+        return manifest
+    roles = {r.get("role") for r in revisions}
+    note = manifest.get("note") or ""
+    if "current" in roles or which == "all" or (which == "latest" and roles):
+        return manifest
+    if roles == {"original"} and (manifest.get("revision_count", 0) <= 1
+                                  or note.startswith("only one revision with files")):
+        return manifest
+    return None
 
 
 def build_plan(client: IndicoClient, *, which: str = "first-last",
-               only: set[str] | None = None) -> Plan:
+               only: set[str] | None = None, destination: Path | None = None,
+               on_read=None) -> Plan:
     """Ask Indico what is there, and what fetching it would cost.
 
     One detail request per paper and not a single byte of content — sizes are in
@@ -126,11 +202,19 @@ def build_plan(client: IndicoClient, *, which: str = "first-last",
         raise IndicoError(f"which must be one of {', '.join(WHICH)}")
 
     plan = Plan()
-    for row in client.list_editables():
-        if only and (row.code not in only and str(row.friendly_id) not in only):
-            continue
+    rows = [row for row in client.list_editables()
+            if not only or row.code in only or str(row.friendly_id) in only]
+    for index, row in enumerate(rows, start=1):
+        if on_read:
+            on_read(index, len(rows))
         paper = PaperPlan(row=row)
         plan.papers.append(paper)
+
+        if destination is not None:
+            done = _already_complete(destination / paper.folder, which)
+            if done is not None:
+                paper.done, paper.note = done, "already downloaded"
+                continue
 
         if not row.submitted:
             paper.note = "nothing submitted"
@@ -142,16 +226,24 @@ def build_plan(client: IndicoClient, *, which: str = "first-last",
             paper.note = "no revisions"
             continue
 
+        # Only revisions that carry files can be fetched.  In Indico's editing
+        # workflow the last revisions are often state changes — "accepted",
+        # "submitter confirmed" — with no files of their own; taking the very
+        # last revision and then dropping it for having no files left most
+        # papers with the author's version only.  The edited version is the
+        # latest revision that carries files.
+        with_files = [r for r in ordered if r.files]
         if which == "all":
             chosen = [(r, f"rev-{r.id}") for r in ordered]
         elif which == "latest":
-            chosen = [(ordered[-1], "current")]
+            chosen = [(with_files[-1], "current")] if with_files else []
         else:
-            chosen = [(ordered[0], "original")]
-            if len(ordered) > 1:
-                chosen.append((ordered[-1], "current"))
+            chosen = [(with_files[0], "original")] if with_files else []
+            if len(with_files) > 1:
+                chosen.append((with_files[-1], "current"))
             else:
-                paper.note = "only one revision: the author's, never edited"
+                paper.note = ("only one revision with files: the author's, never edited"
+                              if with_files else "")
 
         paper.revisions = [RevisionPlan(revision=r, role=role) for r, role in chosen
                            if r.files]
@@ -166,6 +258,8 @@ def _manifest(paper: PaperPlan) -> dict:
     The tags are the point of the exercise: they are the editors' own labels for
     the difference between ``original`` and ``current``.
     """
+    if paper.done is not None:
+        return paper.done
     row = paper.row
     editable = row.editable
     return {
@@ -186,14 +280,17 @@ def _manifest(paper: PaperPlan) -> dict:
                 "created_dt": rp.revision.created_dt,
                 "comment": rp.revision.comment,
                 "files": [
-                    {"filename": f.filename, "size": f.size,
-                     "file_type": f.file_type, "content_type": f.content_type}
+                    {"filename": f.filename, "saved_as": safe_filename(f.filename),
+                     "size": f.size, "file_type": f.file_type,
+                     "content_type": f.content_type}
                     for f in rp.revision.files
                 ],
             }
             for rp in paper.revisions
         ],
         "note": paper.note,
+        "which": paper.which,
+        "complete": paper.complete,
     }
 
 
@@ -205,7 +302,7 @@ def pull(client: IndicoClient, destination: Path, *, which: str = "first-last",
     *on_paper* is called with ``(index, total, PaperPlan)`` before each paper, so
     a caller can show progress without this module knowing about a console.
     """
-    plan = plan or build_plan(client, which=which, only=only)
+    plan = plan or build_plan(client, which=which, only=only, destination=destination)
     destination.mkdir(parents=True, exist_ok=True)
 
     fetchable = plan.fetchable
@@ -218,15 +315,39 @@ def pull(client: IndicoClient, destination: Path, *, which: str = "first-last",
             json.dumps(_manifest(paper), indent=2, ensure_ascii=False),
             encoding="utf-8")
 
+        paper.which = which
+        failures_before = len(plan.failures)
         for revision_plan in paper.revisions:
             # Source_Files/ is the layout `prescreen` expects, so a pulled paper
             # can be screened where it lies rather than moved first.
             target_dir = root / revision_plan.role / "Source_Files"
+            used: set[str] = set()
             for file in revision_plan.revision.files:
-                target = target_dir / file.filename
+                name = safe_filename(file.filename)
+                stem, dot, ext = name.rpartition(".")
+                candidate, n = name, 2
+                while candidate.lower() in used:    # two names that clean to the same
+                    candidate = f"{stem}-{n}.{ext}" if dot else f"{name}-{n}"
+                    n += 1
+                used.add(candidate.lower())
+                target = target_dir / candidate
                 if target.exists() and file.size and target.stat().st_size == file.size:
                     continue        # already have it: a pull is resumable
-                client.download_file(file, target)
+                # Download beside the target and rename when complete, so an
+                # interrupted file is never mistaken for a finished one.
+                partial = target.with_name(target.name + ".part")
+                try:
+                    client.download_file(file, partial)
+                    partial.replace(target)
+                except Exception as exc:  # noqa: BLE001 — one bad file never stops the pull
+                    partial.unlink(missing_ok=True)
+                    plan.failures.append(f"{paper.row.code}: {file.filename}: "
+                                         f"{type(exc).__name__}: {exc}")
+        if len(plan.failures) == failures_before:
+            # Finished: a restarted pull will not ask Indico about it again.
+            paper.complete = True
+            (root / "manifest.json").write_text(
+                json.dumps(_manifest(paper), indent=2, ensure_ascii=False), encoding="utf-8")
 
     index_path = destination / "index.json"
     index_path.write_text(json.dumps({

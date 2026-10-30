@@ -13,7 +13,7 @@ is still written, because it is the only place the *reasons* fit.
 Two guards decide what gets into that document:
 
 * every line-level fix is a narrow, deterministic substitution;
-* every whole-reference reformat must pass :func:`src.refs.verify.check_rewrite`,
+* every whole-reference reformat must pass :func:`jacow_formatter.check_rewrite` (via :mod:`src.references`),
   which compares the rewrite to the original and rejects it if a number, DOI,
   word or capital went missing.  That check is what stops the two defects seen
   on the sample corpus — ``Poincaré`` lowercased to ``poincaré`` and a doubled
@@ -26,25 +26,13 @@ import json
 import re
 from pathlib import Path
 
-from src.autofix.word_fixes import fix_reference
-from src.checks.word_reference_checks import run_all
+from src.checks.reference_list_checks import run_all
+from src.edits import Tier
 from src.lookup_status import STATUS
 from src.models import Finding, Severity
 from src.output.word_report import write_word_reference_report
 from src.parser.word_parser import parse_word
-from src.refs.verify import check_rewrite, proper_noun_risk
-
-# Word corrections whose only content is presentation, and which therefore
-# carry the same AUTO tier as their LaTeX counterparts.
-_AUTO_CHECKS = frozenset({
-    "DOI-FMT-01", "DOI-FMT-02", "DOI-FMT-03", "AUTH-01", "AUTH-02",
-    "REF-PAGES-01", "CITE-SPACE-01", "CITE-BRACKET-01",
-})
-
-# Substitutions the formatter made deliberately and vouches for, keyed by
-# reference number.  Populated by _format_word_reference and consumed by
-# _verified_reformat immediately afterwards.
-_ALLOWED_SUBSTITUTIONS: dict[int, list[tuple[str, str]]] = {}
+from src.references import screen_reference
 
 
 class WordPrescreenResult:
@@ -81,6 +69,30 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
     parsed = parse_word(doc_path)
     findings = run_all(parsed)
 
+    # Body text and reference forms, shared with the LaTeX path.
+    from src.checks import body_checks
+    try:
+        body, abstract = body_checks.word_paragraphs(doc_path)
+    except Exception:  # noqa: BLE001 — an unreadable body must not stop the reference checks
+        body, abstract = [], None
+    findings.extend(body_checks.check_body_text(body, abstract))
+
+    # Title, author and unit checks — LaTeX papers had these, Word papers did not.
+    from src.checks import word_front_checks
+    try:
+        findings.extend(word_front_checks.run_all(doc_path))
+    except Exception:  # noqa: BLE001 — never let these block the reference checks
+        pass
+    # Unpublished/submitted reference forms are corrected by the formatter
+    # itself below, so body_checks.check_reference_forms is not run here.
+
+    # The same PDF checks a LaTeX submission gets: the Word path previously
+    # checked the reference list only.
+    from src.checks.pdf_checks import find_author_pdf, run_pdf_checks
+    author_pdf = find_author_pdf(folder)
+    if author_pdf is not None:
+        findings.extend(run_pdf_checks(author_pdf))
+
     out_dir = folder / "aiagent_prescreen"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -95,23 +107,21 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
 
     for ref in parsed.references:
         ref_findings = [f for f in findings if f.line == ref.n]
-        suggested_doi = next(
-            (f.suggested for f in ref_findings
-             if f.check_id == "DOI-REQ-01" and f.suggested),
-            None,
-        )
 
-        corrected, fix_findings = fix_reference(
-            ref.n, ref.raw_text, suggested_doi=suggested_doi,
-        )
-
-        formatted, format_finding, rejection = _verified_reformat(ref, corrected)
-        if formatted is not None:
-            corrected = formatted
-            if format_finding:
-                fix_findings.append(format_finding)
-        elif rejection is not None:
-            fix_findings.append(rejection)
+        # One engine for Word and LaTeX: the formatter formats, looks up and
+        # verifies; the adapter decides the tier (src/references.py).
+        result = screen_reference(ref.raw_text, label=f"Reference [{ref.n}]", line=ref.n)
+        fix_findings = list(result.findings)
+        corrected = ref.raw_text
+        if result.after is not None and result.tier is not None:
+            corrected = result.after
+            fix_findings.append(Finding(
+                check_id="FMT-REF-01" if result.tier is Tier.SUGGEST else "FMT-REF-02",
+                severity=Severity.INFO, line=ref.n, message=result.message,
+                original=ref.raw_text[:200], suggested=corrected[:200],
+                auto_fixed=result.tier is Tier.AUTO,
+            ))
+        elif any(f.check_id == "FMT-REF-03" for f in result.findings):
             rejected_rewrites += 1
 
         refs_before.append((ref.n, ref.raw_text))
@@ -123,7 +133,14 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
         if corrected.strip() == ref.raw_text.strip():
             continue
 
-        if ref.paragraph_index < 0 or ref.paragraph_count != 1 or not ref.paragraph_text:
+        more: list[dict] = []
+        split = None
+        if ref.paragraph_count == 2 and ref.paragraph_text:
+            split = _split_link_paragraph(ref, corrected)
+            if split is not None:
+                paragraph_after, more = split
+        if ref.paragraph_index < 0 or not ref.paragraph_text or (
+                ref.paragraph_count != 1 and split is None):
             findings_by_ref[ref.n].append(Finding(
                 check_id="WORD-TRACK-01",
                 severity=Severity.WARNING,
@@ -142,8 +159,9 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
         # against the cleaned raw_text: the entry usually begins "[1]\t", and a
         # revision computed against collapsed whitespace would not match the
         # document and would be silently skipped.
-        paragraph_after = _rebuild_paragraph(ref.paragraph_text, ref.raw_text, corrected)
-        if paragraph_after is None or paragraph_after == ref.paragraph_text:
+        if split is None:
+            paragraph_after = _rebuild_paragraph(ref.paragraph_text, ref.raw_text, corrected)
+        if paragraph_after is None or (paragraph_after == ref.paragraph_text and not more):
             findings_by_ref[ref.n].append(Finding(
                 check_id="WORD-TRACK-01",
                 severity=Severity.WARNING,
@@ -158,12 +176,12 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
             ))
             continue
 
-        checks = sorted({f.check_id for f in fix_findings}) or ["FMT-REF-01"]
+        checks = ["FMT-REF-02"] if result.tier is Tier.AUTO else ["FMT-REF-01"]
         # Same tiering as the LaTeX side: presentation is applied, a
         # whole-reference rewrite is offered.  This is what lets an editor make
         # every decision at the desk and receive a Word file containing only
         # what they accepted.
-        tier = "auto" if checks and set(checks) <= _AUTO_CHECKS else "suggest"
+        tier = "auto" if result.tier is Tier.AUTO else "suggest"
         corrections.append({
             "id": f"W{len(corrections) + 1:03d}",
             "tier": tier,
@@ -179,32 +197,127 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
             "after": paragraph_after,
             "shown_before": ref.raw_text,
             "shown_after": corrected,
-            "message": "; ".join(f.message for f in fix_findings)
-                       or f"Reference [{ref.n}] reformatted to JACoW style.",
+            "message": result.message or f"Reference [{ref.n}] reformatted to JACoW style.",
+            "added_from": result.added_from,
+            "integrity": result.integrity,
+            # Further paragraphs the same correction rewrites (a link line).
+            "more": more,
         })
+        if paragraph_after != ref.paragraph_text:
+            rewrites.append(ParagraphRewrite(
+                paragraph_index=ref.paragraph_index,
+                before=ref.paragraph_text,
+                after=paragraph_after,
+                author=f"JACoW prescreen ({', '.join(checks)})",
+                note="; ".join(f.message for f in fix_findings),
+            ))
+        for extra in more:
+            rewrites.append(ParagraphRewrite(
+                paragraph_index=extra["paragraph_index"], before=extra["before"],
+                after=extra["after"], author=f"JACoW prescreen ({', '.join(checks)})",
+            ))
+
+    # --- Main text: corrections as tracked changes -------------------
+    # Each fix is its own correction (decided on the desk); the fixes in one
+    # paragraph are combined into one rewrite of that paragraph.
+    from src.autofix.word_body_fixes import apply_fixes, body_fixes
+    try:
+        text_fixes, text_findings, para_text = body_fixes(doc_path)
+    except Exception:  # noqa: BLE001 — never let the main text block the references
+        text_fixes, text_findings, para_text = [], [], {}
+    findings.extend(text_findings)
+    by_paragraph: dict[int, list] = {}
+    for fix in text_fixes:
+        by_paragraph.setdefault(fix.paragraph_index, []).append(fix)
+        before = para_text[fix.paragraph_index]
+        context_start = max(0, fix.start - 30)
+        corrections.append({
+            "id": f"W{len(corrections) + 1:03d}",
+            "tier": fix.tier,
+            "check_id": fix.check_id,
+            "checks": [fix.check_id],
+            "reference": None,
+            "paragraph_index": fix.paragraph_index,
+            "before": before,
+            "after": apply_fixes(before, [fix]),
+            "spans": [{"start": fix.start, "end": fix.end, "after": fix.after}],
+            "shown_before": ("…" if context_start else "") + before[context_start:fix.end + 30],
+            "shown_after": ("…" if context_start else "")
+            + before[context_start:fix.start] + fix.after + before[fix.end:fix.end + 30],
+            "message": fix.message,
+            "more": [],
+        })
+    for index, group in by_paragraph.items():
+        before = para_text[index]
         rewrites.append(ParagraphRewrite(
-            paragraph_index=ref.paragraph_index,
-            before=ref.paragraph_text,
-            after=paragraph_after,
-            author=f"JACoW prescreen ({', '.join(checks)})",
-            note="; ".join(f.message for f in fix_findings),
+            paragraph_index=index, before=before, after=apply_fixes(before, group),
+            author=f"JACoW prescreen ({', '.join(sorted({f.check_id for f in group}))})",
         ))
+
+    # --- Layout: paragraph and heading formatting (tracked) ------------
+    from src.autofix.word_format_fixes import format_fixes
+    from src.checks.docx_audit import audit_findings
+    try:
+        layout_fixes, layout_findings = format_fixes(doc_path)
+    except Exception:  # noqa: BLE001
+        layout_fixes, layout_findings = [], []
+    try:
+        layout_findings += audit_findings(doc_path)
+    except Exception:  # noqa: BLE001
+        pass
+    run_in = [f for f in layout_findings if f.check_id == "WORD-HEAD-04"]
+    if run_in:
+        # One note for all third-level headings on their own line.
+        layout_findings = [f for f in layout_findings if f.check_id != "WORD-HEAD-04"]
+        names = ", ".join(f"'{f.original}'" for f in run_in[:6])
+        layout_findings.append(type(run_in[0])(
+            check_id="WORD-HEAD-04", severity=run_in[0].severity,
+            message=(f"{len(run_in)} third-level heading(s) are on a line of their own ({names}). "
+                     "JACoW third-level headings are 10 pt bold and run into the paragraph "
+                     "text, followed by an em space."), original=names))
+    findings.extend(layout_findings)
+    formats: list[tuple[int, dict, str]] = []
+    for fix in layout_fixes:
+        corrections.append({
+            "id": f"W{len(corrections) + 1:03d}",
+            "tier": fix.tier,
+            "check_id": fix.check_id,
+            "checks": [fix.check_id],
+            "reference": None,
+            "paragraph_index": fix.paragraph_index,
+            "before": para_text.get(fix.paragraph_index, ""),
+            "after": para_text.get(fix.paragraph_index, ""),
+            "format": fix.as_dict(),
+            "shown_before": para_text.get(fix.paragraph_index, "")[:120],
+            "shown_after": "(formatting) " + fix.message,
+            "message": fix.message,
+            "more": [],
+        })
+        formats.append((fix.paragraph_index, fix.as_dict(), f"JACoW prescreen ({fix.check_id})"))
 
     # --- Word tracked changes ------------------------------------------
     tracked_name: str | None = None
     revisions = 0
     skipped: list = []
-    if rewrites:
+    if rewrites or formats:
         from src.output.docx_tracked import write_tracked_docx
 
         tracked_path = out_dir / f"{doc_path.stem}_tracked.docx"
         try:
             _path, revision_blocks, skipped = write_tracked_docx(
-                doc_path, tracked_path, rewrites,
+                doc_path, tracked_path, rewrites, formats,
             )
             # Report *corrections*, not revision blocks: one correction can be
             # several w:ins/w:del pairs, and an editor counts references.
-            revisions = len(rewrites) - len(skipped)
+            # A reference whose link line was also rewritten is still one
+            # correction, so count references, not paragraphs.
+            skipped_index = {r.paragraph_index for r in skipped}
+            revisions = sum(
+                1 for c in corrections
+                if c.get("paragraph_index", -1) >= 0
+                and c["paragraph_index"] not in skipped_index
+                and not any(m["paragraph_index"] in skipped_index for m in c.get("more") or [])
+            )
             tracked_name = tracked_path.name
         except Exception as exc:  # noqa: BLE001 — never lose the report over this
             findings.append(Finding(
@@ -222,7 +335,7 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
             check_id="WORD-TRACK-00",
             severity=Severity.INFO,
             message=(
-                f"{revisions} reference(s) corrected as tracked changes in "
+                f"{revisions} correction(s) written as tracked changes in "
                 f"{tracked_name}. Open it in "
                 "Word and use Review → Accept or Reject on each one; rejecting restores "
                 "the author's text exactly."
@@ -239,7 +352,7 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
         ))
     if rejected_rewrites:
         global_findings.append(Finding(
-            check_id="FMT-REF-01",
+            check_id="FMT-REF-03",
             severity=Severity.INFO,
             message=(
                 f"{rejected_rewrites} reference(s) were left exactly as submitted because "
@@ -319,40 +432,45 @@ _CONTAINER_STOP_RE = re.compile(
 )
 
 
-def _container_from_raw(raw: str) -> str | None:
-    r"""The journal or proceedings name in ``authors, "title," CONTAINER, vol. N…``.
+_TRAILING_LINK_RE = re.compile(r"\s*((?:doi:|https?://)\S+)\s*$", re.IGNORECASE)
 
-    ``extract_from_raw`` misses the container for this very common Word shape —
-    a curly-quoted title followed by the journal — so the formatter emitted a
-    reference with the journal name simply absent.  The rewrite verifier catches
-    that as dropped words and keeps the original, which is safe but leaves the
-    reference unimproved; extracting the container fixes the cause.
 
-    Returns a substring of *raw*, verbatim, or ``None``.  Nothing is inferred:
-    if the shape is not recognised the caller goes without.
+def _split_link_paragraph(ref, corrected: str) -> tuple[str, list[dict]] | None:
+    """Write a reference whose link sits on its own line as two revisions.
+
+    One test paper put every reference's DOI or URL in the paragraph below it.  The
+    corrected text is split at its trailing link: the entry paragraph gets
+    the text, the link paragraph gets the link (e.g. https://doi.org/… ->
+    doi:…).  Returns the first paragraph's new text and the extra rewrite,
+    or None when the split is not clean.
     """
-    closing = None
-    for quote in ("\u201d", "\u2019\u2019", "''", '"'):
-        index = raw.find(quote, raw.find(quote) + 1) if quote == '"' else raw.find(quote)
-        if index > 0:
-            closing = index + len(quote) if closing is None else min(closing, index + len(quote))
-    if closing is None:
+    if len(ref.continuations) != 1:
         return None
-
-    tail = raw[closing:].lstrip(" ,.")
-    for segment in tail.split(","):
-        candidate = segment.strip().strip(".").strip()
-        if not candidate:
-            continue
-        if _CONTAINER_STOP_RE.match(candidate):
-            return None          # went straight to volume/pages: no container
-        if len(candidate) < 3 or not re.search(r"[A-Za-z]{3}", candidate):
-            return None
-        # "in Proc. IPAC'23" is a container with a lead-in; the formatter adds
-        # the "in Proc." itself, so hand it the bare name.
-        candidate = re.sub(r"^in\s+Proc\.?\s*", "", candidate, flags=re.IGNORECASE)
-        return candidate.strip() or None
-    return None
+    link_index, link_text = ref.continuations[0]
+    link_clean = link_text.strip()
+    if not re.match(r"(?:doi:|https?://|www\.)", link_clean, re.IGNORECASE):
+        return None
+    match = _TRAILING_LINK_RE.search(corrected)
+    if not match:
+        return None
+    head, tail = corrected[:match.start()].rstrip(), match.group(1)
+    if tail.endswith(".") and not link_clean.endswith("."):
+        tail = tail[:-1]          # a full stop after a URL is not part of it
+    raw_first = ref.raw_text[: len(ref.raw_text) - len(link_clean)].rstrip()
+    if not ref.raw_text.endswith(link_clean):
+        return None
+    first_after = _rebuild_paragraph(ref.paragraph_text, raw_first, head)
+    if first_after is None:
+        return None
+    lead = link_text[: len(link_text) - len(link_text.lstrip())]
+    trail = link_text[len(link_text.rstrip()):]
+    more = []
+    if tail != link_clean:
+        more.append({"paragraph_index": link_index, "before": link_text,
+                     "after": f"{lead}{tail}{trail}"})
+    if first_after == ref.paragraph_text and not more:
+        return None
+    return first_after, more
 
 
 def _rebuild_paragraph(paragraph_text: str, raw_body: str, corrected_body: str) -> str | None:
@@ -399,146 +517,6 @@ def _find_word_doc(folder: Path) -> Path:
 
 # ---------------------------------------------------------------------------
 # Verified whole-reference reformat
-# ---------------------------------------------------------------------------
-
-def _verified_reformat(ref, line_corrected: str):
-    """Reformat one reference to JACoW style, but only if it verifies.
-
-    Returns ``(formatted_or_None, accept_finding, rejection_finding)``.
-    """
-    formatted, finding = _format_word_reference(ref, line_corrected, ref_n=ref.n)
-    if not formatted or formatted.strip() == line_corrected.strip():
-        return None, None, None
-
-    verdict = check_rewrite(
-        line_corrected, formatted,
-        allow_case_change=False,
-        allowed_substitutions=_ALLOWED_SUBSTITUTIONS.get(ref.n, ()),
-    )
-    if verdict.ok:
-        return formatted, finding, None
-
-    risky = proper_noun_risk(line_corrected, formatted)
-    detail = verdict.reason
-    if risky:
-        detail += f" (words at risk: {', '.join(risky[:4])})"
-    return None, None, Finding(
-        check_id="FMT-REF-01",
-        severity=Severity.INFO,
-        line=ref.n,
-        message=(
-            f"Reference [{ref.n}]: a JACoW-style rewrite was computed but rejected "
-            f"because it would have {detail}. The reference is unchanged."
-        ),
-        original=line_corrected[:220],
-    )
-
-
-def _format_word_reference(ref, line_corrected: str, *, ref_n: int):
-    """Run the JACoW formatter over the line-corrected reference text.
-
-    Unchanged in intent from the previous version — it is the *verification*
-    around it that changed. The formatter still fills conference metadata from
-    the offline JACoW table and normalises the journal title, and still never
-    invents a value it was not given.
-    """
-    from src.refs import JacoWConnector, format_ref, normalize_journal
-
-    _ALLOWED_SUBSTITUTIONS.pop(ref_n, None)
-    if not (ref.title and ref.authors):
-        return line_corrected, None
-
-    record: dict = {
-        "authors_raw": " and ".join(ref.authors),
-        "title": ref.title,
-    }
-
-    year = re.search(r"\b(19|20)\d{2}\b", ref.raw_text or "")
-    if not year:
-        return line_corrected, None
-    record["year"] = year.group(0)
-
-    if ref.ref_type:
-        record["ref_type"] = ref.ref_type
-    if ref.doi:
-        record["doi"] = ref.doi
-    if ref.url:
-        record["url"] = ref.url
-
-    raw = ref.raw_text or ""
-    conference = re.search(r"\bin\s+Proc\.\s*([A-Za-z][A-Za-z0-9'’\-]+)", raw)
-    if conference:
-        record["conference"] = conference.group(1)
-    if (ref.ref_type or "").lower() == "arxiv":
-        arxiv = re.search(r"arXiv:\s*([\w.\-]+/?\d+|\d{4}\.\d{4,5})", raw, re.IGNORECASE)
-        if arxiv:
-            record["arxiv_id"] = arxiv.group(1)
-
-    from src.refs.extract import extract_from_raw
-
-    extracted = extract_from_raw(raw)
-    for key in ("city", "country", "month", "pages", "paper_id",
-                "doi", "journal", "volume", "issue", "conference", "year"):
-        if extracted.get(key) and not record.get(key):
-            record[key] = extracted[key]
-
-    # Last resort for the container title, taken verbatim from the reference.
-    if not record.get("journal") and not record.get("conference") \
-            and not record.get("booktitle"):
-        container = _container_from_raw(raw)
-        if container:
-            kind = (record.get("ref_type") or "").lower()
-            if kind.startswith(("proceedings", "conference")):
-                record["conference"] = container
-            elif kind in ("book", "book_chapter"):
-                record["booktitle"] = container
-            else:
-                record["journal"] = container
-
-    if record.get("conference"):
-        record["conference"] = re.sub(r"['’]\d{2,4}$", "", record["conference"])
-        if record.get("year"):
-            record = JacoWConnector(allow_network=False).complete_record(record, [])
-    substitutions: list[tuple[str, str]] = []
-    if record.get("journal"):
-        normalised = normalize_journal(record["journal"])
-        if normalised and normalised != record["journal"]:
-            # An ISO-4 abbreviation is what JACoW asks for, so declare it to the
-            # verifier rather than letting it read as five dropped words.
-            substitutions.append((record["journal"], normalised))
-            record["journal"] = normalised
-
-    try:
-        formatted = format_ref(record, record.get("ref_type", "journal"))
-    except Exception:  # noqa: BLE001
-        return line_corrected, None
-
-    # The formatter lays references out for LaTeX, where a newline is
-    # whitespace.  Inside a Word paragraph it is not: collapse it, or the
-    # corrected reference carries a stray break.
-    formatted = " ".join((formatted or "").split())
-    if not formatted or formatted == " ".join(line_corrected.split()):
-        # No-op: the caller keeps its own text and no finding is emitted.  An
-        # "improvement" that changes nothing must never be reported.
-        return line_corrected, None
-
-    _ALLOWED_SUBSTITUTIONS[ref_n] = substitutions
-    return formatted, Finding(
-        check_id="FMT-REF-01",
-        severity=Severity.INFO,
-        line=ref_n,
-        original=line_corrected[:240],
-        suggested=formatted[:240],
-        message=(
-            f"Reference [{ref_n}] reformatted to JACoW Annex B style; verified to "
-            "preserve every number, DOI, word and capital in the original."
-        ),
-        auto_fixed=True,
-    )
-
-
-# ---------------------------------------------------------------------------
-# report.md for Word submissions
 # ---------------------------------------------------------------------------
 
 def _write_word_report_md(
@@ -631,7 +609,7 @@ def _write_word_report_json(
         "title": parsed.title,
         "authors": [],
         "build": (
-            f"{revisions} reference(s) corrected as tracked changes"
+            f"{revisions} correction(s) written as tracked changes"
             if tracked_name else "no corrections needed"
         ),
         "findings": [f.model_dump() for f in findings],

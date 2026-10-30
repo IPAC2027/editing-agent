@@ -106,6 +106,9 @@ def compile_tex(
     # Mirror images into every subdirectory referenced by \includegraphics
     _setup_figure_dirs(build_dir / f"{paper_id}.tex", build_dir, image_files)
 
+    # Author files are untrusted: a latexmkrc is Perl that latexmk would run.
+    _remove_untrusted_config(build_dir)
+
     # --- 3. Run LaTeX ---
     tex_file = build_dir / f"{paper_id}.tex"
     result = _run_latex(tex_file, build_dir, use_biblatex=use_biblatex)
@@ -209,6 +212,24 @@ def _extract_zips(build_dir: Path) -> list[Path]:
     return extracted
 
 
+# Files a submission must never be able to place in the build directory.
+# latexmk reads ``latexmkrc`` / ``.latexmkrc`` from its working directory, and
+# those files are Perl: a submission carrying one could run any command as the
+# editor.  ``-norc`` below stops latexmk reading them; deleting them as well
+# means a later change to the command line cannot reopen the hole.
+_UNTRUSTED_CONFIG_NAMES = frozenset({"latexmkrc", ".latexmkrc"})
+
+
+def _remove_untrusted_config(build_dir: Path) -> list[Path]:
+    """Delete build-tool configuration files that arrived with a submission."""
+    removed: list[Path] = []
+    for path in build_dir.rglob("*"):
+        if path.name.lower() in _UNTRUSTED_CONFIG_NAMES and (path.is_file() or path.is_symlink()):
+            path.unlink()
+            removed.append(path)
+    return removed
+
+
 def _copy_dir_contents(src: Path, dst: Path) -> None:
     """Copy all files from *src* (flat) into *dst*, preserving nothing."""
     for item in src.iterdir():
@@ -235,7 +256,8 @@ def _run_latex(tex: Path, cwd: Path, *, use_biblatex: bool) -> BuildResult:
 
 def _run_latexmk(tex: Path, cwd: Path) -> BuildResult:
     cmd = [
-        "latexmk", "-pdf",
+        "latexmk", "-norc", "-pdf",
+        "-pdflatex=pdflatex -no-shell-escape %O %S",
         "-interaction=nonstopmode",
         "-halt-on-error",
         tex.name,
@@ -267,7 +289,8 @@ def _run_pdflatex_sequence(
         )
 
     def _pdf(extra_args: list[str] | None = None) -> subprocess.CompletedProcess:
-        cmd = ["pdflatex", "-interaction=nonstopmode"] + (extra_args or []) + [tex.name]
+        cmd = (["pdflatex", "-no-shell-escape", "-interaction=nonstopmode"]
+               + (extra_args or []) + [tex.name])
         return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
                                  encoding="utf-8", errors="replace", timeout=120)
 

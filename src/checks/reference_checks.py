@@ -461,6 +461,52 @@ def _fetch_crossref_work(doi: str) -> dict | None:
         return resp.json().get("message", {})
 
 
+def _fetch_datacite_work(doi: str) -> dict | None:
+    """Fetch DataCite metadata for *doi*, shaped like a Crossref message.
+
+    JACoW proceedings DOIs (10.18429/…) and arXiv DOIs are registered with
+    DataCite, not Crossref, so without this every JACoW DOI had no metadata to
+    compare a reference against.  Only the fields the matcher reads are mapped:
+    ``title`` (a list) and ``issued`` (``date-parts``).
+    """
+    doi = doi.strip().removeprefix("doi:").strip().rstrip('.,;)]}')
+    if not doi:
+        return None
+    with STATUS.attempt("datacite") as outcome:
+        try:
+            resp = httpx.get(
+                f"https://api.datacite.org/dois/{doi}",
+                headers={"Accept": "application/vnd.api+json",
+                         "User-Agent": "aiagent-prescreen/0.1"},
+                timeout=8.0,
+            )
+        except Exception as exc:  # noqa: BLE001 — network failure, not a data answer
+            outcome.failed(f"{type(exc).__name__}: {exc}")
+            return None
+        if resp.status_code == 404:
+            outcome.succeeded()
+            return None
+        if resp.status_code != 200:
+            outcome.failed(f"HTTP {resp.status_code}")
+            return None
+        outcome.succeeded()
+        attrs = (resp.json().get("data") or {}).get("attributes") or {}
+    titles = [t.get("title", "") for t in attrs.get("titles") or [] if t.get("title")]
+    message: dict = {"title": titles[:1]}
+    year = attrs.get("publicationYear")
+    if year:
+        try:
+            message["issued"] = {"date-parts": [[int(year)]]}
+        except (TypeError, ValueError):
+            pass
+    return message
+
+
+def _fetch_doi_metadata(doi: str) -> dict | None:
+    """Crossref first, then DataCite — the two registries JACoW references use."""
+    return _fetch_crossref_work(doi) or _fetch_datacite_work(doi)
+
+
 def _title_tokens(text: str) -> set[str]:
     cleaned = re.sub(r'[^a-z0-9]+', ' ', text.lower())
     return {
@@ -507,10 +553,15 @@ def _crossref_author_surnames(message: dict) -> set[str]:
 
 
 def _doi_matches_reference(ref: Reference, doi: str, message: dict | None = None) -> bool:
-    """Return True when DOI metadata is a plausible match for *ref*."""
-    message = message or _fetch_crossref_work(doi)
+    """Return True when DOI metadata is a plausible match for *ref*.
+
+    A DOI that merely resolves is not evidence that it belongs to *this*
+    reference.  When the reference has a title and neither Crossref nor
+    DataCite returns metadata to compare it with, the DOI is not offered.
+    """
+    message = message or _fetch_doi_metadata(doi)
     if not message:
-        return _validate_doi_online(doi)
+        return False if ref.title else _validate_doi_online(doi)
 
     if ref.title:
         ref_title = ref.title.strip()

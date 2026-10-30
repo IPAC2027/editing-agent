@@ -1,0 +1,63 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The agent's own suite, offline, against the formatter release pinned in
+  # pyproject.toml — plus the formatter's test bibliography run through the
+  # agent's adapter (tests/test_shared_bibliography.py).
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install (locked)
+        run: uv sync --locked --extra dev
+
+      - name: Which formatter release is pinned
+        id: pin
+        shell: bash
+        run: |
+          tag=$(grep -oE 'jacow-reference-formatter@v[0-9.]+' pyproject.toml | cut -d@ -f2)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      # The shared bibliography lives in the formatter repository.
+      - uses: actions/checkout@v4
+        with:
+          repository: IPAC2027/jacow-reference-formatter
+          ref: ${{ steps.pin.outputs.tag }}
+          path: _formatter
+
+      - name: Tests
+        env:
+          JACOW_FORMATTER_DIR: ${{ github.workspace }}/_formatter
+        run: uv run pytest -q
+
+  # The measurement against what real editors did.  The corpus is other
+  # people's unpublished papers and never leaves the editors' machines, so this
+  # runs only on a self-hosted runner that has one, by hand or nightly.
+  # Configure: a runner labelled "jacow-corpus" and a repository variable
+  # JACOW_CORPUS pointing at a conference pulled with `indico-pull`.
+  confirmation-rate:
+    if: github.event_name == 'workflow_dispatch' && vars.JACOW_CORPUS != ''
+    runs-on: [self-hosted, jacow-corpus]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked
+      - name: Score against the editors' corrections
+        run: uv run python main.py corpus-score "${{ vars.JACOW_CORPUS }}" --json score.json
+      - name: Fail if confirmation fell
+        run: uv run python scripts/confirmation_gate.py score.json scripts/confirmation_baseline.json

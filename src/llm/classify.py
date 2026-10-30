@@ -23,15 +23,11 @@ where its answer is **mechanically checkable**:
     one label per token; a response with the wrong number of labels, or any
     token it does not recognise, is rejected.
 
-:func:`classify_reference_type`
-    One token from a closed set. Replaces a regex cascade, and is trivial to
-    evaluate against the example corpus.
-
-:func:`segment_reference`
-    Split messy reference text into fields under a **verbatim constraint**:
-    every character of every returned field must be a contiguous substring of
-    the input. Checked in code, which makes invention structurally impossible
-    rather than merely discouraged.
+Reference segmentation and line-break hyphens are the reference formatter's
+job (``jacow_formatter``), under the same verbatim rule: the model may point
+at spans of the citation, never supply them.  The agent's own copies of
+reference-type classification and segmentation were removed when the
+formatter became the single reference engine.
 
 :func:`adjudicate_finding`
     Ask the model to *suppress* a deterministic finding it judges wrong. Used
@@ -66,17 +62,6 @@ logger = logging.getLogger(__name__)
 
 #: How many samples must agree before a classification is accepted.
 SAMPLES = int(os.environ.get("LLM_SAMPLES", "3"))
-
-REFERENCE_TYPES = (
-    "proceedings",
-    "journal",
-    "preprint",
-    "book",
-    "thesis",
-    "report",
-    "software",
-    "web",
-)
 
 
 class WordLabel(str, Enum):
@@ -185,7 +170,7 @@ def classify_title_words(title: str, words: list[str]) -> dict[str, WordLabel]:
     *words* are the tokens the deterministic caser could not classify, so the
     model is only ever asked about the residue — never about the whole title,
     and never for rewritten text.  Every label is applied by
-    :func:`src.refs.text_utils.sent_case_report`'s caller, in code; the model's
+    :func:`jacow_formatter.sent_case_report`'s caller, in code; the model's
     output is data.
 
     Any response that does not label exactly the requested words is discarded,
@@ -237,97 +222,7 @@ def _normalise_labels(payload: dict | None, words: list[str]) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# 2. Reference-type classification
-# ---------------------------------------------------------------------------
-
-def classify_reference_type(raw_text: str) -> str | None:
-    """One value from :data:`REFERENCE_TYPES`, or ``None`` to abstain."""
-    if not raw_text.strip() or not available():
-        return None
-
-    user = (
-        "Classify this bibliographic reference by the kind of work it cites.\n\n"
-        f"Reference:\n{raw_text[:1200]}\n\n"
-        f'Reply with JSON: {{"type": one of {list(REFERENCE_TYPES)}, '
-        '"confident": true|false}\n'
-        "Use \"confident\": false rather than guessing. Do not return any other text."
-    )
-    samples = [_ask_json(user) for _ in range(SAMPLES)]
-    normalised = []
-    for sample in samples:
-        if not sample:
-            normalised.append(None)
-            continue
-        value = str(sample.get("type", "")).strip().lower()
-        if value not in REFERENCE_TYPES or sample.get("confident") is not True:
-            normalised.append(None)
-            continue
-        normalised.append({"type": value})
-    agreed = _unanimous(normalised)
-    return agreed["type"] if agreed else None
-
-
-# ---------------------------------------------------------------------------
-# 3. Verbatim field segmentation
-# ---------------------------------------------------------------------------
-
-_SEGMENT_FIELDS = (
-    "authors", "title", "container_title", "volume", "issue",
-    "pages", "year", "month", "doi", "venue", "publisher",
-)
-
-
-def segment_reference(raw_text: str) -> dict[str, str] | None:
-    """Split *raw_text* into fields, each a verbatim substring of the input.
-
-    The constraint is the whole point.  Every returned value is checked to be a
-    contiguous substring of the input, so the model cannot supply a page range
-    or a DOI that was not already in front of it.  One failed field discards
-    the entire response: a partially-invented record is worse than none,
-    because it looks trustworthy.
-    """
-    if not raw_text.strip() or not available():
-        return None
-
-    user = (
-        "Split this reference into fields by COPYING text out of it.\n\n"
-        f"Reference:\n{raw_text[:1200]}\n\n"
-        f'Reply with JSON: {{"fields": {{<field>: "<exact substring>"}}}} using only '
-        f"these field names: {list(_SEGMENT_FIELDS)}\n"
-        "Every value must be copied character for character from the reference "
-        "above. Do not normalise, reorder, abbreviate, correct or complete "
-        "anything. Omit a field entirely if it is not present. Do not return any "
-        "other text."
-    )
-    samples = [_ask_json(user) for _ in range(SAMPLES)]
-    normalised = [_verbatim_only(sample, raw_text) for sample in samples]
-    return _unanimous(normalised)
-
-
-def _verbatim_only(payload: dict | None, source: str) -> dict | None:
-    """Keep a segmentation only if every value is a substring of *source*."""
-    if not payload:
-        return None
-    fields = payload.get("fields")
-    if not isinstance(fields, dict):
-        return None
-    result: dict[str, str] = {}
-    for name, value in fields.items():
-        key = str(name).strip().lower()
-        if key not in _SEGMENT_FIELDS:
-            return None
-        text = str(value).strip()
-        if not text:
-            continue
-        if text not in source:
-            logger.debug("discarding segmentation: %r is not in the source", text[:80])
-            return None
-        result[key] = text
-    return result or None
-
-
-# ---------------------------------------------------------------------------
-# 4. False-positive suppression
+# 2. Adjudicating deterministic findings (suppress only)
 # ---------------------------------------------------------------------------
 
 def adjudicate_finding(check_id: str, message: str, excerpt: str) -> Verdict:
@@ -420,9 +315,9 @@ def resolve_title_casing(title: str, *, evidence: set[str] | None = None):
     never gets to return prose.  Words it also cannot classify stay UNSURE, and
     a title with any UNSURE word is left exactly as the author wrote it.
 
-    Returns a :class:`~src.refs.text_utils.TitleCasing`.
+    Returns a :class:`jacow_formatter.TitleCasing`.
     """
-    from src.refs.text_utils import TitleCasing, sent_case_report
+    from src.references import TitleCasing, sent_case_report
 
     report = sent_case_report(title, evidence=evidence)
     if not report.unsure or not available():

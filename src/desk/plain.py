@@ -189,6 +189,42 @@ EXPLANATIONS: dict[str, Explanation] = {
         ),
         owner=EDITOR,
     ),
+    "FMT-REF-03": Explanation(
+        "Reference left as written",
+        "A JACoW-style rewrite was computed but would have lost or changed "
+        "information with no authoritative source behind it, so the reference "
+        "is unchanged. The note says what would have been lost; fix it by hand "
+        "if the formatting needs it.",
+        owner=EDITOR,
+    ),
+    "FMT-REF-02": Explanation(
+        "Reference punctuation",
+        "DOI form, 'et al.' punctuation, the comma before 'and', quotation "
+        "marks and dashes were put in JACoW form; nothing else in the "
+        "reference changed.",
+        fixed="reference punctuation and DOI form",
+        owner=TOOL,
+    ),
+    "REF-INT-01": Explanation(
+        "DOI belongs to another paper",
+        "The DOI in this reference resolves to a different publication, so "
+        "either the DOI or the rest of the reference is wrong.",
+        ask="Please check the DOI in this reference: it points to a different paper.",
+        owner=AUTHOR,
+    ),
+    "REF-INT-02": Explanation(
+        "Reference not found anywhere",
+        "Several indexes were searched and none has this reference. It may be "
+        "mistyped, unindexed, or not exist; check it by hand.",
+        owner=EDITOR,
+    ),
+    "REF-INT-03": Explanation(
+        "Reference not confirmed",
+        "The reference was not found in Crossref, DataCite or the JACoW "
+        "proceedings. This is common for reports, talks, strategy inputs, "
+        "preprints and older papers, and is not a fault.",
+        owner=TOOL,
+    ),
     "REF-NUM-02": Explanation(
         "Reference list reordered",
         "Reference numbers must count up in the order the paper first cites "
@@ -331,10 +367,10 @@ EXPLANATIONS: dict[str, Explanation] = {
     ),
     "PAGE-LIMIT-01": Explanation(
         "Over the page limit",
-        "Body text must fit in three pages; only the reference list may run "
-        "onto page four.",
+        "Body text must fit within the conference's page limit; only the "
+        "reference list may run onto the following page.",
         ask=(
-            "Please shorten the paper so the body text fits in three pages; only the reference list may run onto page four."
+            "Please shorten the paper so the body text fits within the page limit; only the reference list may run onto the following page."
         ),
         owner=AUTHOR,
     ),
@@ -387,6 +423,255 @@ EXPLANATIONS: dict[str, Explanation] = {
         "The edited paper was built successfully, so none of the automatic "
         "changes broke it.",
         owner=TOOL,
+    ),
+    "WORD-TITLE-01": Explanation(
+        "Title not in capitals",
+        "The paper title is set in capitals, keeping the case of units and "
+        "names such as GeV or SwissFEL.",
+        owner=EDITOR,
+    ),
+    "WORD-AUTH-02": Explanation(
+        "'and' in the author list",
+        "Author names are separated by commas only.",
+        owner=EDITOR,
+    ),
+    "WORD-UNIT-01": Explanation(
+        "Space before a unit",
+        "A value and its unit are joined by a non-breaking space so they never "
+        "split across lines.",
+        owner=EDITOR,
+    ),
+    "WORD-UNIT-02": Explanation(
+        "Unit symbol case",
+        "Units use the standard symbol and case, such as MeV or GHz.",
+        owner=EDITOR,
+    ),
+    "WORD-PARA-01": Explanation(
+        "First-line indent",
+        "Body paragraphs start with a 0.33 cm first-line indent; a direct override set it to something else.",
+        owner=EDITOR,
+    ),
+    "WORD-PARA-02": Explanation(
+        "Widow/orphan control",
+        "Widow/orphan control keeps a paragraph from leaving a single line at the top or bottom of a column.",
+        owner=EDITOR,
+    ),
+    "WORD-PARA-03": Explanation(
+        "Body text in the wrong style",
+        "Body text uses the body-text style: 10 pt, justified, first line indented 0.33 cm.",
+        owner=EDITOR,
+    ),
+    "WORD-PARA-04": Explanation(
+        "Body text font size",
+        "Body text is 10 pt; a direct font size overrides the style.",
+        owner=EDITOR,
+    ),
+    "WORD-HEAD-03": Explanation(
+        "Heading separated from its text",
+        "A heading is kept with the next paragraph, so a column break never falls between them.",
+        owner=EDITOR,
+    ),
+    "WORD-HEAD-04": Explanation(
+        "Third-level heading on its own line",
+        "Third-level headings are 10 pt bold and run into the paragraph text, followed by an em space.",
+        owner=EDITOR,
+    ),
+    "WORD-HEAD-05": Explanation(
+        "Subsection heading format",
+        "Subsection headings are 12 pt italic and left aligned.",
+        owner=EDITOR,
+    ),
+    "WORD-LAYOUT-01": Explanation(
+        "Page layout",
+        "The page is 595 by 792 pt with JACoW margins and two columns of 82.5 mm.",
+        owner=AUTHOR,
+    ),
+    "WORD-FONT-01": Explanation(
+        "Font not allowed",
+        "Only Times New Roman, Symbol and Liberation Mono (for DOIs and URLs) are used.",
+        owner=AUTHOR,
+    ),
+    "WORD-FONT-02": Explanation(
+        "Body font size",
+        "Body text is 10 pt.",
+        owner=EDITOR,
+    ),
+    "WORD-FONT-03": Explanation(
+        "Fonts not embedded",
+        "Fonts are embedded in the Word file (Options, Save, Embed fonts in the file).",
+        owner=AUTHOR,
+    ),
+    "WORD-LINK-01": Explanation(
+        "Web address hyperlinked",
+        "Only DOIs are hyperlinked; other web addresses are plain text.",
+        owner=EDITOR,
+    ),
+    "WORD-LINK-02": Explanation(
+        "DOI not hyperlinked",
+        "Every DOI carries a hyperlink.",
+        owner=EDITOR,
+    ),
+    "WORD-PAGENUM-01": Explanation(
+        "Page numbers present",
+        "Papers carry no page numbers; they are added in the proceedings.",
+        owner=EDITOR,
+    ),
+    "WORD-FOOTNOTE-01": Explanation(
+        "Word footnotes used",
+        "Footnotes go in a text box at the bottom of the column, never Word's footnote feature.",
+        owner=AUTHOR,
+    ),
+    "WORD-REFSPACE-01": Explanation(
+        "Reference line spacing",
+        "References use line spacing of exactly 10.4 pt.",
+        owner=EDITOR,
+    ),
+    "WORD-TITLE-03": Explanation(
+        "Title not in capitals",
+        "The title is 14 pt bold uppercase.",
+        owner=EDITOR,
+    ),
+    "WORD-AUDIT-01": Explanation(
+        "Document check",
+        "A document-level check from the JACoW formatting audit; see the note.",
+        owner=TOOL,
+    ),
+    "WORD-HEAD-01": Explanation(
+        "Numbered heading",
+        "JACoW section and subsection headings are not numbered.",
+        owner=EDITOR,
+    ),
+    "WORD-HEAD-02": Explanation(
+        "Subsection heading case",
+        "Subsection headings use Title Case: principal words capitalised.",
+        owner=EDITOR,
+    ),
+    "WORD-STYLE-01": Explanation(
+        "Body text in a heading style",
+        "A paragraph of ordinary text carries a heading style, so it is laid "
+        "out as a heading. Give it the body-text style.",
+        owner=EDITOR,
+    ),
+    "WORD-CAP-01": Explanation(
+        "Caption label",
+        "Captions start 'Figure 1:' or 'Table 1:', with a colon after the number.",
+        owner=EDITOR,
+    ),
+    "WORD-CAP-02": Explanation(
+        "Figure caption full stop",
+        "A figure caption ends with a full stop.",
+        owner=EDITOR,
+    ),
+    "WORD-CAP-03": Explanation(
+        "Table caption full stop",
+        "A table caption written as a heading has no full stop at the end.",
+        owner=EDITOR,
+    ),
+    "TXT-ACR-01": Explanation(
+        "Acronym not expanded",
+        "Every acronym is written out in full the first time it is used, in the "
+        "abstract and again in the body.",
+        ask=("Please expand each acronym the first time it is used, in the abstract "
+             "and in the main text."),
+        owner=AUTHOR,
+    ),
+    "TXT-ABS-01": Explanation(
+        "Citation in the abstract",
+        "The abstract must stand alone, so it may not cite references.",
+        ask="Please remove the reference citation from the abstract.",
+        owner=AUTHOR,
+    ),
+    "TXT-CITE-01": Explanation(
+        "Citations in separate brackets",
+        "Several citations go in one bracket, as in [1, 2], with ranges such "
+        "as [1-3] where they apply.",
+        owner=EDITOR,
+    ),
+    "TXT-TAB-01": Explanation(
+        "'Tab.' abbreviation",
+        "A table reference is always written in full, as 'Table 1'.",
+        owner=EDITOR,
+    ),
+    "TXT-FIG-01": Explanation(
+        "'Fig.' at the start of a sentence",
+        "Use 'Fig. 1' within a sentence, but write 'Figure 1' when it begins one.",
+        owner=EDITOR,
+    ),
+    "TXT-EQ-01": Explanation(
+        "Equation reference",
+        "Within a sentence an equation is cited as 'Eq. (1)', with the number "
+        "in parentheses.",
+        owner=EDITOR,
+    ),
+    "REF-FORM-01": Explanation(
+        "Unpublished paper cited as published",
+        "A paper that was presented but never published has no proceedings, so "
+        "it is cited as 'presented at', without 'in Proc.'.",
+        owner=EDITOR,
+    ),
+    "REF-FORM-02": Explanation(
+        "Journal named for a submitted paper",
+        "For a paper submitted but not yet accepted, the journal is not named: "
+        "'submitted for publication'.",
+        owner=EDITOR,
+    ),
+    "PDF-00": Explanation(
+        "PDF not checked",
+        "The author's PDF could not be read, so its page size, margins, fonts "
+        "and links were not checked.",
+        owner=TOOL,
+    ),
+    "PDF-SIZE-01": Explanation(
+        "Wrong page size",
+        "JACoW papers are 595 by 792 points; A4 and US Letter pages are both "
+        "the wrong size.",
+        ask=("Please produce the PDF from the JACoW template, whose page size is "
+             "595 by 792 points (20.99 by 27.94 cm)."),
+        owner=AUTHOR,
+    ),
+    "PDF-MARGIN-01": Explanation(
+        "Content in the margins",
+        "Text or images reach into the page margins, which must stay clear.",
+        ask=("Please keep all text and figures inside the JACoW margins: 19 mm at "
+             "the top and bottom and 20 mm at the sides."),
+        owner=AUTHOR,
+    ),
+    "PDF-PAGENUM-01": Explanation(
+        "Page numbers present",
+        "Page numbers are added when the proceedings are produced, so the "
+        "paper must not carry its own.",
+        ask="Please remove the page numbers from the paper.",
+        owner=AUTHOR,
+    ),
+    "PDF-FONT-01": Explanation(
+        "Font not embedded",
+        "Every font must be embedded in the PDF, including those inside "
+        "figures, or the paper may not display or print correctly.",
+        ask=("Please embed all fonts when producing the PDF (in Word: Options, "
+             "Save, Embed fonts in the file), including the fonts in figures."),
+        owner=AUTHOR,
+    ),
+    "PDF-FONT-02": Explanation(
+        "Bitmap font",
+        "A bitmap (Type 3) font displays and prints poorly; it usually comes "
+        "from a figure or an old LaTeX setup.",
+        ask=("Please regenerate the affected figures or PDF so that they use "
+             "outline (Type 1 or TrueType) fonts."),
+        owner=AUTHOR,
+    ),
+    "PDF-DOI-01": Explanation(
+        "DOI split across lines",
+        "A DOI must stay on one line so that it can be read and copied whole.",
+        ask=("Please keep each DOI on a single line, starting it on a new line "
+             "where necessary."),
+        owner=AUTHOR,
+    ),
+    "PDF-LINK-01": Explanation(
+        "Web address hyperlinked",
+        "Only DOIs may be hyperlinked; other web addresses may appear as plain "
+        "text but must not be links.",
+        ask="Please remove the hyperlinks from web addresses that are not DOIs.",
+        owner=AUTHOR,
     ),
     "BUILD-SKIP": Explanation(
         "Not compiled",

@@ -734,19 +734,44 @@ def _write_reviewed_docx(paper: Paper) -> list[str]:
 
     from src.output.docx_tracked import ParagraphRewrite, write_tracked_docx
 
-    rewrites = [
-        ParagraphRewrite(
-            paragraph_index=c["paragraph_index"],
-            before=c["before"],
-            after=c["after"],
-            author=f"JACoW prescreen ({', '.join(c.get('checks') or [c['check_id']])})",
-        )
-        for c in accepted
-        if c.get("paragraph_index", -1) >= 0
-    ]
+    rewrites = []
+    # Main-text fixes are spans on a paragraph: every accepted span in one
+    # paragraph goes into a single rewrite of it.
+    spans_by_paragraph: dict[int, tuple[str, list[dict], list[str]]] = {}
+    for c in accepted:
+        if c.get("spans") and c.get("paragraph_index", -1) >= 0:
+            before, spans, checks = spans_by_paragraph.setdefault(
+                c["paragraph_index"], (c["before"], [], []))
+            spans.extend(c["spans"])
+            checks.extend(c.get("checks") or [c["check_id"]])
+    for index, (before, spans, checks) in sorted(spans_by_paragraph.items()):
+        after = before
+        for span in sorted(spans, key=lambda x: x["start"], reverse=True):
+            after = after[:span["start"]] + span["after"] + after[span["end"]:]
+        if after != before:
+            rewrites.append(ParagraphRewrite(
+                paragraph_index=index, before=before, after=after,
+                author=f"JACoW prescreen ({', '.join(sorted(set(checks)))})"))
+    for c in accepted:
+        if c.get("paragraph_index", -1) < 0 or c.get("spans") or c.get("format"):
+            continue
+        author = f"JACoW prescreen ({', '.join(c.get('checks') or [c['check_id']])})"
+        if c["after"] != c["before"]:
+            rewrites.append(ParagraphRewrite(paragraph_index=c["paragraph_index"],
+                                             before=c["before"], after=c["after"],
+                                             author=author))
+        # A reference whose link is on its own line is one correction made
+        # of two paragraph rewrites; both are accepted or rejected together.
+        for extra in c.get("more") or []:
+            rewrites.append(ParagraphRewrite(paragraph_index=extra["paragraph_index"],
+                                             before=extra["before"], after=extra["after"],
+                                             author=author))
+    formats = [(c["paragraph_index"], c["format"],
+                f"JACoW prescreen ({', '.join(c.get('checks') or [c['check_id']])})")
+               for c in accepted if c.get("format") and c.get("paragraph_index", -1) >= 0]
     try:
         _path, _revisions, _skipped = write_tracked_docx(
-            paper.source_path, target, rewrites,
+            paper.source_path, target, rewrites, formats,
         )
     except Exception as exc:  # noqa: BLE001
         raise DeskError(

@@ -241,6 +241,6 @@ def test_the_diffs_are_written_one_file_per_paper_plus_a_combined_one(
     combined = write(diffs, tmp_path / "_diffs")
 
     assert (tmp_path / "_diffs" / "AAA01.json").exists()
-    everything = json.loads(combined.read_text())
+    everything = json.loads(combined.read_text(encoding="utf-8"))
     assert everything[0]["hunks"][0]["after"] == "10~MeV"
     assert everything[0]["tags"] == ["TC12"]

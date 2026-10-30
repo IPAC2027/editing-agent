@@ -162,7 +162,7 @@ def test_the_manifest_carries_the_editors_labels(client: IndicoClient, tmp_path:
     _mock_reads()
 
     pull(client, tmp_path)
-    manifest = json.loads((tmp_path / "MOX01" / "manifest.json").read_text())
+    manifest = json.loads((tmp_path / "MOX01" / "manifest.json").read_text(encoding="utf-8"))
 
     assert [t["code"] for t in manifest["tags"]] == ["TC14", "QA01"]
     assert manifest["editor"] == "Kent Wootton"
@@ -177,7 +177,7 @@ def test_the_index_lists_every_paper_including_the_unsubmitted_ones(
     _mock_reads()
 
     pull(client, tmp_path)
-    index = json.loads((tmp_path / "index.json").read_text())
+    index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
 
     assert index["event_id"] == 82
     assert [p["code"] for p in index["papers"]] == ["MOX01", "WEP31"]
@@ -218,3 +218,102 @@ def test_only_selects_papers_by_code(client: IndicoClient, tmp_path: Path):
     plan = build_plan(client, only={"WEP31"})
 
     assert [p.row.code for p in plan.papers] == ["WEP31"]
+
+
+@respx.mock
+def test_the_edited_version_is_the_latest_revision_with_files(client: IndicoClient):
+    """Regression: the final revisions are often state changes without files
+    ("accepted"); taking the very last one left most papers with only the
+    author's version."""
+    detail = json.loads(json.dumps(DETAIL_JSON))
+    detail["revisions"].append({"id": 27100, "created_dt": "2025-06-25T10:00:00+00:00", "files": []})
+    respx.get(f"{BASE}/event/82/editing/api/paper/list").mock(
+        return_value=httpx.Response(200, json=LIST_JSON))
+    respx.get(f"{BASE}/event/82/api/contributions/6680/editing/paper").mock(
+        return_value=httpx.Response(200, json=detail))
+    plan = build_plan(client)
+    paper = next(p for p in plan.papers if p.row.code == "MOX01")
+    assert [(r.role, r.revision.id) for r in paper.revisions] == [
+        ("original", 26704), ("current", 26999)]
+    assert "1 with an edited version" in plan.summary()
+
+
+# --- File names an operating system cannot store (Oct 2026) -----------------------
+
+def test_safe_filename():
+    from src.indico_client.pull import safe_filename
+    assert safe_filename("MOPA001*.pdf") == "MOPA001_.pdf"
+    assert safe_filename('a<b>c:d"e|f?g.docx') == "a_b_c_d_e_f_g.docx"
+    assert safe_filename("../../etc/passwd") == "passwd"          # never leaves the folder
+    assert safe_filename("CON.pdf") == "_CON.pdf"
+    assert safe_filename("paper. ") == "paper"
+    assert safe_filename("MOPA001.pdf") == "MOPA001.pdf"
+
+
+@respx.mock
+def test_a_non_standard_file_name_does_not_stop_the_pull(client: IndicoClient, tmp_path):
+    """Regression: "MOPA001*.pdf" stopped the pull; the next files never came."""
+    from src.indico_client.pull import pull
+    detail = json.loads(json.dumps(DETAIL_JSON))
+    detail["revisions"][-1]["files"] = [
+        {"id": 3, "filename": "MOX01*.pdf", "size": 5, "file_type": 191,
+         "download_url": "/f/star.pdf", "external_download_url": ""},
+        {"id": 4, "filename": "MOX01.docx", "size": 12, "file_type": 192,
+         "download_url": "/f/broken.docx", "external_download_url": ""},
+        {"id": 5, "filename": "MOX01-figures.zip", "size": 3, "file_type": 193,
+         "download_url": "/f/figs.zip", "external_download_url": ""},
+    ]
+    respx.get(f"{BASE}/event/82/editing/api/paper/list").mock(
+        return_value=httpx.Response(200, json=LIST_JSON))
+    respx.get(f"{BASE}/event/82/api/contributions/6680/editing/paper").mock(
+        return_value=httpx.Response(200, json=detail))
+    respx.get(f"{BASE}/f/original.docx").mock(return_value=httpx.Response(200, content=b"0123456789"))
+    respx.get(f"{BASE}/f/star.pdf").mock(return_value=httpx.Response(200, content=b"%PDF-"))
+    respx.get(f"{BASE}/f/broken.docx").mock(return_value=httpx.Response(500))
+    respx.get(f"{BASE}/f/figs.zip").mock(return_value=httpx.Response(200, content=b"zip"))
+    plan = pull(client, tmp_path)
+    current = tmp_path / "MOX01" / "current" / "Source_Files"
+    assert (current / "MOX01_.pdf").read_bytes() == b"%PDF-"
+    assert (current / "MOX01-figures.zip").exists()               # the pull went on
+    assert not list(current.glob("*.part"))                       # nothing half-written left
+    assert len(plan.failures) == 1 and "MOX01.docx" in plan.failures[0]
+    manifest = json.loads((tmp_path / "MOX01" / "manifest.json").read_text(encoding="utf-8"))
+    names = {f["filename"]: f["saved_as"] for r in manifest["revisions"] for f in r["files"]}
+    assert names["MOX01*.pdf"] == "MOX01_.pdf"
+
+
+# --- A restarted pull does not read finished papers again (Oct 2026) --------------
+
+@respx.mock
+def test_a_restarted_pull_skips_reading_finished_papers(client: IndicoClient, tmp_path):
+    from src.indico_client.pull import build_plan, pull
+    respx.get(f"{BASE}/event/82/editing/api/paper/list").mock(
+        return_value=httpx.Response(200, json=LIST_JSON))
+    detail = respx.get(f"{BASE}/event/82/api/contributions/6680/editing/paper").mock(
+        return_value=httpx.Response(200, json=DETAIL_JSON))
+    respx.get(f"{BASE}/f/original.docx").mock(return_value=httpx.Response(200, content=b"0123456789"))
+    respx.get(f"{BASE}/f/current.docx").mock(return_value=httpx.Response(200, content=b"012345678901"))
+    pull(client, tmp_path)
+    assert json.loads((tmp_path / "MOX01" / "manifest.json").read_text(encoding="utf-8"))["complete"] is True
+    calls = detail.call_count
+    plan = build_plan(client, destination=tmp_path)
+    assert detail.call_count == calls                      # not read again
+    assert "1 already downloaded" in plan.summary() and not plan.fetchable
+    # index.json still describes the finished paper fully
+    pull(client, tmp_path, plan=plan)
+    index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
+    assert index["papers"][0]["revisions"][1]["role"] == "current"
+
+
+def test_an_old_manifest_without_the_edited_version_is_read_again(tmp_path):
+    from src.indico_client.pull import _already_complete
+    folder = tmp_path / "MOX01"
+    (folder / "original" / "Source_Files").mkdir(parents=True)
+    (folder / "original" / "Source_Files" / "MOX01.docx").write_bytes(b"0123456789")
+    manifest = {"revision_count": 3, "note": "", "revisions": [
+        {"role": "original", "files": [{"filename": "MOX01.docx", "size": 10}]}]}
+    (folder / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert _already_complete(folder, "first-last") is None   # the old pull missed "current"
+    manifest["revision_count"] = 1
+    (folder / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert _already_complete(folder, "first-last") is not None   # truly only the author's

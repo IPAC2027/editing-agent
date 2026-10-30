@@ -101,6 +101,8 @@ def write_git_history(
             cwd=repo,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env={
                 "GIT_AUTHOR_NAME": "aiagent prescreen",
                 "GIT_AUTHOR_EMAIL": "aiagent@localhost",
