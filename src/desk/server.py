@@ -297,6 +297,7 @@ class DeskHandler(BaseHTTPRequestHandler):
                 "/api/reopen": self._reopen,
                 "/api/format-references": self._format_references,
                 "/api/indico-refresh": self._indico_refresh,
+                "/api/title-authors": self._title_authors,
             }.get(route)
             if handler is None:
                 self._error("unknown address", HTTPStatus.NOT_FOUND)
@@ -325,6 +326,20 @@ class DeskHandler(BaseHTTPRequestHandler):
             self._error(f"Could not reach Indico ({type(exc).__name__}). Check the "
                         "internet connection; the list still shows what the pull "
                         "recorded.", HTTPStatus.BAD_GATEWAY)
+
+    def _title_authors(self, body: dict) -> None:
+        from src.desk import title_check
+
+        folder, review = self._with_state(body)
+        conference = indico_module.Conference.open(folder.parent.parent)
+        title_check.act(
+            review, str(body.get("action", "")), body,
+            front=title_check.front_for(folder, paper_module.Paper(folder).report),
+            record=conference.record(folder) if conference else None,
+        )
+        review.touch()
+        review.save(folder)
+        self._json(self._view(folder))
 
     def _format_references(self, body: dict) -> None:
         from src.desk.references_page import check_reference_list

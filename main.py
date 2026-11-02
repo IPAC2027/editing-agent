@@ -183,7 +183,8 @@ def indico(
 
     try:
         client = IndicoClient(base_url=url, event_id=event,
-                              token=load_token(), editable_type=editable_type)
+                              token=load_token(), editable_type=editable_type,
+                              read_only=True)
         if show_tags:
             table = Table(title=f"Tag vocabulary — event {event}")
             table.add_column("Code"); table.add_column("Used"); table.add_column("Title")

@@ -10,7 +10,51 @@ os.environ.setdefault("AIAGENT_DISABLE_JABREF", "1")
 os.environ.setdefault("AIAGENT_DISABLE_LTWA", "1")
 os.environ.setdefault("JACOW_DISABLE_JABREF", "1")
 
+import socket  # noqa: E402
+
 import pytest  # noqa: E402
+
+_LOOPBACK = {"127.0.0.1", "::1"}
+
+
+@pytest.fixture(autouse=True)
+def _offline(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+    """No test may open a connection off this machine — above all not to a live
+    Indico, where the editor's token is their whole account.
+
+    The desk's own server on 127.0.0.1 is allowed; anything else is refused
+    and fails the test, even when the code under test catches the refusal
+    (the author fetch in "Check Indico now" deliberately does).
+    """
+    if "network" in request.keywords:
+        yield
+        return
+    attempts: list[str] = []
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+
+    def _allowed(sock: socket.socket, address) -> bool:
+        if sock.family == getattr(socket, "AF_UNIX", None):
+            return True
+        host = address[0] if isinstance(address, tuple) else str(address)
+        if host in _LOOPBACK:
+            return True
+        attempts.append(f"{host}:{address[1]}" if isinstance(address, tuple) else host)
+        return False
+
+    def connect(sock, address):
+        if not _allowed(sock, address):
+            raise ConnectionRefusedError(f"the test suite runs offline ({address!r})")
+        return real_connect(sock, address)
+
+    def connect_ex(sock, address):
+        if not _allowed(sock, address):
+            raise ConnectionRefusedError(f"the test suite runs offline ({address!r})")
+        return real_connect_ex(sock, address)
+
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+    yield
+    assert not attempts, f"a test tried to reach the network: {attempts}"
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

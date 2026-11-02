@@ -108,6 +108,11 @@ def _extract_braced(text: str, pos: int) -> tuple[str, int]:
 
     Returns ``(content, end_pos)`` where *end_pos* is the index after the closing
     brace.  Handles nested braces and escaped braces ``\\{`` / ``\\}``.
+
+    A backslash escapes exactly one character, so ``\\\\}`` — a line break and
+    then the closing brace, as "…, USA \\\\}" ends many JACoW author blocks — closes
+    the group.  Treating every character after a backslash as escaped read
+    that brace as ``\\}`` and ran on to the end of the paper.
     """
     if pos >= len(text) or text[pos] != '{':
         return "", pos
@@ -116,9 +121,9 @@ def _extract_braced(text: str, pos: int) -> tuple[str, int]:
     i = pos
     while i < len(text):
         ch = text[i]
-        if i > 0 and text[i - 1] == '\\':
-            buf.append(ch)
-            i += 1
+        if ch == '\\':
+            buf.append(text[i:i + 2])
+            i += 2
             continue
         if ch == '{':
             depth += 1

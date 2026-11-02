@@ -601,13 +601,20 @@ def _write_word_report_json(
 
     auto = [c for c in corrections if c["tier"] == "auto"]
     suggested = [c for c in corrections if c["tier"] != "auto"]
+    from src.checks.title_authors import front_matter_of
+
+    try:
+        front_matter = front_matter_of(doc_path).model_dump()
+    except Exception:  # noqa: BLE001 — the comparison is optional; the report is not
+        front_matter = None
     payload = {
         "schema_version": 2,
         "paper_id": parsed.paper_id,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "source": str(doc_path),
         "title": parsed.title,
-        "authors": [],
+        "authors": front_matter["authors"] if front_matter else [],
+        "front_matter": front_matter,
         "build": (
             f"{revisions} correction(s) written as tracked changes"
             if tracked_name else "no corrections needed"

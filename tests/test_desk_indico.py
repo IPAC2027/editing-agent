@@ -144,12 +144,17 @@ def test_the_live_check_uses_a_read_only_client(pulled: Path, monkeypatch):
         seen.append(self.read_only)
         return []
 
+    def fake_contributions(self):
+        seen.append(self.read_only)
+        return []
+
     monkeypatch.setenv("INDICO_TOKEN", "indico-test-token-0123456789")
     monkeypatch.setattr(IndicoClient, "list_editables", fake_list)
+    monkeypatch.setattr(IndicoClient, "contributions", fake_contributions)
 
     refresh(pulled)
 
-    assert seen == [True]
+    assert seen == [True, True]
 
 
 def test_a_paper_missing_from_the_live_check_keeps_what_the_pull_said(pulled: Path):

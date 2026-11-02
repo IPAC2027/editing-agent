@@ -33,6 +33,8 @@ from src.parser.latex_parser import is_jacow_author_name
 NBSP = "\u00a0"
 _TITLE_STYLES = {"jacow_paper title", "title", "jacow_title"}
 _FOOTNOTE_MARKS = "*†‡§¶"
+_PAPER_CODE = re.compile(r"[A-Z]{2,6}\d{1,4}")     # "WEP014", typed above the title
+_TITLE_WITHIN = 8                                   # the title is among the first paragraphs
 
 
 @dataclass
@@ -40,6 +42,11 @@ class WordFrontMatter:
     title: str = ""
     author_line: str = ""
     body: list[str] = field(default_factory=list)   # paragraphs before REFERENCES
+    # Every name in the author block, across all its lines and paragraphs —
+    # ``author_line`` is only the first group, which is all the format checks
+    # need.  The title and author check needs everyone.
+    author_names: str = ""
+    author_paragraphs: list[int] = field(default_factory=list)
 
 
 def read_front_matter(doc_path: Path) -> WordFrontMatter:
@@ -49,13 +56,28 @@ def read_front_matter(doc_path: Path) -> WordFrontMatter:
     paragraphs = [(p.text, (p.style.name if p.style is not None else "") or "")
                   for p in docx.Document(str(doc_path)).paragraphs]
     result = WordFrontMatter()
+    # The title: the Title-styled paragraphs at the top, taken together — a long
+    # title is often typed as two or three, sometimes with an empty one between
+    # (WEP014), and sometimes after one holding only the paper code.
     title_index: int | None = None
+    parts: list[str] = []
+    seen = 0
     for index, (text, style) in enumerate(paragraphs):
-        if text.strip() and style.lower() in _TITLE_STYLES:
-            result.title, title_index = text.strip(), index
+        text = text.strip()
+        if not text:
+            continue
+        seen += 1
+        if style.lower() in _TITLE_STYLES:
+            title_index = index
+            if not _PAPER_CODE.fullmatch(text):
+                parts.append(text)
+        elif title_index is not None or seen > _TITLE_WITHIN:
             break
-    if title_index is None:
-        title_index = next((i for i, (t, _) in enumerate(paragraphs) if t.strip()), None)
+    if parts:
+        result.title = " ".join(parts)
+    else:
+        title_index = next((i for i, (t, _) in enumerate(paragraphs)
+                            if t.strip() and not _PAPER_CODE.fullmatch(t.strip())), None)
         if title_index is not None:
             result.title = paragraphs[title_index][0].strip()
 
@@ -66,12 +88,41 @@ def read_front_matter(doc_path: Path) -> WordFrontMatter:
         # Authors and affiliation often share one paragraph, separated by a
         # line break: only the names are the author line.
         result.author_line = author_part((styled or following))
+        result.author_paragraphs = _author_block(paragraphs, title_index, styled is not None)
+        # A line opening with a superscript number ("1Oak Ridge …") is an
+        # affiliation; elsewhere, text before an institution word counts as a
+        # name only if it has initials ("H.P. Alpha† Institute for …"), not
+        # when it is the start of the institution ("Thomas Jefferson National …").
+        names = [author_part(line, strict=True) for i in result.author_paragraphs
+                 for line in re.split(r"[\n\x0b\r]", paragraphs[i][0])
+                 if line.strip() and not re.match(r"\s*[\d*†‡§¶]", line)]
+        result.author_names = ", ".join(n for n in names if n)
 
     for text, _ in paragraphs:
         if re.fullmatch(r"\s*REFERENCES?\s*", text, re.IGNORECASE):
             break
         result.body.append(text)
     return result
+
+
+def _author_block(paragraphs: list[tuple[str, str]], title_index: int, styled: bool) -> list[int]:
+    """Indices of the author block: the consecutive author-styled paragraphs
+    after the title, or the one paragraph that follows it in an unstyled file."""
+    indices: list[int] = []
+    for index in range(title_index + 1, min(len(paragraphs), title_index + 8)):
+        text, style = paragraphs[index]
+        if not text.strip():
+            if indices:
+                break
+            continue
+        if styled and "author" not in style.lower():
+            if indices:
+                break
+            continue
+        indices.append(index)
+        if not styled:
+            break
+    return indices
 
 
 # ---------------------------------------------------------------------------
@@ -129,11 +180,13 @@ _AFFILIATION_WORDS = re.compile(
     r"Corporation|Inc\.|GmbH|Ltd|Foundation|Hospital|Observatory|National)\b")
 
 
-def author_part(paragraph: str) -> str:
+def author_part(paragraph: str, *, strict: bool = False) -> str:
     """The author names in an author paragraph, without the affiliation.
 
     Stops at the first line break, and otherwise at the first comma-separated
     part that names an institution ("Institute for …", "University of …").
+    *strict* keeps the words before the institution word only when they have
+    initials, so they are a name and not the institution's own first words.
     """
     first_line = re.split(r"[\n\x0b\r]", paragraph.strip(), maxsplit=1)[0].strip()
     # "M. Kappa, for XYZG" / "… on behalf of the X Collaboration": a group the
@@ -146,7 +199,7 @@ def author_part(paragraph: str) -> str:
         if match:
             before = part[:match.start()].strip()
             # "H.P. Alpha† Institute for …": the names before the institution word
-            if before:
+            if before and (not strict or re.search(r"\b[A-Z]\.", before)):
                 kept.append(before)
             break
         kept.append(part)

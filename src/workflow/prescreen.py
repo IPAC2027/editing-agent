@@ -61,10 +61,31 @@ def detect_source_format(folder: Path) -> str:
 
 
 def _find_tex(folder: Path) -> Path:
-    candidates = list((folder / "Source_Files").glob("*.tex"))
+    """The submission's main ``.tex`` file.
+
+    A submission can carry several: the paper, a figure drawn as a standalone
+    document, a copy of the template.  The main one is a whole document
+    (``\\documentclass`` and ``\\begin{document}``) and is named after the paper —
+    THAN01 sent four files and the first in the directory listing was a
+    template, so the paper itself was never read.
+    """
+    candidates = sorted((folder / "Source_Files").glob("*.tex"))
     if not candidates:
         raise FileNotFoundError(f"No .tex file found under {folder / 'Source_Files'}")
-    return candidates[0]
+    # "MOP030-revision-1_author" or, pulled from Indico, "THAN01/original".
+    name = folder.parent.name if folder.name in ("original", "current") else folder.name
+    match = re.match(r"[A-Za-z0-9]+", name)
+    code = match.group(0).lower() if match else ""
+
+    def _rank(path: Path) -> tuple:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        whole = "\\documentclass" in text and "\\begin{document}" in text
+        return (not whole, path.stem.lower() != code, "\\title" not in text, path.name)
+
+    return min(candidates, key=_rank)
 
 
 def _find_bibs(folder: Path) -> list[Path]:

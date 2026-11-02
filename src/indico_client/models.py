@@ -14,7 +14,7 @@ routes take ``id``** — Indico's own ``timeline_url`` in the same payload reads
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _Model(BaseModel):
@@ -177,3 +177,54 @@ class EditableDetail(_Model):
         if self.editor is not None:
             return f"this paper is assigned to {self.editor.full_name}"
         return "you are not assigned to this paper — take it first"
+
+
+class ContributionPerson(_Model):
+    """One person on a contribution, as Indico's event export describes them."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    first_name: str | None = ""
+    last_name: str | None = ""
+    full_name: str | None = Field("", alias="fullName")
+    affiliation: str | None = ""
+
+    @property
+    def name(self) -> str:
+        return " ".join(f"{self.first_name or ''} {self.last_name or ''}".split()) or (
+            self.full_name or "")
+
+
+class ContributionAuthors(_Model):
+    """A contribution's title and authors, with roles and affiliations.
+
+    The editing list names the people on a paper but not which of them are
+    authors (it includes speakers) nor where they work; the event export,
+    ``/export/event/<id>.json?detail=contributions``, has both. ``db_id`` is the
+    id the editing routes take, the same as :attr:`ContributionRow.id`.
+
+    Unlike the editing payloads above, these field names come from Indico's
+    export serializer and have not yet been checked against a payload from
+    indico.jacow.org: every field is optional, so a difference shows up as
+    missing authors, never as a crash.
+    """
+
+    db_id: int
+    friendly_id: int | None = None
+    title: str = ""
+    primaryauthors: list[ContributionPerson] = []
+    coauthors: list[ContributionPerson] = []
+    speakers: list[ContributionPerson] = []
+
+    def authors(self) -> list[tuple[ContributionPerson, str]]:
+        """``(person, role)`` for every author, primary first; speakers who are
+        not also authors are left out."""
+        out: list[tuple[ContributionPerson, str]] = []
+        seen: set[str] = set()
+        for people, role in ((self.primaryauthors, "primary"), (self.coauthors, "coauthor")):
+            for one in people:
+                key = one.name.casefold()
+                if key and key not in seen:
+                    seen.add(key)
+                    out.append((one, role))
+        return out

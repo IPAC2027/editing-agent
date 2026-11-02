@@ -23,8 +23,8 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.desk import plain
-from src.desk.indico import assignment_for
+from src.desk import plain, title_check
+from src.desk.indico import Conference
 from src.desk.state import ManualEdit, ReviewState, _guess_paper_id, finding_key
 from src.edits import EditConflict, EditSet
 
@@ -183,8 +183,10 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
     state = paper.state
     if default_editor and not state.editor:
         state.editor = default_editor
-    held = assignment_for(folder, me=default_editor)
+    conference = Conference.open(folder.parent.parent)
+    held = conference.assignment(folder, me=default_editor) if conference else None
     indico = held.model_dump() if held else None
+    title_authors = _title_authors(paper, conference, indico_url=held.url if held else "")
 
     if not paper.screened:
         return {
@@ -194,6 +196,7 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
             "kind": paper.kind,
             "screened": False,
             "indico": indico,
+            "title_authors": title_authors,
             "message": (
                 "This paper has not been prepared yet. Press “Prepare this paper” "
                 "and the agent will read it, apply the safe corrections and list "
@@ -224,6 +227,7 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
         "status_word": state.status_word,
         "editor": state.editor,
         "indico": indico,
+        "title_authors": title_authors,
         "build": paper.report.get("build", ""),
         "generated_at": paper.report.get("generated_at", ""),
         "paper_note": state.paper_note,
@@ -252,6 +256,18 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
         "source": _source_view(paper),
         "lookups": paper.report.get("lookups", []),
     }
+
+
+def _title_authors(paper: Paper, conference: Conference | None, *,
+                   indico_url: str = "") -> dict | None:
+    """The title and author check's panel, for a paper Indico knows."""
+    record = conference.record(paper.folder) if conference else None
+    return title_check.view(
+        front=title_check.front_for(paper.folder, paper.report) if record else None,
+        prepared=paper.screened, state=paper.state, record=record,
+        paper_id=paper.paper_id, event=paper.folder.parent.parent.name,
+        indico_url=indico_url,
+    )
 
 
 def _applied_card(edit, state: ReviewState) -> dict:
@@ -513,7 +529,7 @@ def compose(paper: Paper, *, include_undecided: bool = False) -> str:
 
     for edit in paper.state.manual_edits:
         text = _apply_manual(text, edit)
-    return text
+    return title_check.add_authors_latex(text, title_check.additions(paper.state))
 
 
 def _apply_manual(text: str, edit: ManualEdit) -> str:
@@ -595,6 +611,18 @@ def letter_text(paper: Paper) -> str:
             _note_fixed(edit.check_id)
     if paper.reorder and state.decision_for(paper.reorder.get("id", "R1")) == "accepted":
         _note_fixed("REF-NUM-02")
+    ta = state.title_authors
+    if ta.applied_at:
+        sent = (ta.sent_at or "")[:10]
+        if ta.plan.get("title"):
+            # Indico is changed by hand: claim it only once the editor has ticked it off.
+            done = ta.indico_done.get("title")
+            corrected.append("the title in Indico, which "
+                             + ("now matches" if done else "is being changed to match")
+                             + " your paper's" + (f", as we wrote on {sent}" if sent else ""))
+        if ta.plan.get("add_to_paper") or ta.plan.get("add_to_indico"):
+            corrected.append("the author list, which is now the combined list from your "
+                             "paper and Indico" + (f", as we wrote on {sent}" if sent else ""))
 
     if corrected:
         lines.append(
@@ -732,7 +760,9 @@ def _write_reviewed_docx(paper: Paper) -> list[str]:
         or paper.state.decision_for(c.get("id", "")) == "accepted"
     ]
     target = paper.out_dir / f"{paper.source_path.stem}_reviewed.docx"
-    if not accepted:
+    added = title_check.word_author_addition(paper.source_path,
+                                             title_check.additions(paper.state))
+    if not accepted and not added:
         # Nothing to change: hand over a clean copy so there is always one
         # file that is "the reviewed document".
         shutil.copy2(paper.source_path, target)
@@ -772,6 +802,15 @@ def _write_reviewed_docx(paper: Paper) -> list[str]:
             rewrites.append(ParagraphRewrite(paragraph_index=extra["paragraph_index"],
                                              before=extra["before"], after=extra["after"],
                                              author=author))
+    if added:
+        index, before, after = added
+        same = next((r for r in rewrites if r.paragraph_index == index), None)
+        if same is not None:
+            same.after += after[len(before):]
+        else:
+            rewrites.append(ParagraphRewrite(
+                paragraph_index=index, before=before, after=after,
+                author="JACoW prescreen (title and author check)"))
     formats = [(c["paragraph_index"], c["format"],
                 f"JACoW prescreen ({', '.join(c.get('checks') or [c['check_id']])})")
                for c in accepted if c.get("format") and c.get("paragraph_index", -1) >= 0]
@@ -796,6 +835,13 @@ def _summary_markdown(paper: Paper, letter: str) -> str:
         f"Editor: {state.editor or '(not named)'}",
         f"Status: {state.status_word}",
         f"Closed: {state.closed_at or '(open)'}",
+    ]
+    names = _title_authors(paper, Conference.open(paper.folder.parent.parent))
+    if names:
+        lines.append(f"Author/title check: {names['status_word']}")
+        for task in names.get("indico_tasks", []):
+            lines.append(f"  - [{'x' if task['done'] else ' '}] {task['text']}")
+    lines += [
         "",
         "## Corrections applied automatically",
         "",

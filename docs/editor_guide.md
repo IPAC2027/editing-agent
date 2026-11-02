@@ -115,6 +115,58 @@ something: in three weeks, when the author writes back to argue, the note is
 the only reason you will remember why. Notes stay with the paper and go into
 your review summary.
 
+### Title & authors
+
+Only for a conference pulled from Indico. The proceedings' table of contents,
+author index and DOI metadata come from Indico, so the paper's title and author
+list have to match it. This tab compares them, ignoring capitals and
+punctuation and matching "Y. Luo" with "Yun Luo".
+
+Every paper gets a verdict, shown on the paper list, at the top of the paper
+and in the tab:
+
+| Label | Means |
+|---|---|
+| **✓ Author/title check done** | Title and authors match Indico. Nothing to do. |
+| **Needs correction: email drafted** | They differ; the email to the author is ready in the tab. |
+| **Waiting until …** / **No reply: ready to apply** | You sent the email; the 48 hours are running, or are up. |
+| **Corrected; Indico changes to make** | Applied to the paper; tick off the Indico changes as you make them. |
+| **✓ Author/title check done (corrected)** | Applied, and every Indico change is ticked off. |
+| **Not checked** | The file is not a paper the desk can read (LaTeX pasted into Word, a file of references only). Compare by hand. |
+
+When they differ, two rules decide what happens:
+
+- **The title in the paper is the right one.** Indico's title is changed to it.
+- **The author list becomes the combined list.** Anyone in the paper but not in
+  Indico is added to Indico; anyone Indico lists as an author but the paper does
+  not is added to the paper, with the affiliation Indico gives.
+
+The tab drafts an email to the author saying what does not match, and the title
+and author list the paper will be published with if they do not reply within 48
+hours. Edit it if you like, paste it into
+a comment on the paper in Indico (Indico tells the submitter) or send it by mail,
+and press **I've sent it**. The desk sends nothing itself.
+
+Then one of three things happens:
+
+- **The author agrees** — press *The author agreed: apply now*.
+- **The author replies otherwise** — press *The author replied otherwise* and
+  follow their answer by hand; nothing is changed.
+- **No reply** — after the deadline the paper says *No reply about the title and
+  authors* and **Apply the changes** appears. The desk never applies anything
+  before the time printed in the email.
+
+Applying adds the missing authors to the paper in the reviewed files (a tracked
+change in Word) and lists what to change in Indico — the title, and authors to
+add there — with boxes to tick, because the desk does not change Indico for
+you. **Undo the changes** takes them back out.
+
+Press **Check Indico now** on the paper list before you send anything: it reads
+each paper's authors with their roles and affiliations. Without it the tab says
+so and compares against the names the pull recorded, which include speakers.
+Only when the file itself cannot be read as a paper does it say *Not checked*
+rather than guess.
+
 ### Problems
 
 Sorted by who has to act, which is the only sorting that matters:

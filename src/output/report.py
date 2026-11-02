@@ -57,6 +57,17 @@ def _edit_tally(editset: EditSet | None) -> dict[str, int]:
     }
 
 
+def _front_matter(paper: Paper) -> dict | None:
+    """Title and authors as plain text, for comparing with Indico."""
+    from src.checks.title_authors import front_matter_of
+
+    try:
+        front = front_matter_of(Path(paper.source_path))
+    except Exception:  # noqa: BLE001 — the comparison is optional; the report is not
+        return None
+    return front.model_dump() if front else None
+
+
 def _write_json(
     paper: Paper,
     path: Path,
@@ -71,6 +82,7 @@ def _write_json(
         "source": str(paper.source_path),
         "title": paper.title,
         "authors": paper.authors,
+        "front_matter": _front_matter(paper),
         "build": build_status,
         "findings": [f.model_dump() for f in paper.findings],
         "edits": [e.model_dump() for e in (editset.edits if editset else [])],

@@ -15,6 +15,12 @@ Two sources, the newer one wins:
   files are never rewritten: they record what Indico said when the papers were
   fetched, and the corpus measurements read them as that.
 
+The same check fetches each paper's abstract record — its title and its authors
+with roles and affiliations — into ``indico_abstracts.json``, for the title and
+author check (:mod:`src.desk.title_check`). Without it that check falls back to
+the names the pull recorded, which include speakers and carry no affiliation,
+and says so.
+
 "Yours" is decided by name: the name typed at the top of the desk against the
 editor's full name in Indico, ignoring case and accents. The desk has no other
 way to know who is sitting in front of it, and within one conference's editors
@@ -32,9 +38,12 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from src.checks.title_authors import IndicoRecord, Person, person
+
 PULL_INDEX = "index.json"
 MANIFEST = "manifest.json"
 LIVE_FILE = "indico_assignments.json"
+ABSTRACTS_FILE = "indico_abstracts.json"
 
 
 class Assignment(BaseModel):
@@ -86,6 +95,8 @@ class Conference:
     pulled_at: str = ""
     checked_at: str = ""
     live: dict[str, dict] = field(default_factory=dict)   # contribution id -> paper
+    abstracts_at: str = ""
+    abstracts: dict[str, dict] = field(default_factory=dict)  # contribution id -> record
 
     @classmethod
     def open(cls, root: Path) -> "Conference | None":
@@ -95,6 +106,7 @@ class Conference:
             return None
         index = _read_json(index_path)
         live = _read_json(root / LIVE_FILE)
+        abstracts = _read_json(root / ABSTRACTS_FILE)
         return cls(
             root=root,
             base_url=str(index.get("base_url") or "").rstrip("/"),
@@ -103,6 +115,8 @@ class Conference:
             pulled_at=_mtime(index_path),
             checked_at=str(live.get("checked_at") or ""),
             live=live.get("papers") or {},
+            abstracts_at=str(abstracts.get("checked_at") or ""),
+            abstracts=abstracts.get("contributions") or {},
         )
 
     def paper_url(self, contribution_id: int) -> str:
@@ -142,6 +156,32 @@ class Conference:
             source=source, as_of=as_of,
         )
 
+    def record(self, folder: Path) -> IndicoRecord | None:
+        """The paper's title and authors as Indico has them, or ``None``."""
+        manifest = _read_json(folder.parent / MANIFEST)
+        contribution_id = manifest.get("contribution_id")
+        if not isinstance(contribution_id, int):
+            return None
+        fetched = self.abstracts.get(str(contribution_id))
+        if fetched:
+            return IndicoRecord(
+                title=fetched.get("title") or manifest.get("title", ""),
+                authors=[
+                    Person(name=" ".join(f"{a.get('first_name', '')} {a.get('last_name', '')}"
+                                         .split()),
+                           given=a.get("first_name", ""), family=a.get("last_name", ""),
+                           affiliation=a.get("affiliation", ""), role=a.get("role", ""))
+                    for a in fetched.get("authors", [])
+                ],
+                roles_known=True, as_of=self.abstracts_at,
+            )
+        return IndicoRecord(
+            title=manifest.get("title", ""),
+            authors=[person(name) for name in manifest.get("persons", [])],
+            roles_known=False,
+            as_of=_mtime(folder.parent / MANIFEST) or self.pulled_at,
+        )
+
     def summary(self) -> dict:
         """For the page: where the assignments come from, and how old they are."""
         live = bool(self.checked_at)
@@ -151,12 +191,6 @@ class Conference:
             "event_url": (f"{self.base_url}/event/{self.event_id}"
                           if self.base_url and self.event_id else ""),
         }
-
-
-def assignment_for(folder: Path, *, me: str = "") -> Assignment | None:
-    """Who holds this one paper, for a desk opened on its conference."""
-    conference = Conference.open(folder.parent.parent)
-    return conference.assignment(folder, me=me) if conference else None
 
 
 def refresh(root: Path, *, client=None) -> dict:
@@ -184,9 +218,35 @@ def refresh(root: Path, *, client=None) -> dict:
         str(row.id): {"code": row.code, "editor": row.editor_name, "state": row.state}
         for row in rows if row.submitted
     }
-    target = root / LIVE_FILE
+    _write(root / LIVE_FILE, {"checked_at": checked_at, "papers": papers})
+
+    # The authors are a second request, and optional: the assignments above
+    # have already arrived, and the title and author check can fall back to
+    # the names the pull recorded.
+    authors_error = ""
+    contributions = []
+    try:
+        contributions = client.contributions()
+    except Exception as exc:  # noqa: BLE001 — see above
+        authors_error = (f"The authors could not be fetched ({exc}). The title and "
+                         "author check uses the names the pull recorded instead.")
+    if contributions:
+        _write(root / ABSTRACTS_FILE, {"checked_at": checked_at, "contributions": {
+            str(c.db_id): {
+                "title": c.title,
+                "authors": [{"first_name": (one.first_name or "").strip(),
+                             "last_name": (one.last_name or "").strip(),
+                             "affiliation": (one.affiliation or "").strip(),
+                             "role": role} for one, role in c.authors()],
+            }
+            for c in contributions
+        }})
+    return {"checked_at": checked_at, "papers": len(papers),
+            "authors": len(contributions), "authors_error": authors_error}
+
+
+def _write(target: Path, payload: dict) -> None:
+    """Replace *target* whole, so an interrupted write never leaves half a file."""
     partial = target.with_name(target.name + ".part")
-    partial.write_text(json.dumps({"checked_at": checked_at, "papers": papers},
-                                  indent=2, ensure_ascii=False), encoding="utf-8")
+    partial.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     os.replace(partial, target)
-    return {"checked_at": checked_at, "papers": len(papers)}

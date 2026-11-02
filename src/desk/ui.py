@@ -119,6 +119,12 @@ button.big{padding:11px 18px;font-size:.95rem}
 .pill.who-you{background:var(--good-soft);color:var(--good)}
 .pill.who-other{background:var(--warn-soft);color:var(--warn)}
 .pill.who-nobody{background:var(--surface3);color:var(--ink2)}
+.pill.ta-differs,.pill.ta-changed{background:var(--warn-soft);color:var(--warn)}
+.pill.ta-waiting{background:var(--accent-soft);color:var(--accent)}
+.pill.ta-due{background:var(--bad-soft);color:var(--bad)}
+.pill.ta-applied{background:var(--accent-soft);color:var(--accent)}
+.pill.ta-match,.pill.ta-done{background:var(--good-soft);color:var(--good)}
+.pill.ta-unknown,.pill.ta-replied{background:var(--surface3);color:var(--ink2)}
 
 .bar{height:7px;border-radius:4px;background:var(--surface3);overflow:hidden}
 .bar span{display:block;height:100%;background:var(--good);transition:width .3s}
@@ -158,6 +164,17 @@ table.wl tr.theirs td{color:var(--muted)}
 .held.other{background:var(--warn-soft);border-left-color:var(--warn)}
 .held.you{background:var(--good-soft);border-left-color:var(--good)}
 .held a{color:var(--accent)}
+table.cmp{width:100%;border-collapse:collapse;font-size:.88rem;margin:4px 0 16px}
+table.cmp th{text-align:left;font-weight:600;color:var(--muted);width:9.5em;
+             padding:5px 12px 5px 0;vertical-align:top}
+table.cmp td{padding:5px 0;vertical-align:top}
+ul.people{list-style:none;padding:0;margin:4px 0 14px}
+ul.people li{padding:5px 0;font-size:.88rem;border-bottom:1px solid var(--rule2)}
+ul.people li:last-child{border-bottom:0}
+ul.people .tag{font-size:.72rem;font-weight:600;padding:1px 8px;border-radius:9px;margin-left:8px}
+.tag.both{background:var(--good-soft);color:var(--good)}
+.tag.to-indico{background:var(--accent-soft);color:var(--accent)}
+.tag.to-paper{background:var(--warn-soft);color:var(--warn)}
 
 /* ---------- paper ---------- */
 .paper-head{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:6px}
@@ -442,6 +459,14 @@ function when(iso){
   return isNaN(d) ? iso : d.toLocaleString(undefined,{dateStyle:"medium",timeStyle:"short"});
 }
 
+/* The author/title verdict as a pill: a tick when the check is done. */
+function verdictPill(ta, short){
+  const passed = ta.status==="match" || ta.status==="done";
+  const text = ta.status==="waiting" && ta.deadline && short
+    ? "Waiting until "+when(ta.deadline) : ta.status_word;
+  return el("span","pill ta-"+ta.status, (passed ? "✓ " : "")+text);
+}
+
 function heldNotice(ind){
   if(!ind) return null;
   const box = el("div","held "+ind.holder);
@@ -473,10 +498,12 @@ function heldNotice(ind){
 async function checkIndico(btn){
   btn.disabled = true; btn.textContent = "Checking Indico…";
   try{
-    await api("/api/indico-refresh", {});
+    const res = await api("/api/indico-refresh", {});
     await loadWorklist();
     const n = (h) => S.papers.filter(p=>p.indico && p.indico.holder===h).length;
-    toast("Checked Indico: "+n("you")+" yours, "+n("nobody")+" not taken yet");
+    toast("Checked Indico: "+n("you")+" yours, "+n("nobody")+" not taken yet"
+      + (res.authors ? "; authors read for "+res.authors+" papers" : ""));
+    if(res.authors_error) toast(res.authors_error, true);
   }catch(err){ toast(err.message, true); }
   renderWorklist();
 }
@@ -586,7 +613,8 @@ function renderWorklist(){
   const thead = el("thead");
   const htr = el("tr");
   const numeric = ["To decide","Must fix","Your notes"];
-  ["Paper","Title","Status"].concat(S.indico ? ["In Indico"] : [], numeric, [""])
+  ["Paper","Title","Status"].concat(S.indico ? ["In Indico","Title & authors"] : [],
+                                     numeric, [""])
     .forEach(h=>{ const th=el("th",null,h);
       if(numeric.includes(h)) th.style.textAlign="right"; htr.appendChild(th); });
   thead.appendChild(htr); table.appendChild(thead);
@@ -619,6 +647,10 @@ function renderWorklist(){
         c4.appendChild(pill);
       }
       tr.appendChild(c4);
+
+      const c5 = el("td"); const ta = p.title_authors;
+      if(ta && p.screened) c5.appendChild(verdictPill(ta, true));
+      tr.appendChild(c5);
     }
 
     const mk = (v, cls) => { const td=el("td","num "+(v?cls:"zero"),
@@ -724,11 +756,22 @@ function renderPaper(){
   head.appendChild(grow);
   const right = el("div","row");
   right.appendChild(el("span","pill "+p.status, p.status_word));
+  if(p.title_authors) right.appendChild(verdictPill(p.title_authors, false));
   if(p.build) right.appendChild(el("span","pill count", p.build));
   head.appendChild(right);
   host.appendChild(head);
   const held = heldNotice(p.indico);
   if(held) host.appendChild(held);
+  const names = p.title_authors;
+  if(names && names.status==="due" && S.tab!=="names"){
+    const box = el("div","held other");
+    box.appendChild(el("b",null,"No reply about the title and authors."));
+    box.appendChild(el("span",null,"The author had until "+names.deadline_text+"."));
+    const go = el("button","plain","Review and apply");
+    go.onclick = () => { S.tab="names"; renderPaper(); };
+    box.appendChild(go);
+    host.appendChild(box);
+  }
 
   const c = p.counts;
   const sum = el("div","summary");
@@ -742,11 +785,15 @@ function renderPaper(){
   sum.appendChild(chip(c.my_notes + c.my_edits,"your notes & edits"));
   host.appendChild(sum);
 
+  const tabList = TABS.slice();
+  if(names) tabList.splice(1, 0, ["names","Title & authors"]);
+  if(!tabList.some(([key])=>key===S.tab)) S.tab = "decisions";
   const tabs = el("div","tabs");
-  TABS.forEach(([key,label])=>{
+  tabList.forEach(([key,label])=>{
     const b = el("button",null,label);
     const n = {decisions:c.to_decide, problems:c.must_fix+c.worth_a_look,
-               mine:c.my_notes+c.my_edits}[key];
+               mine:c.my_notes+c.my_edits,
+               names:(names && ["differs","due","changed"].includes(names.status)) ? "!" : 0}[key];
     if(n) b.appendChild(el("span","n",String(n)));
     b.setAttribute("aria-selected", S.tab===key?"true":"false");
     b.onclick = () => { S.tab=key; S.cursor=0; renderPaper(); };
@@ -756,7 +803,7 @@ function renderPaper(){
 
   const body = el("div");
   host.appendChild(body);
-  ({decisions:tabDecisions, problems:tabProblems, mine:tabMine,
+  ({decisions:tabDecisions, names:tabNames, problems:tabProblems, mine:tabMine,
     source:tabSource, letter:tabLetter, files:tabFiles}[S.tab])(body);
 
   updateFoot();
@@ -1352,6 +1399,172 @@ function openLineEditor(row, line){
 }
 
 /* -------------------------------------------------------- tab: letter */
+/* --------------------------------------------- tab: title & authors */
+function tabNames(host){
+  const t = S.paper.title_authors, c = t.comparison;
+  const g = el("div","group");
+  g.appendChild(el("h2",null,"Title and authors against Indico"));
+  g.appendChild(el("p",null,"The proceedings' table of contents, author index and DOI "
+    +"metadata come from Indico. Where Indico differs from the paper, the paper's title "
+    +"is taken as right and the author list becomes the combined list, after the "
+    +"author has had 48 hours to say otherwise."));
+
+  const tone = {match:"you", done:"you", differs:"other", due:"other",
+                changed:"other"}[t.status] || "";
+  const state = el("div","held "+tone);
+  state.appendChild(el("b",null,(tone==="you" ? "✓ " : "")+t.status_word+"."));
+  const say = {
+    match: "The paper's title and authors match Indico. Nothing to do.",
+    done: "Corrected"+(t.reply==="agreed" ? " as the author agreed" : " after 48 hours without a reply")
+      +", and every change in Indico is ticked off.",
+    unknown: c && c.unreadable.length
+      ? "The desk cannot compare this paper on its own: "+c.unreadable.join("; ")+"."
+      : t.why_not,
+    differs: "Send the author the email below, then press “I’ve sent it”. If they do "
+      +"not reply within 48 hours, the changes it describes are made.",
+    waiting: "Sent "+when(t.sent_at)+". The author has until "+t.deadline_text+".",
+    due: "No reply by "+t.deadline_text+". The changes the email described are ready.",
+    applied: "Applied "+when(t.applied_at)+(t.reply==="agreed" ? ", as the author agreed" : "")
+      +". The reviewed files carry the paper's side; Indico's side is below for you to make.",
+    replied: "The author replied, so the prepared changes are dropped. Follow their answer by hand.",
+    changed: "The paper or its Indico record has changed since the email was sent; perhaps "
+      +"the author has already fixed it. Compare again before changing anything.",
+  }[t.status];
+  if(say) state.appendChild(el("span",null,say));
+  g.appendChild(state);
+
+  const step = async (action, extra) => {
+    try{
+      S.paper = await api("/api/title-authors", Object.assign({folder:S.folder, action}, extra||{}));
+      renderPaper();
+    }catch(err){ toast(err.message, true); }
+  };
+  const acts = el("div","row"); acts.style.margin = "0 0 16px";
+  const button = (label, cls, action) => {
+    const b = el("button", cls, label); b.onclick = () => step(action); acts.appendChild(b);
+  };
+  if(t.status==="due") button("Apply the changes","primary","apply");
+  if(["waiting","due","changed"].includes(t.status)){
+    button("The author agreed: apply now", null, "agreed");
+    button("The author replied otherwise: drop the changes", null, "declined");
+  }
+  if(t.status==="applied" || t.status==="done") button("Undo the changes", null, "undo");
+  if(["waiting","due","replied","changed","applied","done"].includes(t.status))
+    button("Start again", "plain", "restart");
+  if(acts.childNodes.length) g.appendChild(acts);
+
+  if(c && !t.roles_known){
+    const warn = el("div","held other");
+    warn.appendChild(el("b",null,"Indico's authors have not been read yet."));
+    warn.appendChild(el("span",null,"This compares against the names the pull recorded, "
+      +"which include speakers and carry no affiliation. Press “Check Indico now” on the "
+      +"paper list before you send anything."));
+    g.appendChild(warn);
+  }
+
+  const withAff = (x) => x.affiliation ? x.name+" ("+x.affiliation+")" : x.name;
+  if(t.status==="applied" || t.status==="done"){
+    if(t.plan.add_to_paper.length)
+      g.appendChild(el("p",null,"Added to the paper's author list in the reviewed files: "
+        + t.plan.add_to_paper.map(withAff).join(", ")+"."));
+    if(t.indico_tasks.length){
+      g.appendChild(el("h3",null,"For you to change in Indico"));
+      const ul = el("ul","people");
+      t.indico_tasks.forEach(task=>{
+        const li = el("li"); const label = el("label");
+        const box = el("input"); box.type = "checkbox"; box.checked = task.done;
+        box.onchange = () => step("tick", {key:task.key, done:box.checked});
+        label.appendChild(box); label.appendChild(document.createTextNode(" "+task.text));
+        li.appendChild(label); ul.appendChild(li);
+      });
+      g.appendChild(ul);
+      if(t.indico_url){
+        const a = el("a",null,"Open the paper in Indico ↗");
+        a.href = t.indico_url; a.target = "_blank"; a.rel = "noopener noreferrer";
+        const line = el("p"); line.appendChild(a); g.appendChild(line);
+      }
+    }
+  }
+
+  if(c){
+    g.appendChild(el("h3",null,"Title"));
+    const table = el("table","cmp");
+    const row = (k, v) => { const tr = el("tr"); tr.appendChild(el("th",null,k));
+      tr.appendChild(el("td",null,v)); table.appendChild(tr); };
+    row("In the paper", c.paper_title || "—");
+    row("In Indico", c.indico_title || "—");
+    if(c.title_differs)
+      row("Indico becomes", c.proposed_indico_title
+        + (c.check_capitals ? "  (check its capitals)" : ""));
+    g.appendChild(table);
+
+    g.appendChild(el("h3",null,"Authors"));
+    const ul = el("ul","people");
+    const person = (name, detail, cls, tag) => {
+      const li = el("li"); li.appendChild(el("span",null,name));
+      li.appendChild(el("span","tag "+cls, tag));
+      if(detail) li.appendChild(el("div","tiny muted", detail));
+      ul.appendChild(li);
+    };
+    c.matched.forEach(([paper, indico]) =>
+      person(paper, paper===indico ? "" : "In Indico as "+indico, "both", "in both"));
+    c.paper_only.forEach(name =>
+      person(name, "In the paper only", "to-indico", "will be added to Indico"));
+    c.indico_only.forEach(x => person(x.jacow,
+      ["In Indico only as "+x.name, x.affiliation,
+       {primary:"primary author", coauthor:"co-author"}[x.role]].filter(Boolean).join(" · "),
+      "to-paper", "will be added to the paper"));
+    g.appendChild(ul);
+    if(c.not_names.length)
+      g.appendChild(el("p","tiny muted","Not read as names (address or footnote "
+        +"fragments): "+c.not_names.join(", ")));
+    if(c.unreadable.length && t.status!=="unknown")
+      g.appendChild(el("p","tiny muted","Not compared: "+c.unreadable.join("; ")+"."));
+  }
+
+  if(t.email && ["differs","waiting","due","changed"].includes(t.status)){
+    g.appendChild(el("h3",null,"Email to the author"));
+    const box = el("div","card pad");
+    const text = el("textarea"); text.value = t.email; text.rows = 24;
+    box.appendChild(text);
+    const row2 = el("div","row"); row2.style.marginTop = "10px";
+    const save = async () => { if(text.value !== t.email)
+      await api("/api/title-authors",{folder:S.folder, action:"email", text:text.value}); };
+    if(t.status==="differs"){
+      const sent = el("button","primary","I’ve sent it");
+      sent.onclick = async () => { try{ await save(); }catch(err){ toast(err.message,true); return; }
+        step("send"); };
+      row2.appendChild(sent);
+    }
+    const copy = el("button",null,"Copy to clipboard");
+    copy.onclick = async () => {
+      try{ await navigator.clipboard.writeText(text.value); toast("Copied"); }
+      catch(_){ text.select(); toast("Press Ctrl-C / ⌘-C to copy"); }
+    };
+    row2.appendChild(copy);
+    const keep = el("button",null,"Save my wording");
+    keep.onclick = async () => { try{ await save(); toast("Saved"); await refresh(); }
+      catch(err){ toast(err.message,true); } };
+    row2.appendChild(keep);
+    if(t.email_edited){
+      const reset = el("button","plain","Back to the drafted text");
+      reset.onclick = () => step("email", {text:""});
+      row2.appendChild(reset);
+    }
+    if(t.indico_url){
+      const a = el("a",null,"Open the paper in Indico ↗");
+      a.href = t.indico_url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      row2.appendChild(a);
+    }
+    box.appendChild(row2);
+    g.appendChild(box);
+    g.appendChild(el("p","tiny muted","The desk sends nothing. Paste the email into a "
+      +"comment on the paper in Indico, which notifies the submitter, or send it by "
+      +"mail. The desk never applies a change before the time printed in it."));
+  }
+  host.appendChild(g);
+}
+
 function tabLetter(host){
   const g = el("div","group letter");
   g.appendChild(el("h2",null,"Letter to the author"));

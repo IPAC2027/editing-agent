@@ -32,7 +32,12 @@ from pathlib import Path
 
 import httpx
 
-from src.indico_client.models import ContributionRow, EditableDetail, IndicoTag
+from src.indico_client.models import (
+    ContributionAuthors,
+    ContributionRow,
+    EditableDetail,
+    IndicoTag,
+)
 
 TOKEN_ENV = "INDICO_TOKEN"
 KEYRING_SERVICE = "jacow-prescreen"
@@ -88,13 +93,17 @@ class IndicoClient:
     token: str
     editable_type: str = "paper"
     timeout: float = 60.0
-    read_only: bool = False
+    read_only: bool = True
     """Refuse to send anything but GET.
 
     Not a promise in a docstring — a latch. When a task is "read the whole
     conference and touch nothing", the guarantee has to be enforced where the
     request is made, so that no later change to a caller can quietly turn a pull
     into a write. :class:`ReadOnlyViolation` is raised before the socket opens.
+
+    On by default: nothing in the agent writes to Indico yet. A client that may
+    write has to be opened with this latch switched off on purpose, and
+    ``tests/test_indico_read_only.py`` fails if any code does.
     """
 
     def __post_init__(self) -> None:
@@ -118,6 +127,10 @@ class IndicoClient:
     @property
     def _event(self) -> str:
         return f"{self.base_url}/event/{self.event_id}"
+
+    @property
+    def _event_export(self) -> str:
+        return f"{self.base_url}/export/event/{self.event_id}"
 
     def _api(self, tail: str) -> str:
         return f"{self._event}/editing/api/{tail}"
@@ -193,6 +206,20 @@ class IndicoClient:
         """The table an editor sees, including papers not yet submitted."""
         raw = self._get_json(self._api(f"{self.editable_type}/list"))
         return [ContributionRow.model_validate(row) for row in raw]
+
+    def contributions(self) -> list[ContributionAuthors]:
+        """Every contribution's title and authors, with roles and affiliations.
+
+        One GET of Indico's event export for the whole event.  The editing list
+        above is the paper table; this is the abstract record behind it, which
+        the proceedings' author index is built from.
+        """
+        raw = self.request("GET", f"{self._event_export}.json",
+                           params={"detail": "contributions"}).json()
+        results = (raw.get("results") or []) if isinstance(raw, dict) else []
+        rows = results[0].get("contributions", []) if results else []
+        return [ContributionAuthors.model_validate(row) for row in rows
+                if isinstance(row, dict) and isinstance(row.get("db_id"), int)]
 
     def tags(self) -> list[IndicoTag]:
         """This event's tag vocabulary — the codes editors classify with."""

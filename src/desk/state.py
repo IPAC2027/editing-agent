@@ -31,6 +31,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from src.desk import plain
+from src.checks.title_authors import IndicoRecord
 from src.desk.indico import Assignment, Conference
 
 STATE_FILENAME = "review_state.json"
@@ -99,6 +100,24 @@ class ManualEdit(BaseModel):
         return f"{_short(self.before)} → {_short(self.after)}"
 
 
+class TitleAuthorState(BaseModel):
+    """The title and author check on one paper: the email, the wait, the change.
+
+    ``plan`` is what the email promised, frozen when the editor sent it, so the
+    change made 48 hours later is the one the author was told about even if
+    Indico or the paper has been refreshed since.
+    """
+
+    plan: dict = Field(default_factory=dict)
+    sent_at: str = ""
+    deadline: str = ""                     # never earlier than the one in the email
+    reply: str = ""                        # "" | agreed | declined
+    reply_at: str = ""
+    applied_at: str = ""
+    email_override: str = ""
+    indico_done: dict[str, bool] = Field(default_factory=dict)   # checklist ticks
+
+
 class ReviewState(BaseModel):
     """One editor's work on one paper."""
 
@@ -114,6 +133,7 @@ class ReviewState(BaseModel):
     manual_edits: list[ManualEdit] = Field(default_factory=list)
     paper_note: str = ""                   # a note about the paper as a whole
     letter_override: str = ""              # an edited author letter, if any
+    title_authors: TitleAuthorState = Field(default_factory=TitleAuthorState)
     opened_at: str = ""
     updated_at: str = ""
     closed_at: str = ""
@@ -274,6 +294,7 @@ class PaperRow(BaseModel):
     build: str = ""
     updated_at: str = ""
     indico: Assignment | None = None  # who holds it in Indico, for a pulled conference
+    title_authors: dict | None = None   # the title and author check, for a pulled conference
 
     @property
     def progress(self) -> float:
@@ -330,8 +351,10 @@ def submission_folders(root: Path) -> list[Path]:
     ]
 
 
-def describe(folder: Path, *, indico: Assignment | None = None) -> PaperRow:
+def describe(folder: Path, *, indico: Assignment | None = None,
+             record: IndicoRecord | None = None) -> PaperRow:
     """Build a worklist row for one submission folder."""
+    from src.desk import title_check
     from src.workflow.prescreen import detect_source_format
 
     out_dir = folder / "aiagent_prescreen"
@@ -356,6 +379,9 @@ def describe(folder: Path, *, indico: Assignment | None = None) -> PaperRow:
         build=report.get("build", ""),
         updated_at=state.updated_at,
         indico=indico,
+        title_authors=title_check.summary(
+            title_check.front_for(folder, report) if record and report else None,
+            state, record),
     )
 
     if not report:
@@ -412,6 +438,8 @@ def worklist(root: Path, *, me: str = "") -> list[PaperRow]:
     """Every submission under *root*; *me* is the name typed at the top of the desk."""
     conference = Conference.open(root) if is_pulled_conference(root) else None
     return [
-        describe(folder, indico=conference.assignment(folder, me=me) if conference else None)
+        describe(folder,
+                 indico=conference.assignment(folder, me=me) if conference else None,
+                 record=conference.record(folder) if conference else None)
         for folder in submission_folders(root)
     ]

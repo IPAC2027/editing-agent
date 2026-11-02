@@ -36,6 +36,7 @@ page, so another website open in the same browser cannot drive it.
 |---|---|
 | **The list** | Every submission with its status, how many changes await you, and how many problems the author must fix. Click one to open it. For a conference pulled from Indico, also who has each paper there — you, a colleague, or nobody — as of the pull, or of **Check Indico now** (one read-only request). |
 | **Your decisions** | One card per change: what it is, why JACoW wants it, before and after. Accept or keep as submitted. Keyboard: `a` `r` `j` `k` `n`. Repeated changes of one kind get an "accept all" button. The corrections applied automatically are listed too, folded away, each with **Put back as submitted** — "we did not ask you" never means "you cannot say no". |
+| **Title & authors** | For a conference pulled from Indico: the paper's title and author list against Indico's. Where they differ, the paper's title is taken as right and the author list becomes the combined list — after an email the desk drafts gives the author 48 hours to object. Applying adds the missing authors to the reviewed files and lists the Indico changes for the editor to make. |
 | **Problems** | Sorted by who has to act — only the author can fix these / for you to check / for the record. Tick off what you have handled. |
 | **Your notes** | Anything the agent missed. Goes into the letter. |
 | **The paper** | The paper with your accepted corrections in place. Click any line to edit it yourself. Jump to the title, authors, body, references, or the first change. |
@@ -150,7 +151,8 @@ folder beside the author's files. The author's files are never touched.
 | `history/` | A git repository: one commit per edit. `git log -p`, `git revert <sha>`. |
 | `report.md` | Findings, grouped by who has to act, plus which checks did not run and why. |
 | `edits.json` | The machine-readable edit set that `apply` operates on. |
-| `review_state.json` | The editor's decisions, notes and hand edits. Survives re-screening. |
+| `review_state.json` | The editor's decisions, notes and hand edits, and the title and author check's email, deadline and outcome. Survives re-screening. |
+| `front_matter.json` | The paper's title and authors, read from the source for a paper prepared before reports carried them. |
 | `author_letter.txt` | The letter, once the paper is finished. |
 | `review_summary.md` | Every decision and note, for the record. |
 
