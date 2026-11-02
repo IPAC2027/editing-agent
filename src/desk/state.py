@@ -31,6 +31,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from src.desk import plain
+from src.desk.indico import Assignment, Conference
 
 STATE_FILENAME = "review_state.json"
 
@@ -272,6 +273,7 @@ class PaperRow(BaseModel):
     my_edits: int = 0
     build: str = ""
     updated_at: str = ""
+    indico: Assignment | None = None  # who holds it in Indico, for a pulled conference
 
     @property
     def progress(self) -> float:
@@ -328,7 +330,7 @@ def submission_folders(root: Path) -> list[Path]:
     ]
 
 
-def describe(folder: Path) -> PaperRow:
+def describe(folder: Path, *, indico: Assignment | None = None) -> PaperRow:
     """Build a worklist row for one submission folder."""
     from src.workflow.prescreen import detect_source_format
 
@@ -353,6 +355,7 @@ def describe(folder: Path) -> PaperRow:
         my_edits=len(state.manual_edits),
         build=report.get("build", ""),
         updated_at=state.updated_at,
+        indico=indico,
     )
 
     if not report:
@@ -405,5 +408,10 @@ def _suggested_ids(out_dir: Path) -> list[str]:
     return [i for i in ids if i]
 
 
-def worklist(root: Path) -> list[PaperRow]:
-    return [describe(folder) for folder in submission_folders(root)]
+def worklist(root: Path, *, me: str = "") -> list[PaperRow]:
+    """Every submission under *root*; *me* is the name typed at the top of the desk."""
+    conference = Conference.open(root) if is_pulled_conference(root) else None
+    return [
+        describe(folder, indico=conference.assignment(folder, me=me) if conference else None)
+        for folder in submission_folders(root)
+    ]

@@ -116,6 +116,9 @@ button.big{padding:11px 18px;font-size:.95rem}
 .pill.done{background:var(--good-soft);color:var(--good)}
 .pill.needs_author{background:var(--warn-soft);color:var(--warn)}
 .pill.count{background:var(--surface3);font-family:var(--mono);font-weight:500}
+.pill.who-you{background:var(--good-soft);color:var(--good)}
+.pill.who-other{background:var(--warn-soft);color:var(--warn)}
+.pill.who-nobody{background:var(--surface3);color:var(--ink2)}
 
 .bar{height:7px;border-radius:4px;background:var(--surface3);overflow:hidden}
 .bar span{display:block;height:100%;background:var(--good);transition:width .3s}
@@ -146,6 +149,15 @@ table.wl tbody tr:hover{background:var(--surface2)}
 .num.zero{color:var(--muted)}
 .num.attn{color:var(--bad);font-weight:600}
 .num.todo{color:var(--accent);font-weight:600}
+table.wl tr.theirs td{color:var(--muted)}
+.wl-indico{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:.82rem;
+           color:var(--ink2);margin:0 0 14px}
+.held{display:flex;gap:4px 12px;align-items:baseline;flex-wrap:wrap;margin:10px 0 14px;
+      padding:10px 14px;border-radius:var(--radius);border-left:3px solid var(--rule);
+      background:var(--surface2);font-size:.88rem}
+.held.other{background:var(--warn-soft);border-left-color:var(--warn)}
+.held.you{background:var(--good-soft);border-left-color:var(--good)}
+.held a{color:var(--accent)}
 
 /* ---------- paper ---------- */
 .paper-head{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:6px}
@@ -319,7 +331,9 @@ kbd{font-family:var(--mono);font-size:.75rem;border:1px solid var(--rule);
   <a class="toplink" href="/references">Check a reference list</a>
   <div class="top-spacer"></div>
   <label class="who">Your name
-    <input id="editorName" type="text" placeholder="e.g. A. Editor" autocomplete="name">
+    <input id="editorName" type="text" placeholder="e.g. A. Editor" autocomplete="name"
+           list="indicoEditors">
+    <datalist id="indicoEditors"></datalist>
   </label>
 </div></div>
 
@@ -367,7 +381,7 @@ kbd{font-family:var(--mono);font-size:.75rem;border:1px solid var(--rule);
 
 /* ------------------------------------------------------------------ state */
 const S = {
-  root:"", editor:"", papers:[], filter:"all",
+  root:"", editor:"", papers:[], filter:"all", whose:"any", indico:null,
   folder:null, paper:null, tab:"decisions", cursor:0, job:null,
   showApplied:false,
 };
@@ -402,10 +416,69 @@ const FILTERS = [
   ["in_review","In progress"], ["done","Finished"],
 ];
 
-function matchesFilter(p){
-  if(S.filter==="all") return true;
-  if(S.filter==="todo") return p.status!=="done";
-  return p.status===S.filter;
+/* Who holds each paper in Indico; shown only for a conference pulled from it. */
+const WHOSE = [
+  ["any","Everyone's"], ["you","Yours"], ["nobody","Not taken"],
+  ["other","Taken by others"],
+];
+
+function matchesStatus(p, f=S.filter){
+  if(f==="all") return true;
+  if(f==="todo") return p.status!=="done";
+  return p.status===f;
+}
+
+function matchesWhose(p, w=S.whose){
+  return w==="any" || (p.indico && p.indico.holder===w);
+}
+
+function matchesFilter(p){ return matchesStatus(p) && matchesWhose(p); }
+
+const theirs = (p) => !!(p && p.indico && p.indico.holder==="other");
+
+function when(iso){
+  if(!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString(undefined,{dateStyle:"medium",timeStyle:"short"});
+}
+
+function heldNotice(ind){
+  if(!ind) return null;
+  const box = el("div","held "+ind.holder);
+  box.appendChild(el("b",null,
+    ind.holder==="you" ? "This paper is yours in Indico."
+    : ind.holder==="other" ? ind.editor+" has this paper in Indico."
+    : "No editor has taken this paper in Indico yet."));
+  if(ind.holder==="other"){
+    box.appendChild(el("span",null,"Your work here stays on this computer. Check "
+      +"with them before you spend time on it."));
+    if(!S.papers.some(x=>x.indico && x.indico.holder==="you"))
+      box.appendChild(el("span",null,"If that is you, type your name at the top "
+        +"exactly as Indico shows it."));
+  } else if(ind.holder==="nobody"){
+    box.appendChild(el("span",null,"Take it in Indico before you start, so nobody "
+      +"else works on it too."));
+  }
+  box.appendChild(el("span","tiny muted",
+    (ind.source==="indico" ? "Checked with Indico " : "As recorded when the papers were pulled, ")
+    + when(ind.as_of)));
+  if(ind.url){
+    const a = el("a",null,"Open in Indico ↗");
+    a.href = ind.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+    box.appendChild(a);
+  }
+  return box;
+}
+
+async function checkIndico(btn){
+  btn.disabled = true; btn.textContent = "Checking Indico…";
+  try{
+    await api("/api/indico-refresh", {});
+    await loadWorklist();
+    const n = (h) => S.papers.filter(p=>p.indico && p.indico.holder===h).length;
+    toast("Checked Indico: "+n("you")+" yours, "+n("nobody")+" not taken yet");
+  }catch(err){ toast(err.message, true); }
+  renderWorklist();
 }
 
 function renderWorklist(){
@@ -465,14 +538,41 @@ function renderWorklist(){
 
   const filters = el("div","filters");
   FILTERS.forEach(([key,label])=>{
-    const n = S.papers.filter(p=>{const o=S.filter;S.filter=key;
-      const m=matchesFilter(p);S.filter=o;return m;}).length;
+    const n = S.papers.filter(p=>matchesWhose(p) && matchesStatus(p,key)).length;
     const b = el("button",null,label+(n?" ("+n+")":""));
     b.setAttribute("aria-pressed", S.filter===key ? "true":"false");
     b.onclick = () => { S.filter=key; renderWorklist(); };
     filters.appendChild(b);
   });
   host.appendChild(filters);
+
+  if(S.indico){
+    const whose = el("div","filters");
+    WHOSE.forEach(([key,label])=>{
+      const n = S.papers.filter(p=>matchesStatus(p) && matchesWhose(p,key)).length;
+      const b = el("button",null,label+(n?" ("+n+")":""));
+      b.setAttribute("aria-pressed", S.whose===key ? "true":"false");
+      b.onclick = () => { S.whose=key; renderWorklist(); };
+      whose.appendChild(b);
+    });
+    host.appendChild(whose);
+
+    const info = el("div","wl-indico");
+    info.appendChild(el("span",null,"Who has each paper in Indico: "
+      + (S.indico.source==="indico" ? "checked "+when(S.indico.as_of)
+         : "as recorded when the papers were pulled, "+when(S.indico.as_of))));
+    const chk = el("button",null,"Check Indico now");
+    chk.onclick = () => checkIndico(chk);
+    info.appendChild(chk);
+    if(!S.editor){
+      info.appendChild(el("span","muted","Type your name at the top, as Indico "
+        +"shows it, to see which papers are yours."));
+    } else if(!S.papers.some(p=>p.indico && p.indico.holder==="you")){
+      info.appendChild(el("span","muted","No paper here is held by “"+S.editor
+        +"” in Indico. If you have taken some, type your name exactly as Indico shows it."));
+    }
+    host.appendChild(info);
+  }
 
   const rows = S.papers.filter(matchesFilter);
   if(!rows.length){
@@ -485,14 +585,15 @@ function renderWorklist(){
   const table = el("table","wl");
   const thead = el("thead");
   const htr = el("tr");
-  ["Paper","Title","Status","To decide","Must fix","Your notes",""]
-    .forEach((h,i)=>{ const th=el("th",null,h);
-      if(i>=3&&i<=5) th.style.textAlign="right"; htr.appendChild(th); });
+  const numeric = ["To decide","Must fix","Your notes"];
+  ["Paper","Title","Status"].concat(S.indico ? ["In Indico"] : [], numeric, [""])
+    .forEach(h=>{ const th=el("th",null,h);
+      if(numeric.includes(h)) th.style.textAlign="right"; htr.appendChild(th); });
   thead.appendChild(htr); table.appendChild(thead);
 
   const tbody = el("tbody");
   rows.forEach(p=>{
-    const tr = el("tr");
+    const tr = el("tr", theirs(p) ? "theirs" : null);
     tr.onclick = () => openPaper(p.folder);
     tr.tabIndex = 0;
     tr.onkeydown = (e) => { if(e.key==="Enter"){ e.preventDefault(); openPaper(p.folder); } };
@@ -508,6 +609,17 @@ function renderWorklist(){
     c3.appendChild(el("span","pill "+(p.screened?p.status:"new"),
       p.screened? p.status_word : "Not prepared"));
     tr.appendChild(c3);
+
+    if(S.indico){
+      const c4 = el("td"); const ind = p.indico;
+      if(ind){
+        const pill = el("span","pill who-"+ind.holder,
+          ind.holder==="you" ? "You" : ind.holder==="other" ? ind.editor : "Not taken");
+        if(ind.state) pill.title = "Indico: "+ind.state.replace(/_/g," ");
+        c4.appendChild(pill);
+      }
+      tr.appendChild(c4);
+    }
 
     const mk = (v, cls) => { const td=el("td","num "+(v?cls:"zero"),
       p.screened? String(v) : "—"); return td; };
@@ -582,6 +694,8 @@ function renderUnprepared(){
   const back = el("button","crumb","← All papers"); back.onclick = backToList;
   host.appendChild(back);
   host.appendChild(el("h1",null,S.paper.paper_id));
+  const held = heldNotice(S.paper.indico);
+  if(held) host.appendChild(held);
   const e = el("div","empty");
   e.appendChild(el("b",null,"Not prepared yet"));
   e.appendChild(el("div",null,S.paper.message||""));
@@ -613,6 +727,8 @@ function renderPaper(){
   if(p.build) right.appendChild(el("span","pill count", p.build));
   head.appendChild(right);
   host.appendChild(head);
+  const held = heldNotice(p.indico);
+  if(held) host.appendChild(held);
 
   const c = p.counts;
   const sum = el("div","summary");
@@ -1333,6 +1449,10 @@ $("#btnFinish").onclick = () => {
   if(c.my_notes) add(c.my_notes+" note(s) of your own");
   if(c.my_edits) add(c.my_edits+" line(s) you changed yourself");
   box.appendChild(ul);
+  if(theirs(S.paper)){
+    box.appendChild(el("p","held other", S.paper.indico.editor+" has this paper in "
+      +"Indico. Agree with them who answers the author before anything is sent."));
+  }
   const radios = document.getElementsByName("closeStatus");
   radios[c.must_fix || c.my_notes ? 1 : 0].checked = true;
   $("#dlgFinish").showModal();
@@ -1367,13 +1487,16 @@ function goRelative(delta, preferUnfinished){
   let i = S.papers.findIndex(x=>x.folder===S.folder);
   if(i<0) { backToList(); return; }
   if(preferUnfinished){
+    const open = (x) => x.status!=="done" && !theirs(x);
     for(let k=i+1;k<S.papers.length;k++){
-      if(S.papers[k].status!=="done"){ openPaper(S.papers[k].folder); return; }
+      if(open(S.papers[k])){ openPaper(S.papers[k].folder); return; }
     }
     for(let k=0;k<i;k++){
-      if(S.papers[k].status!=="done"){ openPaper(S.papers[k].folder); return; }
+      if(open(S.papers[k])){ openPaper(S.papers[k].folder); return; }
     }
-    toast("Every paper is finished"); backToList(); return;
+    toast(S.indico ? "Every paper not held by another editor is finished"
+                   : "Every paper is finished");
+    backToList(); return;
   }
   const j = i+delta;
   if(j<0 || j>=S.papers.length) return;
@@ -1413,6 +1536,11 @@ async function refresh(){
 async function loadWorklist(){
   const data = await api("/api/worklist");
   S.papers = data.papers;
+  S.indico = data.indico || null;
+  const names = [...new Set(S.papers.map(p=>p.indico && p.indico.editor)
+    .filter(Boolean))].sort();
+  const list = $("#indicoEditors"); list.innerHTML = "";
+  names.forEach(n=>{ const o=document.createElement("option"); o.value=n; list.appendChild(o); });
 }
 
 const nameInput = $("#editorName");
@@ -1422,6 +1550,12 @@ nameInput.addEventListener("input", ()=>{
   nameTimer = setTimeout(async ()=>{
     S.editor = nameInput.value.trim();
     try{ await api("/api/editor",{editor:S.editor}); }catch(_){}
+    if(!S.indico) return;
+    try{ await loadWorklist(); }catch(_){ return; }
+    if(!S.folder){ renderWorklist(); return; }
+    const row = S.papers.find(x=>x.folder===S.folder);
+    if(row && S.paper){ S.paper.indico = row.indico;
+      if(S.paper.screened) renderPaper(); else renderUnprepared(); }
   }, 500);
 });
 

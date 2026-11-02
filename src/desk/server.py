@@ -25,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from src.desk import indico as indico_module
 from src.desk import paper as paper_module
 from src.desk import state as state_module
 from src.desk.state import EditorNote, ManualEdit, ReviewState
@@ -239,9 +240,15 @@ class DeskHandler(BaseHTTPRequestHandler):
                     "jobs": self.jobs.active(),
                 })
             elif route == "/api/worklist":
-                self._json({"papers": [
-                    row.model_dump() for row in state_module.worklist(self.root)
-                ]})
+                conference = (indico_module.Conference.open(self.root)
+                              if state_module.is_pulled_conference(self.root) else None)
+                self._json({
+                    "papers": [
+                        row.model_dump() for row in state_module.worklist(
+                            self.root, me=self._config().get("editor", ""))
+                    ],
+                    "indico": conference.summary() if conference else None,
+                })
             elif route == "/api/paper":
                 folder = self._folder(_one(query, "folder"))
                 self._json(paper_module.view(
@@ -289,6 +296,7 @@ class DeskHandler(BaseHTTPRequestHandler):
                 "/api/close": self._close,
                 "/api/reopen": self._reopen,
                 "/api/format-references": self._format_references,
+                "/api/indico-refresh": self._indico_refresh,
             }.get(route)
             if handler is None:
                 self._error("unknown address", HTTPStatus.NOT_FOUND)
@@ -304,6 +312,20 @@ class DeskHandler(BaseHTTPRequestHandler):
                         HTTPStatus.INTERNAL_SERVER_ERROR)
 
     # -- actions --------------------------------------------------------
+    def _indico_refresh(self, body: dict) -> None:
+        import httpx
+
+        from src.indico_client.client import IndicoError
+
+        try:
+            self._json(indico_module.refresh(self.root))
+        except IndicoError as exc:
+            self._error(str(exc), HTTPStatus.BAD_GATEWAY)
+        except httpx.HTTPError as exc:
+            self._error(f"Could not reach Indico ({type(exc).__name__}). Check the "
+                        "internet connection; the list still shows what the pull "
+                        "recorded.", HTTPStatus.BAD_GATEWAY)
+
     def _format_references(self, body: dict) -> None:
         from src.desk.references_page import check_reference_list
 

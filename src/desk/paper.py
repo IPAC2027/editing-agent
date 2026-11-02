@@ -24,7 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.desk import plain
-from src.desk.state import ManualEdit, ReviewState, finding_key
+from src.desk.indico import assignment_for
+from src.desk.state import ManualEdit, ReviewState, _guess_paper_id, finding_key
 from src.edits import EditConflict, EditSet
 
 
@@ -98,7 +99,8 @@ class Paper:
             self.source = self.source_path.read_text(encoding="utf-8", errors="replace")
 
         if not self.state.paper_id:
-            self.state.paper_id = self.report.get("paper_id", folder.name)
+            # As the worklist names it, so a pulled paper is not called "original".
+            self.state.paper_id = self.report.get("paper_id") or _guess_paper_id(folder)
 
     @property
     def screened(self) -> bool:
@@ -181,6 +183,8 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
     state = paper.state
     if default_editor and not state.editor:
         state.editor = default_editor
+    held = assignment_for(folder, me=default_editor)
+    indico = held.model_dump() if held else None
 
     if not paper.screened:
         return {
@@ -189,6 +193,7 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
             "paper_id": paper.paper_id,
             "kind": paper.kind,
             "screened": False,
+            "indico": indico,
             "message": (
                 "This paper has not been prepared yet. Press “Prepare this paper” "
                 "and the agent will read it, apply the safe corrections and list "
@@ -218,6 +223,7 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
         "status": state.status,
         "status_word": state.status_word,
         "editor": state.editor,
+        "indico": indico,
         "build": paper.report.get("build", ""),
         "generated_at": paper.report.get("generated_at", ""),
         "paper_note": state.paper_note,

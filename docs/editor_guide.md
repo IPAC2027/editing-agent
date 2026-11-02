@@ -39,6 +39,23 @@ Every submission is one line. Six things per line:
 Click a line to open the paper. The buttons above the list filter it — **Still
 to do** is the useful one most days.
 
+### Who has each paper in Indico
+
+When the folder was pulled from Indico, a seventh column, **In Indico**, says
+who has each paper there: **You**, another editor's name, or **Not taken**.
+For the desk to know which papers are yours, type your name at the top exactly
+as Indico shows it — the box suggests the names it knows.
+
+Indico gives each paper to one editor, but the desk works on copies, so nothing
+here stops you opening a colleague's paper. Their lines are greyed out, the
+paper itself says who has it, and **Open the next paper** passes over them.
+**Yours** and **Not taken** above the list hide the rest. Take a paper in
+Indico before you start on it, so nobody else does.
+
+The list starts out as Indico was when the papers were pulled. **Check Indico
+now** asks Indico again — it only reads, and needs the same token as pulling
+(`INDICO_TOKEN`).
+
 ### "Not prepared yet"
 
 The tool has to read a paper once before you can review it. That takes a few
@@ -185,6 +202,7 @@ is locked.
 
 **Open the next paper** takes you straight to the next one that is not
 finished, so you can work down a conference without going back to the list.
+It skips papers another editor has in Indico.
 
 ---
 

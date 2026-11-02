@@ -34,7 +34,7 @@ page, so another website open in the same browser cannot drive it.
 
 | Screen | What you do there |
 |---|---|
-| **The list** | Every submission with its status, how many changes await you, and how many problems the author must fix. Click one to open it. |
+| **The list** | Every submission with its status, how many changes await you, and how many problems the author must fix. Click one to open it. For a conference pulled from Indico, also who has each paper there — you, a colleague, or nobody — as of the pull, or of **Check Indico now** (one read-only request). |
 | **Your decisions** | One card per change: what it is, why JACoW wants it, before and after. Accept or keep as submitted. Keyboard: `a` `r` `j` `k` `n`. Repeated changes of one kind get an "accept all" button. The corrections applied automatically are listed too, folded away, each with **Put back as submitted** — "we did not ask you" never means "you cannot say no". |
 | **Problems** | Sorted by who has to act — only the author can fix these / for you to check / for the record. Tick off what you have handled. |
 | **Your notes** | Anything the agent missed. Goes into the letter. |
