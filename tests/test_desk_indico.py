@@ -21,6 +21,7 @@ import respx
 
 from src.desk.indico import LIVE_FILE, refresh, same_person
 from src.desk.paper import view
+from src.desk import me as me_module
 from src.desk.server import DeskHandler, JobRunner
 from src.desk.state import submission_folders, worklist
 from src.indico_client.client import IndicoAuthError, IndicoClient
@@ -179,10 +180,11 @@ def test_a_folder_not_pulled_from_indico_cannot_be_checked(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
-def desk(pulled: Path):
-    (pulled / ".aiagent_desk.json").write_text(json.dumps({"editor": "Ling Wang"}),
-                                               encoding="utf-8")
-    handler = partial(DeskHandler, root=pulled, jobs=JobRunner(llm=False))
+def desk(pulled: Path, tmp_path: Path):
+    # The editor's name is kept with their own settings, not in the pool.
+    home = tmp_path / "home"
+    me_module.update_settings(home, editor="Ling Wang")
+    handler = partial(DeskHandler, root=pulled, jobs=JobRunner(llm=False), home=home)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()

@@ -23,7 +23,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.desk import plain, title_check
+from src.desk import files, plain, title_check
 from src.desk.indico import Conference
 from src.desk.state import ManualEdit, ReviewState, _guess_paper_id, finding_key
 from src.edits import EditConflict, EditSet
@@ -705,7 +705,7 @@ def close_paper(folder: Path, *, status: str = "done", compile_pdf: bool = True)
     if paper.kind == "latex" and paper.source:
         final = compose(paper, include_undecided=False)
         final_path = paper.out_dir / f"{paper.paper_id}_final.tex"
-        final_path.write_text(final, encoding="utf-8")
+        files.write_text(final_path, final)
         written.append(final_path.name)
 
         if compile_pdf:
@@ -724,7 +724,7 @@ def close_paper(folder: Path, *, status: str = "done", compile_pdf: bool = True)
 
     letter = state.letter_override.strip() or letter_text(paper)
     letter_path = paper.out_dir / "author_letter.txt"
-    letter_path.write_text(letter + "\n", encoding="utf-8")
+    files.write_text(letter_path, letter + "\n")
     written.append(letter_path.name)
 
     # Set the outcome before writing the summary, so the summary records the
@@ -734,7 +734,7 @@ def close_paper(folder: Path, *, status: str = "done", compile_pdf: bool = True)
     state.save(folder)
 
     summary_path = paper.out_dir / "review_summary.md"
-    summary_path.write_text(_summary_markdown(paper, letter), encoding="utf-8")
+    files.write_text(summary_path, _summary_markdown(paper, letter))
     written.append(summary_path.name)
 
     return {"written": written, "status": state.status,

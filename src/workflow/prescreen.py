@@ -479,7 +479,10 @@ def prescreen(
 #: A re-screen regenerates everything else, but wiping these would throw away
 #: decisions, notes and hand edits — which is exactly what an editor does when
 #: they press "Prepare this paper again" after the author resubmits.
-EDITOR_OWNED = ("review_state.json", "review_decisions.json")
+#: Files under ``aiagent_prescreen/`` that belong to the editor, not the agent,
+#: and survive a re-screen: their decisions, and the claim saying which desk is
+#: editing the paper (dropping it would let a second editor in mid-review).
+EDITOR_OWNED = ("review_state.json", "review_decisions.json", "claim.json")
 
 
 def _reset_dir(out_dir: Path) -> None:

@@ -52,5 +52,8 @@ NAPAC2025/
 # Local editor settings, per machine.
 .claude/
 
-# The desk's per-folder preferences, written where the papers live.
+# The desk's per-folder preferences, written where the papers live by older
+# versions (the editor's own settings now live in ~/.aiagent/desk.json).
 .aiagent_desk.json
+# Which papers folder this computer's launcher opens (e.g. a shared folder).
+papers_folder.txt

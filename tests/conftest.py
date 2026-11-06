@@ -18,6 +18,16 @@ _LOOPBACK = {"127.0.0.1", "::1"}
 
 
 @pytest.fixture(autouse=True)
+def _own_settings(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch):
+    """Each test gets its own editor settings, never the developer's.
+
+    The desk keeps the editor's name and its desk id in the home folder
+    (``src.desk.me``); without this a test run would write there.
+    """
+    monkeypatch.setenv("AIAGENT_HOME", str(tmp_path_factory.mktemp("aiagent_home")))
+
+
+@pytest.fixture(autouse=True)
 def _offline(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
     """No test may open a connection off this machine — above all not to a live
     Indico, where the editor's token is their whole account.

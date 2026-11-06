@@ -16,7 +16,9 @@ window opens showing your papers. If the browser does not open by itself, copy
 the address from the black window into your browser.
 
 Put your name in the box at the top right. It goes on the letters you send and
-tells a colleague who worked on a paper.
+tells a colleague who worked on a paper. It is kept on your own computer, so
+when several editors open the same shared folder each of them is "you" on
+their own screen.
 
 When you are done for the day, close the black window. Everything you have done
 is saved as you go — there is no "save" button to forget.
@@ -55,6 +57,52 @@ Indico before you start on it, so nobody else does.
 The list starts out as Indico was when the papers were pulled. **Check Indico
 now** asks Indico again — it only reads, and needs the same token as pulling
 (`INDICO_TOKEN`).
+
+### Several editors, one folder
+
+The papers can live on the chief editor's computer, shared over the office
+network, with every editor running the desk on their own computer. Everyone
+then sees the same papers and the same progress.
+
+**Who is editing what.** Your first change to a paper — a decision, a note,
+an edit — marks it as yours. The list then shows **You're editing** on that
+line, and **Editing: *name*** to everyone else. Just opening a paper to look
+at it marks nothing.
+
+If you open a paper a colleague is editing, a yellow box at the top says who
+and since when. You can read everything, but your changes are not saved — the
+desk says so as soon as you try, and nothing of theirs is touched.
+
+A paper stops being marked as yours when you **finish** it (either choice) or
+press **Let it go** in the green box at the top. Nothing expires on its own:
+you can keep a paper for days. If a colleague has gone home and left a paper
+marked, **Take it over** in the yellow box moves it to you after asking you
+to confirm. Their saved work stays; anything they try to change afterwards is
+refused. Ask them first.
+
+This is separate from Indico. Indico still decides whose paper it is — take
+it there as usual. The marking here only stops two desks writing over each
+other.
+
+**Setting it up** (once, by whoever looks after the tool):
+
+1. *On the chief editor's computer:* the papers folder (e.g. `NAPAC2025`) is
+   shared — on a Mac, *System Settings → General → Sharing → File Sharing*,
+   add the folder, and give the editors read and write access. That computer
+   must stay on and awake while others are working, and should be backed up
+   (Time Machine is enough): it holds everyone's work.
+2. *On each editor's computer:* connect to the share — on a Mac, *Finder → Go
+   → Connect to Server*, `smb://<chief's computer>.local`; on Windows, *File
+   Explorer → This PC → Map network drive*. Then put the folder's path, as
+   that computer sees it, on the first line of a file called
+   `papers_folder.txt` next to `Start Review Desk` — for example
+   `/Volumes/NAPAC2025` on a Mac or `Z:\` on Windows. The launcher opens that
+   folder from then on, and says so plainly if the share is not connected.
+3. Each editor's computer needs the tool installed, and TeX if LaTeX papers
+   are to get a PDF when finished.
+
+The chief editor can prepare new papers while the others work: preparing
+leaves alone any paper someone is editing.
 
 ### "Not prepared yet"
 
@@ -249,8 +297,8 @@ things is true:
 - **Send back to the author.** The letter lists what they must fix.
 
 Then the tool writes your reviewed paper, the letter, and a summary of
-everything you decided. You can reopen a finished paper at any time — nothing
-is locked.
+everything you decided. Finishing also stops marking the paper as yours, so a
+colleague can pick it up. You can reopen a finished paper at any time.
 
 **Open the next paper** takes you straight to the next one that is not
 finished, so you can work down a conference without going back to the list.
@@ -280,9 +328,15 @@ No. The tool never writes to the files the author sent. Every decision can be
 changed, every hand edit can be undone, and a finished paper can be reopened.
 
 **Two of us are reviewing the same conference. Is that a problem?**
-Work on different papers and you are fine — each paper keeps its own record,
-including whose name is on it. Two people on the *same* paper at the same time
-will overwrite each other's last action, so agree who has which paper.
+No. Each paper keeps its own record, including whose name is on it. On a
+shared folder, the first editor to change a paper has it until they finish or
+let it go; anyone else can read it but not change it (see *Several editors,
+one folder*). Take your papers in Indico so you do not both start on the same
+one.
+
+**My name has gone from the box at the top.**
+Since the desk learned to work from a shared folder, your name is kept on your
+computer rather than in the papers folder. Type it once more; it stays.
 
 **I closed the browser by accident.**
 Nothing is lost. Double-click the launcher again, or reload the page.

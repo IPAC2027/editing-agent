@@ -30,7 +30,6 @@ a name is unambiguous.
 from __future__ import annotations
 
 import json
-import os
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -39,6 +38,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from src.checks.title_authors import IndicoRecord, Person, person
+from src.desk import files
 
 PULL_INDEX = "index.json"
 MANIFEST = "manifest.json"
@@ -246,7 +246,9 @@ def refresh(root: Path, *, client=None) -> dict:
 
 
 def _write(target: Path, payload: dict) -> None:
-    """Replace *target* whole, so an interrupted write never leaves half a file."""
-    partial = target.with_name(target.name + ".part")
-    partial.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(partial, target)
+    """Replace *target* whole, so an interrupted write never leaves half a file.
+
+    The temporary name is unique per write: two editors pressing "Check Indico
+    now" at once on a shared pool must not write into the same temporary file.
+    """
+    files.write_text(target, json.dumps(payload, indent=2, ensure_ascii=False))

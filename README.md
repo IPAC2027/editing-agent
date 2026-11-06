@@ -46,8 +46,18 @@ page, so another website open in the same browser cannot drive it.
 
 **Finish this paper** writes the reviewed source, the letter and a summary of
 every decision, then offers the next unfinished paper. A finished paper can be
-reopened; nothing is locked. Everything is saved as you go — there is no save
-button to forget.
+reopened. Everything is saved as you go — there is no save button to forget.
+
+**Several editors.** The papers can sit in a folder shared from the chief
+editor's computer, with each editor running their own desk on it (the path
+goes in `papers_folder.txt` next to the launcher). An editor's first change
+claims a paper (`aiagent_prescreen/claim.json`, created with `O_EXCL` so two
+desks cannot both win); other desks can read it but their changes are refused
+(HTTP 409) until it is finished, let go or taken over. Saves are written whole
+(temporary file, then rename), report paths are relative to the paper, and
+each editor's name and desk id live in `~/.aiagent/desk.json`
+(`AIAGENT_HOME`), not in the shared folder. `prescreen-all` skips claimed
+papers. Indico still decides whose paper it is; nothing is written there.
 
 Word submissions work the same way, except the text is edited in Word: finishing
 produces a `.docx` carrying **only the corrections you accepted**, as tracked
@@ -74,6 +84,8 @@ uv run python main.py apply   paper_examples/MOP030-revision-27360_author \
 
 # A whole conference
 uv run python main.py prescreen-all paper_examples/ --workers 4
+# A conference pulled from Indico; only papers not prepared yet
+uv run python main.py prescreen-all NAPAC2025/ --workers 4 --skip-prepared
 ```
 
 A run prints what it did:

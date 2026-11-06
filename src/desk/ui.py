@@ -119,6 +119,9 @@ button.big{padding:11px 18px;font-size:.95rem}
 .pill.who-you{background:var(--good-soft);color:var(--good)}
 .pill.who-other{background:var(--warn-soft);color:var(--warn)}
 .pill.who-nobody{background:var(--surface3);color:var(--ink2)}
+.pill.claim-mine{background:var(--good-soft);color:var(--good)}
+.pill.claim-other{background:var(--warn-soft);color:var(--warn)}
+td .pill + .pill{margin-left:4px}
 .pill.ta-differs,.pill.ta-changed{background:var(--warn-soft);color:var(--warn)}
 .pill.ta-waiting{background:var(--accent-soft);color:var(--accent)}
 .pill.ta-due{background:var(--bad-soft);color:var(--bad)}
@@ -421,10 +424,64 @@ async function api(path, body){
   const res = await fetch(path, opts);
   let data = null;
   try { data = await res.json(); } catch(_) {}
+  if(res.status===409 && data && data.claim && S.paper){
+    // Another desk is editing this paper: show who, without a reload that
+    // would throw away what the editor was typing.
+    S.paper.claim = data.claim; showClaim();
+  }
   if(!res.ok || (data && data.error)){
     throw new Error((data && data.error) || ("Request failed ("+res.status+")"));
   }
   return data;
+}
+
+/* ---------------------------------------------- who is editing a paper */
+/* A paper is claimed by an editor's first change, so two desks on a shared
+   folder never write over each other. Indico still decides whose paper it is. */
+function claimNotice(c){
+  const box = el("div","held claim");
+  box.id = "claimBox";
+  if(!c){ box.hidden = true; return box; }
+  if(c.state==="mine"){
+    box.classList.add("you");
+    box.appendChild(el("b",null,"You are editing this paper."));
+    box.appendChild(el("span",null,"Other editors see it as taken until you "
+      +"finish it or let it go."));
+    const go = el("button","plain","Let it go");
+    go.onclick = () => claimAction("release");
+    box.appendChild(go);
+  } else {
+    box.classList.add("other");
+    box.appendChild(el("b",null,c.who+" is editing this paper."));
+    box.appendChild(el("span",null,"You can read everything, but your changes "
+      +"are not saved while they have it."));
+    if(c.since) box.appendChild(el("span","tiny muted","Since "+when(c.since)
+      +(c.machine ? " · on "+c.machine : "")));
+    const take = el("button","plain","Take it over");
+    take.onclick = () => {
+      if(!confirm("Take "+(S.paper.paper_id||"this paper")+" over from "+c.who+"?\n\n"
+        +"Do this only if they have finished with it or agreed. Their saved work "
+        +"stays; any change they make after this is refused.")) return;
+      claimAction("take_over");
+    };
+    box.appendChild(take);
+  }
+  return box;
+}
+
+function showClaim(){
+  const old = $("#claimBox");
+  if(old) old.replaceWith(claimNotice(S.paper && S.paper.claim));
+}
+
+async function claimAction(action){
+  try{
+    const data = await api("/api/claim",{folder:S.folder, action});
+    S.paper = data;
+    if(S.paper.screened) renderPaper(); else renderUnprepared();
+    toast(action==="release" ? "Let go — anyone can pick this paper up now"
+          : "This paper is yours to edit now");
+  }catch(err){ toast(err.message, true); }
 }
 
 /* ------------------------------------------------------------- worklist */
@@ -475,7 +532,7 @@ function heldNotice(ind){
     : ind.holder==="other" ? ind.editor+" has this paper in Indico."
     : "No editor has taken this paper in Indico yet."));
   if(ind.holder==="other"){
-    box.appendChild(el("span",null,"Your work here stays on this computer. Check "
+    box.appendChild(el("span",null,"Your work here is not sent to Indico. Check "
       +"with them before you spend time on it."));
     if(!S.papers.some(x=>x.indico && x.indico.holder==="you"))
       box.appendChild(el("span",null,"If that is you, type your name at the top "
@@ -636,6 +693,14 @@ function renderWorklist(){
     const c3 = el("td");
     c3.appendChild(el("span","pill "+(p.screened?p.status:"new"),
       p.screened? p.status_word : "Not prepared"));
+    if(p.claim){
+      const mine = p.claim.state==="mine";
+      const cp = el("span","pill claim-"+(mine?"mine":"other"),
+        mine ? "You're editing" : "Editing: "+p.claim.who);
+      if(p.claim.since) cp.title = "Since "+when(p.claim.since)
+        +(p.claim.machine ? " on "+p.claim.machine : "");
+      c3.appendChild(cp);
+    }
     tr.appendChild(c3);
 
     if(S.indico){
@@ -728,6 +793,7 @@ function renderUnprepared(){
   host.appendChild(el("h1",null,S.paper.paper_id));
   const held = heldNotice(S.paper.indico);
   if(held) host.appendChild(held);
+  host.appendChild(claimNotice(S.paper.claim));
   const e = el("div","empty");
   e.appendChild(el("b",null,"Not prepared yet"));
   e.appendChild(el("div",null,S.paper.message||""));
@@ -762,6 +828,7 @@ function renderPaper(){
   host.appendChild(head);
   const held = heldNotice(p.indico);
   if(held) host.appendChild(held);
+  host.appendChild(claimNotice(p.claim));
   const names = p.title_authors;
   if(names && names.status==="due" && S.tab!=="names"){
     const box = el("div","held other");
@@ -1686,7 +1753,8 @@ $("#dlgFinish").addEventListener("close", async (e) => {
     res.written.forEach(n=>ul.appendChild(el("li",null,n)));
     body.appendChild(ul);
     body.appendChild(el("p","tiny muted",
-      "You can reopen this paper at any time; nothing is locked."));
+      "You can reopen this paper at any time. It is no longer marked as "
+      +"yours, so another editor can pick it up."));
     await loadWorklist();
     $("#dlgDone").showModal();
   }catch(err){ toast(err.message, true); }

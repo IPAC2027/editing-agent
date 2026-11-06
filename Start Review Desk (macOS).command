@@ -11,9 +11,29 @@
 
 cd "$(dirname "$0")" || exit 1
 
-# Where are the submissions?  By default a folder called "submissions" next to
-# this file; an editor can drop papers straight into it.
-PAPERS="${1:-submissions}"
+# Where are the submissions?
+#  * A folder named on the first line of papers_folder.txt, next to this file.
+#    For papers shared from the chief editor's computer that is the shared
+#    folder as this Mac sees it, e.g. /Volumes/NAPAC2025.
+#  * Otherwise a folder called "submissions" next to this file; an editor can
+#    drop papers straight into it.
+PAPERS="$1"
+if [ -z "$PAPERS" ] && [ -f papers_folder.txt ]; then
+  PAPERS="$(head -n 1 papers_folder.txt | tr -d '\r')"
+  if [ ! -d "$PAPERS" ]; then
+    echo ""
+    echo "  The papers folder named in papers_folder.txt is not available:"
+    echo "    $PAPERS"
+    echo ""
+    echo "  If it is shared from another computer, connect to it first"
+    echo "  (Finder > Go > Connect to Server), then start the desk again."
+    echo ""
+    echo "  Press Return to close this window."
+    read -r _
+    exit 1
+  fi
+fi
+PAPERS="${PAPERS:-submissions}"
 if [ ! -d "$PAPERS" ]; then
   if [ -d "paper_examples" ]; then
     PAPERS="paper_examples"

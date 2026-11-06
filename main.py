@@ -132,7 +132,8 @@ def desk(
     computer only — nothing is uploaded, nothing is installed, and the
     submissions are never modified.
     """
-    from src.desk.server import CONFIG_FILENAME, serve
+    from src.desk import me as me_module
+    from src.desk.server import serve
 
     llm = _configure_llm(llm, model, base_url)
 
@@ -141,19 +142,10 @@ def desk(
         console.print(f"[red]Not a folder:[/red] {root}")
         raise typer.Exit(1)
 
-    # Remember the build preference so the page does not have to ask.
-    import json as _json
-
-    config_path = root / CONFIG_FILENAME
-    try:
-        config = _json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        config = {}
-    config["compile"] = compile_pdf
-    try:
-        config_path.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-    except OSError:
-        pass
+    # Remember the build preference so the page does not have to ask. It is
+    # kept with this editor's settings, not in the paper folder: whether PDFs
+    # can be built depends on this computer having TeX.
+    me_module.update_settings(compile=compile_pdf)
 
     serve(root, port=port, open_browser=open_browser, llm=llm)
 
@@ -764,6 +756,31 @@ def _report_word(paper, out_dir: Path, open_browser: bool) -> None:
 # prescreen-all
 # ---------------------------------------------------------------------------
 
+def prescreen_targets(submissions_dir: Path, *, skip_prepared: bool = False
+                      ) -> tuple[list[Path], list[tuple[Path, str]]]:
+    """The papers ``prescreen-all`` should prepare, and those it must leave alone.
+
+    Returns ``(to_prepare, held)``, where *held* pairs each paper an editor is
+    working on with who that is. Uses the desk's own idea of a submission, so a
+    pulled conference (``<CODE>/original``) is found as well as an ordinary
+    folder of submissions.
+    """
+    from src.desk import claim as claim_module
+    from src.desk.state import submission_folders
+
+    to_prepare: list[Path] = []
+    held: list[tuple[Path, str]] = []
+    for folder in submission_folders(submissions_dir.expanduser().resolve()):
+        if skip_prepared and (folder / "aiagent_prescreen" / "report.json").exists():
+            continue
+        claim = claim_module.current(folder)
+        if claim is not None:
+            held.append((folder, claim.who))
+            continue
+        to_prepare.append(folder)
+    return to_prepare, held
+
+
 @app.command("prescreen-all")
 def prescreen_all(
     submissions_dir: Path = typer.Argument(..., help="Directory of submission folders."),
@@ -771,19 +788,32 @@ def prescreen_all(
     compile_pdf: bool = typer.Option(True, "--compile/--no-compile"),
     git: bool = typer.Option(True, "--git/--no-git"),
     workers: int = typer.Option(1, "--workers", "-j", help="Parallel workers."),
+    skip_prepared: bool = typer.Option(
+        False, "--skip-prepared",
+        help="Leave papers that already have a report alone (e.g. after a new pull)."),
     model: str = typer.Option(None, envvar="LLM_MODEL"),
     base_url: str = typer.Option(None, envvar="LLM_BASE_URL"),
 ) -> None:
-    """Pre-screen every submission folder under a directory."""
-    folders = sorted(
-        p for p in submissions_dir.iterdir()
-        if p.is_dir() and (p / "Source_Files").is_dir()
-    )
+    """Pre-screen every submission folder under a directory.
+
+    Understands a conference pulled with ``indico-pull`` as well as a folder of
+    submissions. Papers an editor is working on at the desk are skipped, so the
+    chief can prepare new papers while the others edit.
+    """
+    from src.desk.state import submission_name
+
+    folders, held = prescreen_targets(submissions_dir, skip_prepared=skip_prepared)
+    for folder, who in held:
+        console.print(f"⏭  [yellow]{submission_name(folder)}[/yellow]: "
+                      f"{who} is editing it — left alone")
     if not folders:
+        if held:
+            console.print("Nothing else to prepare.")
+            return
         console.print(f"[red]No submission folders under {submissions_dir}[/red]")
         raise typer.Exit(1)
 
-    console.print(f"Found [bold]{len(folders)}[/bold] submission(s).\n")
+    console.print(f"Found [bold]{len(folders)}[/bold] submission(s) to prepare.\n")
     llm = _configure_llm(llm, model, base_url)
 
     from src.workflow.prescreen import WordSubmissionError
@@ -812,17 +842,17 @@ def prescreen_all(
                 try:
                     _record(future.result())
                 except WordSubmissionError as exc:
-                    console.print(f"⏭  [yellow]{folder.name}[/yellow]: {exc}")
+                    console.print(f"⏭  [yellow]{submission_name(folder)}[/yellow]: {exc}")
                 except Exception as exc:  # noqa: BLE001
-                    console.print(f"[red]{folder.name}[/red]: {exc}")
+                    console.print(f"[red]{submission_name(folder)}[/red]: {exc}")
     else:
         for folder in folders:
             try:
                 _record(run(folder, llm=llm, compile=compile_pdf, git=git))
             except WordSubmissionError as exc:
-                console.print(f"⏭  [yellow]{folder.name}[/yellow]: {exc}")
+                console.print(f"⏭  [yellow]{submission_name(folder)}[/yellow]: {exc}")
             except Exception as exc:  # noqa: BLE001
-                console.print(f"[red]{folder.name}[/red]: {exc}")
+                console.print(f"[red]{submission_name(folder)}[/red]: {exc}")
 
     if totals["papers"]:
         console.print(

@@ -26,6 +26,7 @@ import json
 import re
 from pathlib import Path
 
+from src.desk.files import relative_to_paper, write_text
 from src.checks.reference_list_checks import run_all
 from src.edits import Tier
 from src.lookup_status import STATUS
@@ -611,7 +612,7 @@ def _write_word_report_json(
         "schema_version": 2,
         "paper_id": parsed.paper_id,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        "source": str(doc_path),
+        "source": relative_to_paper(doc_path, path.parent.parent),
         "title": parsed.title,
         "authors": front_matter["authors"] if front_matter else [],
         "front_matter": front_matter,
@@ -635,4 +636,4 @@ def _write_word_report_json(
         "references_checked": len(parsed.references),
         "tracked_document": tracked_name,
     }
-    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    write_text(path, json.dumps(payload, indent=2, default=str))

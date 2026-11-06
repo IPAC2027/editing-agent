@@ -38,6 +38,7 @@ from src.checks.title_authors import (
     compare,
     front_matter_of,
 )
+from src.desk import files
 from src.desk.state import ReviewState, TitleAuthorState
 
 GRACE = timedelta(hours=48)
@@ -105,8 +106,10 @@ def front_for(folder: Path, report: dict) -> FrontMatter | None:
     stored = report.get("front_matter")
     if stored and stored.get("version") == FRONT_MATTER_VERSION:
         return FrontMatter.model_validate(stored)
-    source = Path(report["source"]) if report.get("source") else None
-    if source is None or not source.is_file():
+    # Found from whichever computer prepared the paper: reports record the
+    # source relative to the paper now, older ones an absolute path.
+    source = files.source_file(folder, report.get("source"))
+    if source is None:
         return None
     cache = folder / "aiagent_prescreen" / FRONT_CACHE
     stamp = source.stat().st_mtime
@@ -123,8 +126,8 @@ def front_for(folder: Path, report: dict) -> FrontMatter | None:
         return None
     if front is not None:
         try:
-            cache.write_text(json.dumps({"source_mtime": stamp,
-                                         "front_matter": front.model_dump()}), encoding="utf-8")
+            files.write_text(cache, json.dumps({"source_mtime": stamp,
+                                                "front_matter": front.model_dump()}))
         except OSError:
             pass
     return front

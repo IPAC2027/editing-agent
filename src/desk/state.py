@@ -25,12 +25,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from src.desk import plain
+from src.desk import claim as claim_module
+from src.desk import files, plain
 from src.checks.title_authors import IndicoRecord
 from src.desk.indico import Assignment, Conference
 
@@ -146,17 +148,26 @@ class ReviewState(BaseModel):
     @classmethod
     def load(cls, folder: Path) -> "ReviewState":
         path = cls.path_for(folder)
-        if not path.exists():
-            return cls()
-        try:
-            return cls.model_validate_json(path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001 — a corrupt state file must not lock a paper
-            backup = path.with_suffix(".json.broken")
+        # Read more than once before calling a file broken. Every desk now
+        # writes it whole (see ``save``), but on a network share a read can
+        # still fail for a moment — and "broken" means "start from nothing",
+        # which the next save would make permanent.
+        text = ""
+        for attempt in range(3):
+            if not path.exists():
+                return cls()
             try:
-                backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-            except OSError:
-                pass
-            return cls()
+                text = path.read_text(encoding="utf-8")
+                return cls.model_validate_json(text)
+            except Exception:  # noqa: BLE001 — retried, then set aside below
+                if attempt < 2:
+                    time.sleep(0.1)
+        # A corrupt state file must not lock a paper: keep a copy, start afresh.
+        try:
+            files.write_text(path.with_suffix(".json.broken"), text)
+        except OSError:
+            pass
+        return cls()
 
     def save(self, folder: Path) -> Path:
         path = self.path_for(folder)
@@ -164,7 +175,8 @@ class ReviewState(BaseModel):
         self.updated_at = _now()
         if not self.opened_at:
             self.opened_at = self.updated_at
-        path.write_text(self.model_dump_json(indent=2), encoding="utf-8")
+        # Written whole, so a desk reading it over the network never sees half.
+        files.write_text(path, self.model_dump_json(indent=2))
         return path
 
     # -- mutation -------------------------------------------------------
@@ -295,6 +307,7 @@ class PaperRow(BaseModel):
     updated_at: str = ""
     indico: Assignment | None = None  # who holds it in Indico, for a pulled conference
     title_authors: dict | None = None   # the title and author check, for a pulled conference
+    claim: dict | None = None           # which desk is editing it now, if any
 
     @property
     def progress(self) -> float:
@@ -352,8 +365,11 @@ def submission_folders(root: Path) -> list[Path]:
 
 
 def describe(folder: Path, *, indico: Assignment | None = None,
-             record: IndicoRecord | None = None) -> PaperRow:
-    """Build a worklist row for one submission folder."""
+             record: IndicoRecord | None = None, desk_id: str = "") -> PaperRow:
+    """Build a worklist row for one submission folder.
+
+    *desk_id* is the desk asking, so a claim reads as "you" or as a colleague.
+    """
     from src.desk import title_check
     from src.workflow.prescreen import detect_source_format
 
@@ -366,7 +382,7 @@ def describe(folder: Path, *, indico: Assignment | None = None,
 
     row = PaperRow(
         folder=str(folder),
-        name=_submission_name(folder),
+        name=submission_name(folder),
         paper_id=paper_id,
         title=plain.readable_title(report.get("title", "")),
         kind=kind,
@@ -379,6 +395,7 @@ def describe(folder: Path, *, indico: Assignment | None = None,
         build=report.get("build", ""),
         updated_at=state.updated_at,
         indico=indico,
+        claim=claim_module.view(folder, desk_id),
         title_authors=title_check.summary(
             title_check.front_for(folder, report) if record and report else None,
             state, record),
@@ -401,7 +418,7 @@ def describe(folder: Path, *, indico: Assignment | None = None,
     return row
 
 
-def _submission_name(folder: Path) -> str:
+def submission_name(folder: Path) -> str:
     """What to call this submission in the worklist.
 
     In a pulled conference the folder itself is called "original", which would
@@ -413,7 +430,7 @@ def _submission_name(folder: Path) -> str:
 
 
 def _guess_paper_id(folder: Path) -> str:
-    match = re.match(r"^([A-Za-z0-9]+)", _submission_name(folder))
+    match = re.match(r"^([A-Za-z0-9]+)", submission_name(folder))
     return match.group(1) if match else folder.name
 
 
@@ -434,12 +451,17 @@ def _suggested_ids(out_dir: Path) -> list[str]:
     return [i for i in ids if i]
 
 
-def worklist(root: Path, *, me: str = "") -> list[PaperRow]:
-    """Every submission under *root*; *me* is the name typed at the top of the desk."""
+def worklist(root: Path, *, me: str = "", desk_id: str = "") -> list[PaperRow]:
+    """Every submission under *root*.
+
+    *me* is the name typed at the top of the desk, matched against Indico's
+    editors; *desk_id* is the desk asking, matched against claims.
+    """
     conference = Conference.open(root) if is_pulled_conference(root) else None
     return [
         describe(folder,
                  indico=conference.assignment(folder, me=me) if conference else None,
-                 record=conference.record(folder) if conference else None)
+                 record=conference.record(folder) if conference else None,
+                 desk_id=desk_id)
         for folder in submission_folders(root)
     ]

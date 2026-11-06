@@ -10,12 +10,33 @@ REM The first time you run it, it may take a minute to set itself up.
 REM ---------------------------------------------------------------------------
 
 cd /d "%~dp0"
+setlocal EnableDelayedExpansion
 
-REM Where are the submissions?  By default a folder called "submissions" next
-REM to this file; an editor can drop papers straight into it.
-set PAPERS=%1
-if "%PAPERS%"=="" set PAPERS=submissions
-if not exist "%PAPERS%\" (
+REM Where are the submissions?
+REM  * A folder named on the first line of papers_folder.txt, next to this
+REM    file. For papers shared from the chief editor's computer that is the
+REM    shared folder as this PC sees it, e.g. Z:\ or \\chief-mac\NAPAC2025.
+REM  * Otherwise a folder called "submissions" next to this file; an editor
+REM    can drop papers straight into it.
+set "PAPERS=%~1"
+set "FROM_FILE="
+if "!PAPERS!"=="" if exist "papers_folder.txt" (
+  set /p PAPERS=<papers_folder.txt
+  set "FROM_FILE=1"
+)
+if defined FROM_FILE if not exist "!PAPERS!\" (
+  echo.
+  echo   The papers folder named in papers_folder.txt is not available:
+  echo     "!PAPERS!"
+  echo.
+  echo   If it is shared from another computer, connect to it first,
+  echo   then start the desk again.
+  echo.
+  pause
+  exit /b 1
+)
+if "!PAPERS!"=="" set "PAPERS=submissions"
+if not exist "!PAPERS!\" (
   if exist "paper_examples\" (
     set PAPERS=paper_examples
   ) else (

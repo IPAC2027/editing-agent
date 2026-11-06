@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.edits import EditSet
+from src.desk.files import relative_to_paper, write_text
 from src.lookup_status import STATUS
 from src.models import Paper, Severity
 
@@ -79,7 +80,8 @@ def _write_json(
         "schema_version": 2,
         "paper_id": paper.paper_id,
         "generated_at": generated_at,
-        "source": str(paper.source_path),
+        # Relative to the paper: the pool may be opened from other computers.
+        "source": relative_to_paper(paper.source_path, path.parent.parent),
         "title": paper.title,
         "authors": paper.authors,
         "front_matter": _front_matter(paper),
@@ -89,7 +91,8 @@ def _write_json(
         "summary": {**_tally(paper), "edits": _edit_tally(editset)},
         "lookups": STATUS.report(),
     }
-    path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    # Written whole: a desk on another computer may be reading it right now.
+    write_text(path, json.dumps(data, indent=2, default=str))
 
 
 def _write_markdown(
@@ -231,7 +234,7 @@ def _write_repair_plan(
     plan = {
         "schema_version": 2,
         "paper_id": paper.paper_id,
-        "source": str(paper.source_path),
+        "source": relative_to_paper(paper.source_path, path.parent.parent),
         "generated_at": generated_at,
         "source_sha256": editset.source_sha256 if editset else None,
         "validation": {"status": build_status},

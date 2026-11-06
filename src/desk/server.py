@@ -26,11 +26,16 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from src.desk import indico as indico_module
+from src.desk import claim as claim_module
+from src.desk import me as me_module
 from src.desk import paper as paper_module
 from src.desk import state as state_module
 from src.desk.state import EditorNote, ManualEdit, ReviewState
 
-CONFIG_FILENAME = ".aiagent_desk.json"
+#: Where the editor's name used to be kept: in the paper folder, shared by
+#: every desk opened on it. Now kept per person (see ``src.desk.me``); the
+#: name is still git-ignored so an old file never ends up in a commit.
+LEGACY_CONFIG_FILENAME = ".aiagent_desk.json"
 
 
 # ---------------------------------------------------------------------------
@@ -106,9 +111,12 @@ class JobRunner:
 class DeskHandler(BaseHTTPRequestHandler):
     server_version = "JACoWReviewDesk/1.0"
 
-    def __init__(self, *args, root: Path, jobs: JobRunner, **kwargs) -> None:
+    def __init__(self, *args, root: Path, jobs: JobRunner,
+                 home: Path | None = None, **kwargs) -> None:
         self.root = root
         self.jobs = jobs
+        # Where this editor's own settings live; None means their home folder.
+        self.home = home
         super().__init__(*args, **kwargs)
 
     # -- plumbing -------------------------------------------------------
@@ -193,22 +201,14 @@ class DeskHandler(BaseHTTPRequestHandler):
             raise ValueError("that paper folder no longer exists")
         return candidate
 
-    # -- config ---------------------------------------------------------
-    @property
-    def _config_path(self) -> Path:
-        return self.root / CONFIG_FILENAME
-
+    # -- the editor's own settings ----------------------------------------
+    # Kept on this computer, not in the paper folder, which other editors'
+    # desks may be reading too.
     def _config(self) -> dict:
-        try:
-            return json.loads(self._config_path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            return {}
+        return me_module.load_settings(self.home)
 
-    def _save_config(self, data: dict) -> None:
-        try:
-            self._config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except OSError:
-            pass
+    def _me(self) -> me_module.Me:
+        return me_module.current(self.home)
 
     # -- routing --------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802
@@ -231,10 +231,12 @@ class DeskHandler(BaseHTTPRequestHandler):
                 self._send(HTTPStatus.OK, REFERENCES_PAGE.encode("utf-8"),
                            "text/html; charset=utf-8")
             elif route == "/api/setup":
+                me = self._me()
                 self._json({
                     "root": str(self.root),
                     "root_name": self.root.name,
-                    "editor": self._config().get("editor", ""),
+                    "editor": me.name,
+                    "machine": me.machine,
                     "compile": self._config().get("compile", True),
                     "llm": _llm_state(self.jobs.llm),
                     "jobs": self.jobs.active(),
@@ -242,18 +244,16 @@ class DeskHandler(BaseHTTPRequestHandler):
             elif route == "/api/worklist":
                 conference = (indico_module.Conference.open(self.root)
                               if state_module.is_pulled_conference(self.root) else None)
+                me = self._me()
                 self._json({
                     "papers": [
                         row.model_dump() for row in state_module.worklist(
-                            self.root, me=self._config().get("editor", ""))
+                            self.root, me=me.name, desk_id=me.desk_id)
                     ],
                     "indico": conference.summary() if conference else None,
                 })
             elif route == "/api/paper":
-                folder = self._folder(_one(query, "folder"))
-                self._json(paper_module.view(
-                    folder, default_editor=self._config().get("editor", ""),
-                ))
+                self._json(self._view(self._folder(_one(query, "folder"))))
             elif route == "/api/job":
                 self._json(self.jobs.status(_one(query, "id") or ""))
             elif route == "/file":
@@ -298,11 +298,16 @@ class DeskHandler(BaseHTTPRequestHandler):
                 "/api/format-references": self._format_references,
                 "/api/indico-refresh": self._indico_refresh,
                 "/api/title-authors": self._title_authors,
+                "/api/claim": self._claim,
             }.get(route)
             if handler is None:
                 self._error("unknown address", HTTPStatus.NOT_FOUND)
                 return
             handler(body)
+        except claim_module.Held as exc:
+            # 409: the paper is being edited at another desk. The page gets the
+            # claim with the message so it can say who, without a reload.
+            self._json({"error": str(exc), "claim": exc.view}, HTTPStatus.CONFLICT)
         except ValueError as exc:
             self._error(str(exc))
         except paper_module.DeskError as exc:
@@ -350,23 +355,56 @@ class DeskHandler(BaseHTTPRequestHandler):
         self._json(check_reference_list(text, lookups=bool(body.get("lookups", True))))
 
     def _view(self, folder: Path) -> dict:
-        return paper_module.view(
-            folder, default_editor=self._config().get("editor", ""),
-        )
+        me = self._me()
+        view = paper_module.view(folder, default_editor=me.name)
+        view["claim"] = claim_module.view(folder, me.desk_id)
+        return view
 
     def _with_state(self, body: dict):
+        """The paper named in *body* and its review state, ready to change.
+
+        Every change to a paper comes through here, so this is where the paper
+        is claimed: the first change claims a free paper, and a paper another
+        desk is editing refuses the change (``claim.Held``) before anything is
+        written.
+        """
         folder = self._folder(body.get("folder"))
+        me = self._me()
+        was_free = claim_module.current(folder) is None
+        claim_module.take(folder, me)
         review = ReviewState.load(folder)
-        if not review.editor:
-            review.editor = self._config().get("editor", "")
+        # Whoever picks a free paper up is its editor from now on, so a paper
+        # reopened for the author's next round is signed by the editor doing
+        # that round, not the one who did the last.
+        if not review.editor or (was_free and me.name):
+            review.editor = me.name or review.editor
         return folder, review
 
+    def _claim(self, body: dict) -> None:
+        """Take a paper, take it over from a colleague, or let it go."""
+        folder = self._folder(body.get("folder"))
+        me = self._me()
+        action = str(body.get("action", ""))
+        if action == "take":
+            claim_module.take(folder, me)
+        elif action == "take_over":
+            claim_module.take_over(folder, me)
+            # The letter is signed by the paper's editor: from now on, that is us.
+            if me.name:
+                review = ReviewState.load(folder)
+                review.editor = me.name
+                review.save(folder)
+        elif action == "release":
+            claim_module.release(folder, me)
+        else:
+            raise ValueError("a claim is take, take_over or release")
+        self._json(self._view(folder))
+
     def _set_editor(self, body: dict) -> None:
-        config = self._config()
-        config["editor"] = str(body.get("editor", "")).strip()[:120]
+        changes = {"editor": str(body.get("editor", "")).strip()[:120]}
         if "compile" in body:
-            config["compile"] = bool(body.get("compile"))
-        self._save_config(config)
+            changes["compile"] = bool(body.get("compile"))
+        config = me_module.update_settings(self.home, **changes)
         self._json({"editor": config.get("editor", ""),
                     "compile": config.get("compile", True)})
 
@@ -473,23 +511,42 @@ class DeskHandler(BaseHTTPRequestHandler):
                     "letter_override": review.letter_override})
 
     def _prepare(self, body: dict) -> None:
+        # Preparing rewrites the agent's files under a paper (the editor's
+        # decisions are kept), so a paper another desk is editing is left alone.
         compile_pdf = bool(self._config().get("compile", True))
+        desk_id = self._me().desk_id
+
+        def theirs(folder: Path) -> claim_module.Claim | None:
+            held = claim_module.current(folder)
+            return held if held and held.desk_id != desk_id else None
+
+        skipped = 0
         if body.get("all"):
-            folders = [
-                folder for folder in state_module.submission_folders(self.root)
-                if body.get("force") or not (
-                    folder / "aiagent_prescreen" / "report.json"
-                ).exists()
-            ]
+            folders = []
+            for folder in state_module.submission_folders(self.root):
+                if not body.get("force") and (
+                        folder / "aiagent_prescreen" / "report.json").exists():
+                    continue
+                if theirs(folder):
+                    skipped += 1
+                    continue
+                folders.append(folder)
             label = f"Preparing {len(folders)} paper(s)"
         else:
             folders = [self._folder(body.get("folder"))]
-            label = f"Preparing {folders[0].name}"
+            held = theirs(folders[0])
+            if held:
+                raise claim_module.Held(held, desk_id)
+            label = f"Preparing {state_module.submission_name(folders[0])}"
         if not folders:
-            self._json({"job": None, "message": "Every paper is already prepared."})
+            message = "Every paper is already prepared."
+            if skipped:
+                message = (f"Nothing to prepare: {skipped} paper(s) left alone because "
+                           "another editor is working on them.")
+            self._json({"job": None, "message": message})
             return
         job_id = self.jobs.start(label, folders, compile_pdf=compile_pdf)
-        self._json({"job": self.jobs.status(job_id)})
+        self._json({"job": self.jobs.status(job_id), "skipped": skipped})
 
     def _close(self, body: dict) -> None:
         folder, review = self._with_state(body)
@@ -504,6 +561,8 @@ class DeskHandler(BaseHTTPRequestHandler):
             folder, status=status,
             compile_pdf=bool(self._config().get("compile", True)),
         )
+        # Finished, or back with the author: either way nobody is editing it now.
+        claim_module.release(folder, self._me())
         self._json(result)
 
     def _reopen(self, body: dict) -> None:
@@ -595,14 +654,15 @@ def _llm_state(enabled: bool) -> dict:
 
 
 def serve(root: Path, *, host: str = "127.0.0.1", port: int = 8765,
-          open_browser: bool = True, llm: bool = False) -> None:
+          open_browser: bool = True, llm: bool = False,
+          home: Path | None = None) -> None:
     """Start the desk and block until interrupted."""
     root = root.expanduser().resolve()
     if not root.is_dir():
         raise SystemExit(f"{root} is not a folder.")
 
     jobs = JobRunner(llm=llm)
-    handler = partial(DeskHandler, root=root, jobs=jobs)
+    handler = partial(DeskHandler, root=root, jobs=jobs, home=home)
 
     # Find a free port rather than failing when one desk is already open.
     last_error: OSError | None = None
