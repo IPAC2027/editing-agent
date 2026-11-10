@@ -56,6 +56,9 @@ class Assignment(BaseModel):
     url: str = ""                    # the paper's page in Indico
     source: str = "pull"             # pull | indico — where `editor` came from
     as_of: str = ""                  # when that source said so
+    editable_id: int | None = None   # what Indico's assignment routes take
+    editor_id: int | None = None     # the editor's Indico user id
+    editor_identifier: str = ""      # and Indico's signed identity for them
 
 
 def _read_json(path: Path) -> dict:
@@ -137,9 +140,13 @@ class Conference:
             return None
 
         live = self.live.get(str(contribution_id))
+        editable_id = editor_id = None
+        editor_identifier = ""
         if live is not None:
             editor, state = live.get("editor", ""), live.get("state", "")
             source, as_of = "indico", self.checked_at
+            editable_id, editor_id = live.get("editable_id"), live.get("editor_id")
+            editor_identifier = str(live.get("editor_identifier") or "")
         else:
             editor, state = manifest.get("editor", ""), manifest.get("state", "")
             source, as_of = "pull", _mtime(folder.parent / MANIFEST) or self.pulled_at
@@ -153,7 +160,8 @@ class Conference:
         return Assignment(
             contribution_id=contribution_id, editor=editor, state=state,
             holder=holder, url=self.paper_url(contribution_id),
-            source=source, as_of=as_of,
+            source=source, as_of=as_of, editable_id=editable_id, editor_id=editor_id,
+            editor_identifier=editor_identifier,
         )
 
     def record(self, folder: Path) -> IndicoRecord | None:
@@ -215,7 +223,13 @@ def refresh(root: Path, *, client=None) -> dict:
 
     checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     papers = {
-        str(row.id): {"code": row.code, "editor": row.editor_name, "state": row.state}
+        str(row.id): {"code": row.code, "editor": row.editor_name, "state": row.state,
+                      "editable_id": row.editable.id,
+                      "editor_id": row.editable.editor.id if row.editable.editor else None,
+                      # Indico's signed identity for the editor: what its
+                      # assignment routes take (only the chief's desk uses it).
+                      "editor_identifier": (row.editable.editor.identifier
+                                            if row.editable.editor else "")}
         for row in rows if row.submitted
     }
     _write(root / LIVE_FILE, {"checked_at": checked_at, "papers": papers})

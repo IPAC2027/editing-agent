@@ -98,6 +98,94 @@ def cache_dir() -> Path:
     return Path(root).expanduser() if root else Path.home() / ".cache" / "aiagent"
 
 
+# ---------------------------------------------------------------------------
+# arXiv: cached, and rested when it stops answering
+# ---------------------------------------------------------------------------
+#
+# The formatter asks arXiv about every reference Crossref and DataCite could
+# not confirm. arXiv allows one request every three seconds, and when it is
+# busy each request ends in rate-limit waits and a 10-second timeout, three
+# times over: preparing one paper took many minutes, mostly waiting on arXiv
+# ("HTTP 429 rate-limited by export.arxiv.org", "The read operation timed
+# out"). Its answers were not cached either, so preparing again asked again.
+#
+# So, without changing the formatter: arXiv's answers are kept in the same
+# lookup cache, and after a failure arXiv is left alone for a while. A request
+# skipped that way is recorded as a network failure, exactly as a timeout is,
+# so a reference only arXiv could have confirmed is reported "not checked",
+# never as possibly fabricated.
+
+ARXIV_REST_SECONDS = 15 * 60
+_ARXIV_HOSTS = {"export.arxiv.org", "arxiv.org"}
+_arxiv = {"resting_until": 0.0, "cache": None, "installed": False}
+_arxiv_lock = threading.Lock()
+
+
+def _arxiv_cache():
+    from jacow_formatter.cache import SqliteCache
+
+    with _arxiv_lock:
+        if _arxiv["cache"] is None:
+            try:
+                _arxiv["cache"] = SqliteCache(cache_dir() / "lookups.sqlite")
+            except Exception:  # noqa: BLE001 — no cache is slower, not wrong
+                _arxiv["cache"] = False
+        return _arxiv["cache"] or None
+
+
+def _guarded_get_raw(original):
+    import time
+    import urllib.parse
+
+    from jacow_formatter import net
+
+    def get_raw(url: str, *args, **kwargs) -> bytes:
+        if urllib.parse.urlparse(url).netloc not in _ARXIV_HOSTS:
+            return original(url, *args, **kwargs)
+        cache = _arxiv_cache()
+        key = "aiagent-arxiv:" + url
+        hit = cache.get(key) if cache else None
+        if hit is not None:
+            return hit.get("body", "").encode("utf-8")
+        if time.monotonic() < _arxiv["resting_until"]:
+            net._record_net_error(url, "arXiv skipped: not answering")
+            return b""
+        body = original(url, *args, **kwargs)
+        if body:
+            if cache:
+                cache.set(key, {"body": body.decode("utf-8", "replace")},
+                          ttl=30 * 86_400)
+            return body
+        with _arxiv_lock:
+            first = time.monotonic() >= _arxiv["resting_until"]
+            _arxiv["resting_until"] = time.monotonic() + ARXIV_REST_SECONDS
+        if first:
+            print(f"  arXiv is not answering (rate-limited or slow): arXiv searches are "
+                  f"skipped for the next {ARXIV_REST_SECONDS // 60} minutes. References only "
+                  "arXiv could confirm are marked 'not checked'.", flush=True)
+        return b""
+
+    get_raw.__wrapped__ = original
+    return get_raw
+
+
+def _install_arxiv_guard() -> None:
+    from jacow_formatter import agent as formatter_agent
+    from jacow_formatter import sources as formatter_sources
+
+    with _arxiv_lock:
+        if _arxiv["installed"]:
+            return
+        _arxiv["installed"] = True
+    for module in (formatter_sources, formatter_agent):
+        current = getattr(module, "_http_get_raw", None)
+        if current is not None and not hasattr(current, "__wrapped__"):
+            module._http_get_raw = _guarded_get_raw(current)
+
+
+_install_arxiv_guard()
+
+
 def formatter_config(*, offline: bool = False, style: HouseStyle | None = None,
                      llm: bool | None = None) -> AgentConfig:
     """Build the formatter's settings from the agent's .env.

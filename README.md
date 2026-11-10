@@ -23,9 +23,26 @@ Editors do not use a terminal. **Double-click `Start Review Desk`** — the
 `.command` file on macOS, the `.bat` file on Windows — and a browser opens on
 your papers.
 
+The command line has two modes:
+
 ```
-aiagent desk <folder-of-submissions>        # what the launcher runs
+aiagent --join ADDRESS --code CODE           # editor, working from the chief's
+                                             # desk: no folder (remembered)
+aiagent --manage [papers-folder] [--event N] # chief editor: the managing page
+                                             # (Indico, download, preparing)
+aiagent [papers-folder]                      # one editor working alone
 ```
+
+The launcher runs the editor mode: the chief's desk this computer joined,
+else the folder it used last. In chief mode the list starts with **The conference
+in Indico**: every paper Indico has, its state and editor, and whether it is
+already in the folder, with **Download and prepare new papers**, which fetches
+what is missing, reads who holds each paper, and prepares the new ones (never
+one an editor has claimed), with progress on the page. The event can be given
+with `--event` or typed on the page; once papers are downloaded the folder
+remembers it (`index.json`) and refuses another. The Indico token is pasted
+into the page once (no environment variable needed) and never shown again. The maintainers'
+commands below are under `aiagent tools …` (their old names still work).
 
 The desk serves a page on your own computer. Nothing is uploaded, nothing is
 installed, and the files the author sent are never modified. It answers only
@@ -48,16 +65,118 @@ page, so another website open in the same browser cannot drive it.
 every decision, then offers the next unfinished paper. A finished paper can be
 reopened. Everything is saved as you go — there is no save button to forget.
 
-**Several editors.** The papers can sit in a folder shared from the chief
-editor's computer, with each editor running their own desk on it (the path
-goes in `papers_folder.txt` next to the launcher). An editor's first change
-claims a paper (`aiagent_prescreen/claim.json`, created with `O_EXCL` so two
-desks cannot both win); other desks can read it but their changes are refused
-(HTTP 409) until it is finished, let go or taken over. Saves are written whole
-(temporary file, then rename), report paths are relative to the paper, and
-each editor's name and desk id live in `~/.aiagent/desk.json`
-(`AIAGENT_HOME`), not in the shared folder. `prescreen-all` skips claimed
-papers. Indico still decides whose paper it is; nothing is written there.
+**Several editors.** The chief editor's desk (`--manage`) holds the papers.
+It also opens a door for editors on the network: port 8770, with a join code
+shown on the chief's page (`--no-share` keeps it to this computer). Each editor runs
+`aiagent --join ADDRESS --code CODE` (no folder) on their own computer once;
+after that plain `aiagent`, or the launcher, opens the same desk. Their desk
+never opens the chief's folder:
+- **Take:** the editor takes a paper, and the claim (`aiagent_prescreen/claim.json`,
+  `O_EXCL`) is made on the chief's computer.
+- **Copy:** the editor's desk downloads a copy into a working folder it keeps
+  itself, one per chief's desk (`~/.aiagent/working/<address>/`). Editors
+  never choose a folder. Copies given back are cleared the next time the desk
+  starts; a copy with changes the chief never received is kept.
+- **Send back:** a few seconds after each change, the paper's
+  `aiagent_prescreen/` is sent back. Only the desk holding the claim may send.
+  The claim file is never overwritten, and the last five versions are kept in
+  `.pool_backups/`.
+- **Give back or give up:** finishing a paper sends it one last time and
+  releases the claim. **Give up this paper** does the same for an unfinished
+  one, with an optional reason: the chief's page shows a notice until
+  dismissed, and the paper is free for the next editor (unassigned in Indico
+  when the sync is on).
+- **One desk per person:** while the door is open, `.pool_door.json` in the
+  folder says so and any other desk started on that folder refuses. An
+  editor's desk started on the chief's computer keeps its own settings in
+  `~/.aiagent/editor/`, so it never has the chief's desk id.
+
+**Edit, then QA.** A paper is edited, then QA'd by an editor
+(`state.stage_of`: to edit → to QA → QA passed; a failed QA sends it back to
+edit, with a note). A claim records what the paper was taken for (`edit` or
+`qa`), and the chief's door refuses a take that does not fit the paper's
+stage. Only taking to edit makes someone the paper's editor and assigns them
+in Indico; a QA never changes Indico. Nobody QAs a paper they edited: the
+chief's desk records everyone whose send changed the paper's editing
+(`edited_by`, by Indico user id) and refuses them its QA. Verdicts are kept in the review state
+(`qa`, with a history).
+
+**The chief's page manages; it does not edit.** It reads Indico, downloads and
+prepares papers, keeps Indico's assignments in step and lists every paper,
+in Indico or in the folder, with: whether it is downloaded (and prepared),
+which is newer (Indico has revisions the copy lacks, or the copy has editing
+Indico has not seen), the author/title check (OK, email to send, email sent,
+fixed), whether it is edited and by whom, and its QA (not yet, in QA, passed,
+failed with the note), next to Indico's editor (refreshed every 10 seconds).
+New revisions of papers already downloaded are flagged, not downloaded yet.
+**Free** releases a paper from
+whoever holds it: their desk is told on its next send, their unsent work stays
+on their computer, and an unfinished paper is unassigned in Indico. Every
+editing request to the managing page is refused (`MANAGING_ROUTES` in
+`src/desk/server.py`). To edit, the chief clicks **Edit papers**: it starts an
+editor's desk joined to the chief's own door, with its own settings
+(`~/.aiagent/editor/`) and Indico account, and opens it in a new tab
+(`src/desk/editing.py`). That desk closes when the managing desk does, even
+if it is killed; a desk already open with those settings is reused.
+
+**Indico.** Each desk takes its Indico token in its own page, not from an
+environment variable. The token is checked with `GET /api/user/` and kept in
+`~/.aiagent/indico_token` (mode 600), and is never sent back to the page.
+`INDICO_TOKEN` still works as a fallback, except on an editor's desk.
+- **Editors:** their token is who they are, in place of a typed name. Their
+  desk sends the chief their Indico user id and name, never the token, and
+  the chief's desk refuses a take from a desk without them.
+- **Indico's editors only:** the chief's desk lets an account take a paper
+  (to edit or to QA) only if it is one of the event's paper editors or
+  editing managers in Indico (`IndicoSync.may_edit`). It works whether the
+  assignment switch is on or off.
+  - *Paper editors:* the chief's token reads `GET …/editing/api/paper/editors`
+    (the `paper_editing` permission, given directly or through a group). The
+    list is kept 10 minutes. Someone not in it is looked up again at once (at
+    most every 30 s), so a newly added editor gets in without a restart.
+  - *Editing managers:* Indico has no endpoint listing them. Each editor's
+    desk asks about its own account with its own token: that same endpoint
+    answers 200 to an editing manager (or event manager) and 403 to anyone
+    else (`IndicoClient.can_manage_editing`, `account.manages_editing`). It
+    re-asks every 10 minutes, and at most every 30 s before a take, and sends
+    the answer as `X-Indico-Editing-Manager`. The token is only sent to the
+    Indico it was connected to.
+  - *If Indico can't be read:* nobody new is let in. Someone confirmed in the
+    last hour still is.
+  - *Shown on the pages:* the editor's page and the chief's door panel show
+    who is neither.
+  - *Papers already taken* are not taken back; the chief can **Free** them.
+  - *Trust:* the editing-manager answer, like the editor's Indico id, is
+    reported by the editor's desk; the chief's desk cannot verify it.
+- **The chief's desk:** when switched on for an event (the box on the chief's
+  page), it assigns an editor in Indico when they take a paper, and unassigns
+  them when they give it back unfinished. It reads Indico's assignments back
+  every 2 minutes. Nothing is sent while it is off. Switching it on assigns
+  the papers already being edited (`Pool.assign_held`, using the Indico id
+  each claim records). Until then the managing page marks those papers *not
+  told: the Indico sync is off*.
+- **The one write:** this is the only thing the agent writes to Indico:
+  `src/indico_client/assign.py` sends `POST …/editables/assign|unassign`
+  with Indico's own conflict check, so a paper reassigned in Indico meanwhile
+  is left alone. Indico sends no email for either request.
+  `tests/test_indico_read_only.py` keeps every other path read-only.
+- **Signed identities:** Indico names a person in these requests only by the
+  signed identity it hands out, `User:<id>:<signature>`. The signature is made
+  with the server's secret key; a bare `User:<id>` gets a 422 "User id
+  signature missing". The chief's desk takes these identities from the paper
+  editors list and from each paper's editor in the paper list
+  (`IndicoSync.identifier`), and keeps them out of the files sent to editors'
+  desks. So Indico can assign only people it lists: an editing manager who
+  is not in the paper editing team can take papers here, but is not assigned
+  in Indico. The chief's page reports that, and tries again at every read of
+  Indico, so adding them to the team is enough.
+
+Each editor's name and desk id live in
+`~/.aiagent/desk.json` (`AIAGENT_HOME`); an editor's desk started on the chief's
+own computer keeps its own in `~/.aiagent/editor/`. Opening the desk on a folder without
+`--join` still works for one editor on their own. Code:
+`src/desk/pool.py` (chief), `src/desk/remote.py` (editor), `src/desk/bundle.py`
+(the zips, read strictly).
 
 Word submissions work the same way, except the text is edited in Word: finishing
 produces a `.docx` carrying **only the corrections you accepted**, as tracked
@@ -123,8 +242,10 @@ uv run python main.py corpus-score ~/HIAT2025
 ```
 
 An Indico personal token with `read:everything` is needed
-(`<indico>/user/tokens/`), in `INDICO_TOKEN` or the OS keyring. It is never
-printed and never written to disk. Indico has no narrower scope for the
+(`<indico>/user/tokens/`). Paste it into the desk's Indico box once: it is kept
+in `~/.aiagent/indico_token`, readable only by you, and these commands use it
+too. `INDICO_TOKEN` or the OS keyring still work as fallbacks. It is never
+printed. Indico has no narrower scope for the
 editing module, so treat it as your whole account and revoke it when done.
 
 **Reading the numbers.** Three columns, and only one of them is evidence of a

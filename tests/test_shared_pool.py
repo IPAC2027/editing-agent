@@ -345,3 +345,36 @@ def test_preparing_skips_a_paper_another_desk_is_editing(two_desks: dict, pool: 
     status, data = _call(two_desks["yue"], "POST", "/api/prepare", {"all": True})
     assert status == 200 and data["job"] is None
     assert "2 paper(s) left alone" in data["message"]
+
+
+# ---------------------------------------------------------------------------
+# Where a paper is in the work
+# ---------------------------------------------------------------------------
+
+def test_a_paper_goes_from_editing_to_qa_and_back_on_a_failed_qa():
+    from src.desk.state import TAKE_FOR, stage_of
+
+    state = ReviewState()
+    assert stage_of(state, prepared=False) == "unprepared"
+    assert stage_of(state) == "to_edit" and TAKE_FOR["to_edit"] == "edit"
+    state.status = "needs_author"
+    assert stage_of(state) == "waiting_author" and TAKE_FOR["waiting_author"] == "edit"
+    state.status = "done"
+    assert stage_of(state) == "to_qa" and TAKE_FOR["to_qa"] == "qa"
+    state.status, state.qa.status = "in_review", "failed"
+    assert stage_of(state) == "to_reedit" and TAKE_FOR["to_reedit"] == "edit"
+    state.status, state.qa.status = "done", "passed"
+    assert stage_of(state) == "qa_passed" and "qa_passed" not in TAKE_FOR
+
+
+def test_who_edited_a_paper_is_known_by_indico_id_else_by_name():
+    from src.desk.state import has_edited
+
+    state = ReviewState(edited_by=[{"id": 501, "name": "Ling Wang"}])
+    assert has_edited(state, 501, "")
+    assert has_edited(state, None, "Ling  WANG")
+    assert not has_edited(state, 502, "Yue Hao")
+    # Edited before editors were recorded: its editor's name still counts.
+    assert has_edited(ReviewState(editor="Yue Hao"), 502, "Yue Hao")
+    assert not has_edited(ReviewState(), 502, "Yue Hao")
+

@@ -11,12 +11,13 @@
 
 cd "$(dirname "$0")" || exit 1
 
-# Where are the submissions?
-#  * A folder named on the first line of papers_folder.txt, next to this file.
-#    For papers shared from the chief editor's computer that is the shared
-#    folder as this Mac sees it, e.g. /Volumes/NAPAC2025.
-#  * Otherwise a folder called "submissions" next to this file; an editor can
-#    drop papers straight into it.
+# Which desk?
+#  * Editors working from the chief editor's desk set nothing up here: once
+#    this Mac has joined the chief's desk (see the editor guide), this file
+#    opens that desk again, and it keeps the papers you take by itself.
+#  * Working alone on a folder of papers: name it on the first line of
+#    papers_folder.txt next to this file. Otherwise the desk works in a folder
+#    called "submissions" next to this file; drop papers straight into it.
 PAPERS="$1"
 if [ -z "$PAPERS" ] && [ -f papers_folder.txt ]; then
   PAPERS="$(head -n 1 papers_folder.txt | tr -d '\r')"
@@ -33,26 +34,28 @@ if [ -z "$PAPERS" ] && [ -f papers_folder.txt ]; then
     exit 1
   fi
 fi
-PAPERS="${PAPERS:-submissions}"
-if [ ! -d "$PAPERS" ]; then
-  if [ -d "paper_examples" ]; then
-    PAPERS="paper_examples"
-  else
-    mkdir -p submissions
-    PAPERS="submissions"
+if [ -n "$PAPERS" ]; then
+  ARGS=("$PAPERS")
+else
+  # No folder named: the chief's desk this Mac joined, else the folder used
+  # last, else "submissions" (or the examples shipped with the tool).
+  ALONE="submissions"
+  if [ ! -d "$ALONE" ] && [ -d "paper_examples" ]; then
+    ALONE="paper_examples"
   fi
+  ARGS=(--alone-in "$ALONE")
 fi
 
 echo ""
 echo "  Starting the JACoW review desk…"
-echo "  Papers folder: $PAPERS"
+[ -n "$PAPERS" ] && echo "  Papers folder: $PAPERS"
 echo ""
 
-run_with_uv() { uv run --quiet python main.py desk "$PAPERS"; }
+run_with_uv() { uv run --quiet python main.py "${ARGS[@]}"; }
 run_with_python() {
   for candidate in python3 python; do
     if command -v "$candidate" >/dev/null 2>&1; then
-      "$candidate" main.py desk "$PAPERS"
+      "$candidate" main.py "${ARGS[@]}"
       return $?
     fi
   done

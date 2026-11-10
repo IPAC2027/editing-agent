@@ -120,6 +120,21 @@ class TitleAuthorState(BaseModel):
     indico_done: dict[str, bool] = Field(default_factory=dict)   # checklist ticks
 
 
+class QAState(BaseModel):
+    """The second look at an edited paper: passed, or failed and back to editing.
+
+    ``status`` is the latest verdict on the paper as it stands: "" until an
+    editor has done its QA (and again after a re-edit), then ``passed`` or
+    ``failed``. Every verdict is also kept in ``history``.
+    """
+
+    status: str = ""                       # "" | passed | failed
+    by: str = ""
+    at: str = ""
+    note: str = ""                         # what to fix, for the editor who re-edits it
+    history: list[dict] = Field(default_factory=list)   # {status, by, at, note}
+
+
 class ReviewState(BaseModel):
     """One editor's work on one paper."""
 
@@ -136,6 +151,10 @@ class ReviewState(BaseModel):
     paper_note: str = ""                   # a note about the paper as a whole
     letter_override: str = ""              # an edited author letter, if any
     title_authors: TitleAuthorState = Field(default_factory=TitleAuthorState)
+    qa: QAState = Field(default_factory=QAState)
+    # Everyone whose editing reached the chief's desk ({id: Indico user id,
+    # name}): none of them may do the paper's QA.
+    edited_by: list[dict] = Field(default_factory=list)
     opened_at: str = ""
     updated_at: str = ""
     closed_at: str = ""
@@ -282,6 +301,60 @@ class ReviewState(BaseModel):
 
 # ---------------------------------------------------------------------------
 # The worklist
+#: Where a paper is in the work, and what an editor may take it for.
+#:   unprepared      the agent has not read it yet: nobody can take it
+#:   to_edit         not edited yet (new, or started and not finished)
+#:   waiting_author  sent back to the author; can be taken to edit again
+#:   to_reedit       QA failed: to edit again, with the QA note
+#:   to_qa           edited, waiting for its QA
+#:   qa_passed       edited and QA passed: nothing left to do
+TAKE_FOR = {"to_edit": "edit", "waiting_author": "edit", "to_reedit": "edit",
+            "to_qa": "qa"}
+
+
+def stage_of(state: "ReviewState", *, prepared: bool = True) -> str:
+    if not prepared:
+        return "unprepared"
+    if state.status == "done":
+        return "qa_passed" if state.qa.status == "passed" else "to_qa"
+    if state.status == "needs_author":
+        return "waiting_author"
+    return "to_reedit" if state.qa.status == "failed" else "to_edit"
+
+
+#: What a send that changes nothing of these leaves as it was: bookkeeping,
+#: not editing.
+NOT_WORK = {"schema_version", "paper_id", "editor", "edited_by", "qa",
+            "opened_at", "updated_at", "closed_at"}
+
+
+def work_of(state: "ReviewState") -> dict:
+    """The editing in a review state, to tell whether a send changed any."""
+    return state.model_dump(exclude=NOT_WORK)
+
+
+def has_edited(state: "ReviewState", indico_id: int | None, name: str) -> bool:
+    """Whether this editor edited the paper, so someone else must QA it.
+
+    Known by Indico user id, else by name; a paper edited before editors were
+    recorded falls back to its editor's name.
+    """
+    from src.desk.indico import same_person
+
+    for entry in state.edited_by:
+        if indico_id and entry.get("id") == indico_id:
+            return True
+        if name and same_person(str(entry.get("name") or ""), name):
+            return True
+    return not state.edited_by and bool(name) and same_person(state.editor, name)
+
+
+def qa_view(state: "ReviewState") -> dict:
+    qa = state.qa
+    return {"status": qa.status, "by": qa.by, "at": qa.at, "note": qa.note,
+            "rounds": len(qa.history)}
+
+
 # ---------------------------------------------------------------------------
 
 class PaperRow(BaseModel):
@@ -308,6 +381,8 @@ class PaperRow(BaseModel):
     indico: Assignment | None = None  # who holds it in Indico, for a pulled conference
     title_authors: dict | None = None   # the title and author check, for a pulled conference
     claim: dict | None = None           # which desk is editing it now, if any
+    stage: str = "unprepared"           # see stage_of
+    qa: dict | None = None              # see qa_view
 
     @property
     def progress(self) -> float:
@@ -399,6 +474,8 @@ def describe(folder: Path, *, indico: Assignment | None = None,
         title_authors=title_check.summary(
             title_check.front_for(folder, report) if record and report else None,
             state, record),
+        stage=stage_of(state, prepared=bool(report)),
+        qa=qa_view(state),
     )
 
     if not report:

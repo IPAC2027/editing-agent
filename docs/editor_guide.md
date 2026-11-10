@@ -16,9 +16,9 @@ window opens showing your papers. If the browser does not open by itself, copy
 the address from the black window into your browser.
 
 Put your name in the box at the top right. It goes on the letters you send and
-tells a colleague who worked on a paper. It is kept on your own computer, so
-when several editors open the same shared folder each of them is "you" on
-their own screen.
+tells a colleague who worked on a paper. When you work from the chief editor's
+desk there is no name to type: your Indico account says who you are (see
+*Joining* below).
 
 When you are done for the day, close the black window. Everything you have done
 is saved as you go — there is no "save" button to forget.
@@ -55,54 +55,148 @@ paper itself says who has it, and **Open the next paper** passes over them.
 Indico before you start on it, so nobody else does.
 
 The list starts out as Indico was when the papers were pulled. **Check Indico
-now** asks Indico again — it only reads, and needs the same token as pulling
-(`INDICO_TOKEN`).
+now** asks Indico again — it only reads, and uses the token pasted into the
+desk's Indico box.
 
-### Several editors, one folder
+### Several editors, one conference
 
-The papers can live on the chief editor's computer, shared over the office
-network, with every editor running the desk on their own computer. Everyone
-then sees the same papers and the same progress.
+The papers live on the chief editor's computer. Each editor runs the desk on
+their own computer and **joins** the chief's desk over the office network. An
+editor's desk never opens the chief's folder: it asks the chief's desk for a
+paper, works on a copy, and sends the work back.
 
-**Who is editing what.** Your first change to a paper — a decision, a note,
-an edit — marks it as yours. The list then shows **You're editing** on that
-line, and **Editing: *name*** to everyone else. Just opening a paper to look
-at it marks nothing.
+**Joining.** The chief's page has a box called **Editors on the network**
+with an address and a join code. Start your desk with them, e.g.
 
-If you open a paper a colleague is editing, a yellow box at the top says who
-and since when. You can read everything, but your changes are not saved — the
-desk says so as soon as you try, and nothing of theirs is touched.
+    uv run python main.py --join 10.9.0.3:8770 --code vyq3-pt4d-8bew
 
-A paper stops being marked as yours when you **finish** it (either choice) or
-press **Let it go** in the green box at the top. Nothing expires on its own:
-you can keep a paper for days. If a colleague has gone home and left a paper
-marked, **Take it over** in the yellow box moves it to you after asking you
-to confirm. Their saved work stays; anything they try to change afterwards is
-refused. Ask them first.
+There is no folder to choose: your desk keeps the papers you take by itself.
+It remembers the address and code, so next time `uv run python main.py` (or
+double-clicking the launcher) is enough.
 
-This is separate from Indico. Indico still decides whose paper it is — take
-it there as usual. The marking here only stops two desks writing over each
-other.
+**Your Indico account (once), instead of a name.** Your page asks for your
+Indico token: in Indico, open *My profile → API tokens*, create a token with
+the scope *read:everything*, and paste it into the box. The desk checks it
+with Indico and keeps it on your computer only. From then on you are known by
+your Indico account: the top of your page shows **Indico: *your name***, the
+chief's page shows that name next to the papers you take, and they are
+assigned to you in Indico. Only your Indico user id and name go to the chief's
+desk, never the token. You cannot take a paper until the token is in.
 
-**Setting it up** (once, by whoever looks after the tool):
+**Only Indico's editors take papers.** Before giving you a paper, to edit or
+to QA, the chief's desk checks that your Indico account is one of the
+conference's *paper editors* (given the paper-editing permission directly or
+through a group) or one of its *editing managers*. Paper editors are looked up
+by the chief's desk. Indico shows the editing managers to nobody, so your own
+desk asks Indico about your account, with your own token, and tells the
+chief's desk the answer. Your token only ever goes to the Indico it was made
+on. Event managers count as editing managers, as they do in Indico. If you are
+neither, your page says so in red, the papers show *not an editor in Indico*
+instead of a Take button, and the chief's page marks your desk the same way.
+Ask the chief editor to add you in Indico; you can take papers within a minute
+of that, with no restart. Your page says which you are once you are in.
 
-1. *On the chief editor's computer:* the papers folder (e.g. `NAPAC2025`) is
-   shared — on a Mac, *System Settings → General → Sharing → File Sharing*,
-   add the folder, and give the editors read and write access. That computer
-   must stay on and awake while others are working, and should be backed up
-   (Time Machine is enough): it holds everyone's work.
-2. *On each editor's computer:* connect to the share — on a Mac, *Finder → Go
-   → Connect to Server*, `smb://<chief's computer>.local`; on Windows, *File
-   Explorer → This PC → Map network drive*. Then put the folder's path, as
-   that computer sees it, on the first line of a file called
-   `papers_folder.txt` next to `Start Review Desk` — for example
-   `/Volumes/NAPAC2025` on a Mac or `Z:\` on Windows. The launcher opens that
-   folder from then on, and says so plainly if the share is not connected.
-3. Each editor's computer needs the tool installed, and TeX if LaTeX papers
-   are to get a PDF when finished.
+**Taking a paper.** Your page lists the chief's papers under **Papers on the
+chief editor's desk**, with what each one needs next:
 
-The chief editor can prepare new papers while the others work: preparing
-leaves alone any paper someone is editing.
+- **To edit**: papers nobody has edited yet. **Take to edit** downloads a copy
+  to your computer and opens it; you become its editor.
+- **To QA**: papers another editor has finished, waiting for a second look.
+  **Take for QA** opens a copy the same way; it does not make you its editor.
+  You never QA a paper you edited (in any round): it shows *you edited it*
+  instead, and another editor does its QA. Taking a paper to edit and giving
+  it up untouched does not count as editing it.
+- A paper whose QA failed is back under **To edit** as **Take to re-edit**,
+  with the QA note saying what to fix.
+
+Nobody else can take a paper while you have it, and the chief's page shows
+who has it and what for. **Assigned to you** shows the papers the chief has
+given you; papers Indico gives to someone else cannot be taken to edit (anyone
+may QA them).
+
+**Doing a QA.** A paper taken for QA has **QA passed** and **QA failed…** at
+the bottom instead of **Finish this paper**. Check the editor's work (you can
+fix small things yourself; your changes are sent as usual), then:
+
+- **QA passed**: the paper is done. Nothing more is needed from the editors.
+- **QA failed…**: say what needs fixing (required). The paper goes back to the
+  editors to re-edit, with your note at the top of the page. Once it is
+  finished again it comes back for QA. Every verdict is kept.
+
+Either way the paper is sent to the chief's desk and given back.
+**Give up this QA** frees it for someone else without a verdict.
+
+**Your work goes back as you go.** A few seconds after each change, your desk
+sends the paper's review files to the chief's desk. A green **Sent** in your
+list means the chief has your latest work. **Not sent yet** means the chief's
+desk could not be reached. Your work is safe on your computer and is sent
+when the chief's desk answers. Only the review files go back; the author's
+files are never changed.
+
+**Finishing or giving up.** Finishing a paper (either choice) sends it one
+last time and gives it back to the chief. If you cannot finish a paper, use
+**Give up this paper** in the green box at the top, and say why if you like
+(a conflict of interest, no time). Your work so far is sent first; the paper
+is then free for another editor to take, with your work in it, and the
+chief's page shows that you gave it up and why. You can still read your copy
+until you next start the desk, which clears the papers you have given back:
+the chief's desk has them. To change one again, **Take it again**: you get
+the chief's latest version. A copy whose last changes never reached the
+chief is never cleared.
+
+**If the chief frees a paper you have.** Only the chief can take a paper away
+from an editor (**Free** on the managing page). If they do, your desk says so
+the next time it sends, and your copy, with any work not sent yet, stays on
+your computer.
+
+**You never need to open Indico.** The chief's desk keeps it in step: when
+you take a paper, it assigns you in Indico; when you give a paper back
+unfinished, it unassigns you; a finished paper stays assigned to you. And a
+paper the chief assigns to you in Indico shows up as **Assigned to you** on
+your desk within a couple of minutes.
+
+**One desk per person.** An editor's desk never opens the chief's papers
+folder: while the chief's desk is sharing it, any other desk started on that
+folder stops and says how to join instead.
+
+**The chief edits on an editor's desk too.** The chief's page is a managing
+page: Indico, downloading and preparing papers, the sync, the editors' door,
+who is editing what, and **Free** to take a paper back from an editor. It does
+not edit papers. **Edit papers**, at the top, opens the chief's own editing
+desk in a new tab: an editor's desk like everyone's, joined to the chief's
+desk, with its own settings in `~/.aiagent/editor`. Paste your Indico token
+into it once, as any editor does (it never uses the managing page's token, nor
+`INDICO_TOKEN` or the keyring on that computer). Like every editor, the chief
+must be a paper editor or an editing manager in Indico to take papers there.
+It closes when the managing desk closes. Started by hand instead (`uv run python main.py --join 127.0.0.1
+--code …` on the chief's computer), it is the same desk, and **Edit papers**
+finds it.
+
+**Setting it up** (once):
+
+1. *The chief editor* starts the desk with `--manage` (add `--no-share` to
+   keep the door to this computer, i.e. only their own editing desk) and
+   connects their Indico account in the managing page (a token with the *full:everything* scope, so
+   the desk can assign editors). Then, in the same box, switch on **Keep
+   Indico's editor assignments in step** for the conference. It is off until
+   switched on, and is remembered per conference. While it is off nothing is
+   sent to Indico, and the managing page says so next to papers being
+   edited. Switching it on assigns those papers' editors too. Assigning editors sends no
+   email; Indico writes each change to the event's log. The desk reads
+   Indico's assignments every two minutes. The chief's computer
+   must stay on and awake while the others work, and should be backed up
+   (Time Machine is enough), because it holds everyone's work. Each time an
+   editor's work arrives, the chief's desk keeps a copy of what it replaced
+   (`.pool_backups/` in the papers folder, the last five per paper). The
+   first time, macOS may ask whether Python may accept incoming connections:
+   allow it.
+2. *Each editor's computer* needs the tool installed, and TeX if LaTeX papers
+   are to get a PDF when finished. Editors must be in the event's paper
+   editing team in Indico, or be its editing managers (the chief too, to
+   edit): the chief's desk lets nobody else take papers.
+
+The chief editor can prepare new papers on the managing page while the
+others work: preparing leaves alone any paper someone has taken.
 
 ### "Not prepared yet"
 
@@ -328,15 +422,15 @@ No. The tool never writes to the files the author sent. Every decision can be
 changed, every hand edit can be undone, and a finished paper can be reopened.
 
 **Two of us are reviewing the same conference. Is that a problem?**
-No. Each paper keeps its own record, including whose name is on it. On a
-shared folder, the first editor to change a paper has it until they finish or
-let it go; anyone else can read it but not change it (see *Several editors,
-one folder*). Take your papers in Indico so you do not both start on the same
-one.
+No. Each paper keeps its own record, including whose name is on it. A paper
+taken from the chief's desk is yours until you finish it or give it back;
+nobody else can take it meanwhile (see *Several editors, one conference*).
+Take your papers in Indico so you do not both want the same one.
 
 **My name has gone from the box at the top.**
-Since the desk learned to work from a shared folder, your name is kept on your
-computer rather than in the papers folder. Type it once more; it stays.
+Your name is kept on your computer rather than in the papers folder, so a
+desk that joined the chief's for the first time, or a new computer, asks
+again. Type it once more; it stays.
 
 **I closed the browser by accident.**
 Nothing is lost. Double-click the launcher again, or reload the page.

@@ -29,7 +29,7 @@ dev = [
 ]
 
 [project.scripts]
-aiagent = "main:app"
+aiagent = "main:main"
 
 [tool.pytest.ini_options]
 markers = [

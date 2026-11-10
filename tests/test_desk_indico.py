@@ -64,7 +64,8 @@ def _row(contribution_id: int, code: str, editor: str | None) -> dict:
         "title": code, "persons": [],
         "editable": {
             "id": contribution_id + 1000, "type": "paper", "state": "ready_for_review",
-            "editor": {"id": 7, "full_name": editor} if editor else None,
+            "editor": {"id": 7, "full_name": editor,
+                       "identifier": "User:7:Nw.signature"} if editor else None,
         },
     }
 
@@ -134,6 +135,11 @@ def test_a_live_check_overrides_what_the_pull_recorded(pulled: Path, monkeypatch
         "TUP002": ("you", "Yue Hao"),
     }
     assert worklist(pulled, me="")[0].indico.source == "indico"
+    # Indico's signed identity for the editor is kept: its assignment routes
+    # take nothing else.
+    live = json.loads((pulled / "indico_assignments.json").read_text(encoding="utf-8"))
+    assert {e["code"]: e["editor_identifier"] for e in live["papers"].values()} == {
+        "MOP001": "", "TUP002": "User:7:Nw.signature"}
     # The pull's own record is what the corpus measurements read; it stays as fetched.
     assert (pulled / "MOP001" / "manifest.json").read_text(encoding="utf-8") == manifest
 

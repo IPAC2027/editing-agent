@@ -12,12 +12,13 @@ REM ---------------------------------------------------------------------------
 cd /d "%~dp0"
 setlocal EnableDelayedExpansion
 
-REM Where are the submissions?
-REM  * A folder named on the first line of papers_folder.txt, next to this
-REM    file. For papers shared from the chief editor's computer that is the
-REM    shared folder as this PC sees it, e.g. Z:\ or \\chief-mac\NAPAC2025.
-REM  * Otherwise a folder called "submissions" next to this file; an editor
-REM    can drop papers straight into it.
+REM Which desk?
+REM  * Editors working from the chief editor's desk set nothing up here: once
+REM    this PC has joined the chief's desk (see the editor guide), this file
+REM    opens that desk again, and it keeps the papers you take by itself.
+REM  * Working alone on a folder of papers: name it on the first line of
+REM    papers_folder.txt next to this file. Otherwise the desk works in a
+REM    folder called "submissions" next to this file; drop papers into it.
 set "PAPERS=%~1"
 set "FROM_FILE="
 if "!PAPERS!"=="" if exist "papers_folder.txt" (
@@ -35,30 +36,30 @@ if defined FROM_FILE if not exist "!PAPERS!\" (
   pause
   exit /b 1
 )
-if "!PAPERS!"=="" set "PAPERS=submissions"
-if not exist "!PAPERS!\" (
-  if exist "paper_examples\" (
-    set PAPERS=paper_examples
-  ) else (
-    mkdir submissions
-    set PAPERS=submissions
-  )
+REM No folder named: the chief's desk this PC joined, else the folder used
+REM last, else "submissions" (or the examples shipped with the tool).
+if "!PAPERS!"=="" (
+  set "ALONE=submissions"
+  if not exist "submissions\" if exist "paper_examples\" set "ALONE=paper_examples"
+  set ARGS=--alone-in "!ALONE!"
+) else (
+  set ARGS="!PAPERS!"
 )
 
 echo.
 echo   Starting the JACoW review desk...
-echo   Papers folder: %PAPERS%
+if not "!PAPERS!"=="" echo   Papers folder: !PAPERS!
 echo.
 
 where uv >nul 2>nul
 if %errorlevel%==0 (
-  uv run --quiet python main.py desk "%PAPERS%"
+  uv run --quiet python main.py !ARGS!
 ) else (
   where py >nul 2>nul
   if %errorlevel%==0 (
-    py main.py desk "%PAPERS%"
+    py main.py !ARGS!
   ) else (
-    python main.py desk "%PAPERS%"
+    python main.py !ARGS!
   )
 )
 

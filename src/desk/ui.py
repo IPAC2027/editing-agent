@@ -128,6 +128,19 @@ td .pill + .pill{margin-left:4px}
 .pill.ta-applied{background:var(--accent-soft);color:var(--accent)}
 .pill.ta-match,.pill.ta-done{background:var(--good-soft);color:var(--good)}
 .pill.ta-unknown,.pill.ta-replied{background:var(--surface3);color:var(--ink2)}
+.pill.st-good{background:var(--good-soft);color:var(--good)}
+.pill.st-bad{background:var(--bad-soft);color:var(--bad)}
+.pill.st-warn{background:var(--warn-soft);color:var(--warn)}
+.pill.st-info{background:var(--accent-soft);color:var(--accent)}
+.pill.st-none{background:var(--surface3);color:var(--ink2)}
+.cell-sub{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+          overflow:hidden;font-size:.72rem;line-height:1.3;color:var(--ink2);margin-top:3px;
+          max-width:150px}
+.cell-sub.bad-text{color:var(--bad)}
+.manage-wrap{overflow-x:auto}
+.wl.manage td,.wl.manage th{padding-left:8px;padding-right:8px}
+.wl.manage td{font-size:.86rem}
+.wl.manage .ttl{max-width:200px}
 
 .bar{height:7px;border-radius:4px;background:var(--surface3);overflow:hidden}
 .bar span{display:block;height:100%;background:var(--good);transition:width .3s}
@@ -157,6 +170,7 @@ table.wl tbody tr:hover{background:var(--surface2)}
 .num{text-align:right;font-family:var(--mono);font-size:.86rem;font-variant-numeric:tabular-nums}
 .num.zero{color:var(--muted)}
 .num.attn{color:var(--bad);font-weight:600}
+.bad-text{color:var(--bad)}
 .num.todo{color:var(--accent);font-weight:600}
 table.wl tr.theirs td{color:var(--muted)}
 .wl-indico{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:.82rem;
@@ -350,11 +364,12 @@ kbd{font-family:var(--mono);font-size:.75rem;border:1px solid var(--rule);
   <div class="brand">JACoW review desk<small id="rootName">&nbsp;</small><small id="llmBadge" hidden></small></div>
   <a class="toplink" href="/references">Check a reference list</a>
   <div class="top-spacer"></div>
-  <label class="who">Your name
+  <label class="who" id="whoName">Your name
     <input id="editorName" type="text" placeholder="e.g. A. Editor" autocomplete="name"
            list="indicoEditors">
     <datalist id="indicoEditors"></datalist>
   </label>
+  <span class="who" id="whoIndico" hidden></span>
 </div></div>
 
 <main>
@@ -367,6 +382,8 @@ kbd{font-family:var(--mono);font-size:.75rem;border:1px solid var(--rule);
   <button id="btnPrev">← Previous paper</button>
   <button id="btnNext">Next paper →</button>
   <button class="primary big" id="btnFinish">Finish this paper</button>
+  <button id="btnQaFail" hidden>QA failed…</button>
+  <button class="primary big" id="btnQaPass" hidden>QA passed</button>
 </div></div>
 
 <dialog id="dlgFinish"><form method="dialog"><div class="dlg-in">
@@ -387,6 +404,32 @@ kbd{font-family:var(--mono);font-size:.75rem;border:1px solid var(--rule);
   <button class="primary" value="ok" id="btnFinishGo">Finish paper</button>
 </div></form></dialog>
 
+<dialog id="dlgGiveUp"><form method="dialog"><div class="dlg-in">
+  <h2 id="giveUpTitle">Give up this paper?</h2>
+  <p>Your work so far goes to the chief editor's desk first. Then the paper is
+  free for another editor to take, and the chief editor is told.</p>
+  <label class="tiny muted" for="giveUpReason">Why? (optional; the chief editor
+  sees it)</label>
+  <textarea id="giveUpReason" rows="3" maxlength="500"
+    placeholder="e.g. a conflict of interest, or no time this week"></textarea>
+  <p class="tiny muted">You can still read your copy until you next start the desk.</p>
+</div><div class="dlg-acts">
+  <button value="cancel">Keep working</button>
+  <button class="primary" value="ok">Give it up</button>
+</div></form></dialog>
+
+<dialog id="dlgQaFail"><form method="dialog"><div class="dlg-in">
+  <h2 id="qaFailTitle">Fail the QA of this paper?</h2>
+  <p>It goes back to the editors: any editor can take it to re-edit, and sees
+  what you write here. After the re-edit it comes back for QA.</p>
+  <label class="tiny muted" for="qaFailNote">What needs fixing? (required)</label>
+  <textarea id="qaFailNote" rows="4" maxlength="2000" required
+    placeholder="e.g. reference 7 still has no DOI; the Fig. 3 caption is not in sentence case"></textarea>
+</div><div class="dlg-acts">
+  <button value="cancel" formnovalidate>Not yet</button>
+  <button class="primary" value="ok">Fail the QA</button>
+</div></form></dialog>
+
 <dialog id="dlgDone"><div class="dlg-in">
   <h2 id="doneTitle">Paper finished</h2>
   <div id="doneBody"></div>
@@ -403,7 +446,10 @@ kbd{font-family:var(--mono);font-size:.75rem;border:1px solid var(--rule);
 const S = {
   root:"", editor:"", papers:[], filter:"all", whose:"any", indico:null,
   folder:null, paper:null, tab:"decisions", cursor:0, job:null,
-  showApplied:false,
+  showApplied:false, givenUpSeen:new Set(), givenUpPrimed:false,
+  chief:null, chiefPapers:null, chiefLoading:false, chiefError:"", chiefListOpen:null,
+  sharing:null, pool:null, poolPapers:null, poolYou:null, poolError:"", poolShow:"edit", manageShow:"all",
+  account:null, indicoSync:null,
 };
 
 const $  = (s, r=document) => r.querySelector(s);
@@ -439,6 +485,7 @@ async function api(path, body){
 /* A paper is claimed by an editor's first change, so two desks on a shared
    folder never write over each other. Indico still decides whose paper it is. */
 function claimNotice(c){
+  if(S.pool && c) return poolClaimNotice(c);
   const box = el("div","held claim");
   box.id = "claimBox";
   if(!c){ box.hidden = true; return box; }
@@ -469,20 +516,75 @@ function claimNotice(c){
   return box;
 }
 
+/* On a desk joined to the chief's, the claim that counts is on the chief's
+   desk; this copy is either still the editor's or given back. */
+function poolClaimNotice(c){
+  const box = el("div","held claim"); box.id = "claimBox";
+  const s = (S.paper && S.paper.sync) || {};
+  const qa = s.mode==="qa", q = (S.paper && S.paper.qa) || {};
+  if(c.state==="mine"){
+    box.classList.add("you");
+    box.appendChild(el("b",null, qa ? "You have this paper for QA on the chief editor's desk."
+      : "You have this paper on the chief editor's desk."));
+    if(qa) box.appendChild(el("span",null,"Edited by "+(S.paper.editor||"another editor")
+      +". Check the editing, then pass or fail its QA with the buttons at the bottom."));
+    else if(q.status==="failed") box.appendChild(el("span","bad-text","QA failed ("
+      +(q.by||"an editor")+", "+when(q.at)+"): "+q.note+" Fix this, then finish the "
+      +"paper again: it goes back for QA."));
+    box.appendChild(el("span", s.error ? "bad-text" : null,
+      s.error ? "Not sent yet: "+s.error
+      : s.dirty ? "Your latest changes go to the chief editor's desk in a few seconds."
+      : s.sent_at ? "Your work was sent to the chief editor's desk "+when(s.sent_at)+"."
+      : "Your changes are sent to the chief editor's desk as you work."));
+    const send = el("button","plain","Send now");
+    send.onclick = () => claimAction("send");
+    const give = el("button","plain", qa ? "Give up this QA" : "Give up this paper");
+    give.onclick = () => {
+      $("#giveUpTitle").textContent = "Give up "+(S.paper.paper_id||"this paper")+"?";
+      $("#giveUpReason").value = "";
+      $("#dlgGiveUp").showModal();
+    };
+    box.appendChild(send); box.appendChild(give);
+  } else {
+    box.classList.add("other");
+    box.appendChild(el("b",null,"This copy is no longer yours on the chief editor's desk."));
+    box.appendChild(el("span",null, s.error ||
+      "You can read it. To change it, take the paper again: you get the chief's "
+      +"latest version."));
+    const take = el("button","plain","Take it again");
+    take.onclick = () => claimAction("take");
+    box.appendChild(take);
+  }
+  return box;
+}
+
 function showClaim(){
   const old = $("#claimBox");
   if(old) old.replaceWith(claimNotice(S.paper && S.paper.claim));
 }
 
-async function claimAction(action){
+async function claimAction(action, extra){
   try{
-    const data = await api("/api/claim",{folder:S.folder, action});
+    const data = await api("/api/claim",Object.assign({folder:S.folder, action}, extra||{}));
+    if(data.pool_error){ toast(data.pool_error, true); }
+    else if(action==="release" && S.pool){
+      // Given up: back to the list, where it is free for the others now.
+      toast("Given up — "+(data.paper_id||"the paper")+" is free for another editor");
+      await loadWorklist(); backToList(); return;
+    }
     S.paper = data;
     if(S.paper.screened) renderPaper(); else renderUnprepared();
-    toast(action==="release" ? "Let go — anyone can pick this paper up now"
+    if(data.pool_error) return;
+    toast(action==="send" ? "Sent to the chief editor's desk"
+          : action==="release" ? "Let go — anyone can pick this paper up now"
           : "This paper is yours to edit now");
   }catch(err){ toast(err.message, true); }
 }
+
+$("#dlgGiveUp").addEventListener("close", () => {
+  if($("#dlgGiveUp").returnValue !== "ok") return;
+  claimAction("release", {reason: $("#giveUpReason").value.trim()});
+});
 
 /* ------------------------------------------------------------- worklist */
 const FILTERS = [
@@ -525,13 +627,26 @@ function verdictPill(ta, short){
 }
 
 function heldNotice(ind){
-  if(!ind) return null;
+  // An editor working from the chief's desk never deals with Indico: the
+  // chief's desk keeps it in step.
+  if(!ind || S.pool) return null;
   const box = el("div","held "+ind.holder);
   box.appendChild(el("b",null,
     ind.holder==="you" ? "This paper is yours in Indico."
     : ind.holder==="other" ? ind.editor+" has this paper in Indico."
     : "No editor has taken this paper in Indico yet."));
-  if(ind.holder==="other"){
+  if(S.pool && ind.holder!=="you"){
+    // Joined to the chief's desk: taking the paper there reserved it among
+    // the editors, but nothing is written to Indico.
+    if(ind.holder==="nobody") box.firstChild.textContent =
+      "Indico does not show an editor for this paper yet.";
+    box.appendChild(el("span",null, ind.holder==="nobody"
+      ? "Taking it here reserves it among the editors on the chief editor's desk; "
+        +"the desk does not write to Indico. Assign yourself in Indico too (Open in "
+        +"Indico ↗), or ask the chief editor to."
+      : "The chief editor's desk gave it to you here. Check with the chief editor "
+        +"which of you answers the author."));
+  } else if(ind.holder==="other"){
     box.appendChild(el("span",null,"Your work here is not sent to Indico. Check "
       +"with them before you spend time on it."));
     if(!S.papers.some(x=>x.indico && x.indico.holder==="you"))
@@ -565,28 +680,525 @@ async function checkIndico(btn){
   renderWorklist();
 }
 
+/* ------------------------------------------------- the chief editor */
+/* Only on a desk started with --manage: the conference as Indico lists it,
+   what is already in the folder, and a button to download and prepare the
+   rest. Indico is only read; the token never reaches this page. */
+async function loadChiefPapers(){
+  if(!S.chief || !S.chief.event || !S.chief.token) return;
+  S.chiefLoading = true; S.chiefError = "";
+  if(!S.folder) renderWorklist();
+  try{ S.chiefPapers = await api("/api/chief/papers", {}); }
+  catch(err){ S.chiefError = err.message; }
+  S.chiefLoading = false;
+  if(!S.folder) renderWorklist();
+}
+
+async function chooseEvent(value){
+  try{
+    S.chief = await api("/api/chief/event", {event:value});
+    S.chiefPapers = null;
+    await loadChiefPapers();
+  }catch(err){ toast(err.message, true); }
+}
+
+async function downloadPapers(){
+  try{
+    const res = await api("/api/chief/download", {});
+    S.job = res.job; renderWorklist(); pollJob();
+  }catch(err){ toast(err.message, true); }
+}
+
+function chiefPanel(){
+  const c = S.chief;
+  const box = el("div","card pad"); box.style.marginBottom="18px";
+  box.appendChild(el("h2",null,"The conference in Indico"));
+  if(!c.event){
+    box.appendChild(el("p","sub","Which Indico event is this conference? It is the "
+      +"number in the event's address, e.g. 194 in "+c.url+"/event/194/."));
+    const r = el("div","row");
+    const input = el("input"); input.type="number"; input.min="1";
+    input.placeholder="event number"; input.style.width="10em";
+    const b = el("button","primary","Use this event");
+    b.onclick = () => chooseEvent(input.value);
+    input.addEventListener("keydown", e=>{ if(e.key==="Enter") chooseEvent(input.value); });
+    r.appendChild(input); r.appendChild(b); box.appendChild(r);
+    return box;
+  }
+  const where = el("p","sub");
+  where.appendChild(document.createTextNode("Event "+c.event+" at "));
+  const a = el("a",null,c.event_url); a.href=c.event_url; a.target="_blank"; a.rel="noopener";
+  where.appendChild(a);
+  where.appendChild(document.createTextNode("."));
+  box.appendChild(where);
+  box.appendChild(accountBox("The chief editor's desk reads the conference with your "
+    +"Indico account and keeps Indico's editor assignments in step. Use a token with "
+    +"the 'full:everything' scope (Indico → My profile → API tokens); "
+    +"'read:everything' is enough to read only."));
+  if(!c.token) return box;
+  if(S.indicoSync) box.appendChild(syncBox());
+  if(S.chiefLoading && !S.chiefPapers){
+    const r = el("div","row"); r.appendChild(el("span","spin"));
+    r.appendChild(el("span",null,"Reading the event's papers from Indico…"));
+    box.appendChild(r); return box;
+  }
+  if(S.chiefError){
+    box.appendChild(el("p","bad-text",S.chiefError));
+    const retry = el("button",null,"Try again"); retry.onclick = loadChiefPapers;
+    box.appendChild(retry); return box;
+  }
+  const info = S.chiefPapers;
+  if(!info) return box;
+  const sent = info.papers.filter(p=>p.submitted);
+  const missing = sent.filter(p=>!p.here).length;
+  box.appendChild(el("p",null, sent.length+" paper"+(sent.length===1?"":"s")
+    +" submitted in Indico; "+info.here+" in this folder"
+    +(missing ? ", "+missing+" not downloaded yet." : ".")
+    +" Checked "+when(info.checked_at)+"."));
+  const r = el("div","row");
+  const busy = !!(S.job && !S.job.finished);
+  const dl = el("button","primary", busy ? "Working — progress is shown above"
+    : missing ? "Download and prepare "+missing+" new paper"+(missing===1?"":"s")
+    : "Check Indico for new papers and prepare");
+  dl.disabled = busy || !sent.length; dl.onclick = downloadPapers;
+  const again = el("button",null,"Check Indico again");
+  again.disabled = S.chiefLoading; again.onclick = loadChiefPapers;
+  r.appendChild(dl); r.appendChild(again); box.appendChild(r);
+
+  return box;
+}
+
+/* ---------------------------------------------- the Indico account */
+/* Pasted once into the page; the desk checks it with Indico and keeps it on
+   this computer. The page is only ever told whose account it is. */
+function accountBox(why){
+  const a = S.account || {};
+  const box = el("div","held "+(a.connected ? "you" : "")); box.id = "accountBox";
+  if(a.connected){
+    box.appendChild(el("b",null,"Indico account: "+(a.name || "from the terminal")));
+    box.appendChild(el("span","muted", a.source==="environment"
+      ? "Using INDICO_TOKEN from the window that started the desk. Paste a token "
+        +"here to keep it with the desk instead."
+      : "Kept on this computer only."));
+    if(a.source==="page"){
+      const off = el("button","plain","Disconnect");
+      off.onclick = async () => {
+        if(!confirm("Disconnect the Indico account from this desk? The token is deleted "
+          +"from this computer.")) return;
+        try{ S.account = await api("/api/indico-account",{disconnect:true}); reboot(); }
+        catch(err){ toast(err.message, true); }
+      };
+      box.appendChild(off);
+    }
+    if(a.source!=="environment") return box;
+  } else {
+    box.appendChild(el("b",null,"Connect your Indico account"));
+  }
+  box.appendChild(el("span",null,why));
+  const r = el("div","row"); r.style.width="100%";
+  const input = el("input"); input.type="password"; input.autocomplete="off";
+  input.placeholder="paste your Indico API token"; input.style.flex="1 1 280px";
+  const go = el("button","primary","Connect");
+  const connect = async () => {
+    go.disabled = true; go.textContent = "Checking with Indico…";
+    try{
+      S.account = await api("/api/indico-account",{token:input.value});
+      input.value = "";
+      toast("Connected as "+(S.account.name||"your Indico account"));
+      reboot();
+    }catch(err){ toast(err.message, true); go.disabled = false; go.textContent = "Connect"; }
+  };
+  go.onclick = connect;
+  input.addEventListener("keydown", e=>{ if(e.key==="Enter") connect(); });
+  r.appendChild(input); r.appendChild(go); box.appendChild(r);
+  return box;
+}
+
+/* The chief's desk assigning editors in Indico as they take papers. */
+function syncBox(){
+  const y = S.indicoSync;
+  const box = el("div","held "+(y.enabled ? "you" : "")); box.style.display="block";
+  const lab = el("label"); lab.style.fontWeight="600";
+  const cb = el("input"); cb.type="checkbox"; cb.checked = y.enabled;
+  cb.onchange = async () => {
+    if(cb.checked && !confirm("Let this desk assign and unassign editors in Indico for "
+      +"event "+S.chief.event+"?\n\nWhen an editor takes a paper here they are "
+      +"assigned to it in Indico; giving it back unfinished unassigns them. Papers "
+      +"Indico gives to someone else are never changed. Papers already being edited "
+      +"here are assigned now too. Indico sends no email for this; each change is "
+      +"written to the event's log.")){ cb.checked = false; return; }
+    try{ S.indicoSync = await api("/api/chief/indico-sync",{enabled:cb.checked}); }
+    catch(err){ toast(err.message, true); }
+    renderWorklist();
+  };
+  lab.appendChild(cb);
+  lab.appendChild(document.createTextNode(" Keep Indico's editor assignments in step "
+    +"with who is working on each paper"));
+  box.appendChild(lab);
+  const facts = [];
+  facts.push(y.enabled ? "On: editors are assigned in Indico when they take a paper."
+    : "Off: Indico is only read.");
+  facts.push(y.last_read ? "Indico read "+when(y.last_read)+" (every 2 minutes)"
+    : "Indico is read every 2 minutes");
+  if(y.waiting.length) facts.push("waiting to send: "+y.waiting.join(", "));
+  box.appendChild(el("div","muted",facts.join(" · ")));
+  if(y.read_error) box.appendChild(el("div","bad-text","Could not read Indico: "+y.read_error));
+  y.problems.forEach(pr=>box.appendChild(el("div","bad-text",pr.paper+": "+pr.message)));
+  return box;
+}
+
+/* ------------------------------------- the chief's door for editors */
+/* On the chief's desk: where editors' desks connect, who has connected, and
+   who is editing which paper next to who has it in Indico. */
+/* On the chief's page: papers editors gave up, until the chief dismisses them. */
+function givenUpBox(){
+  const list = (S.sharing && S.sharing.given_up) || [];
+  const box = el("div","card pad"); box.style.marginBottom="18px";
+  box.style.borderLeft = "3px solid var(--warn)";
+  box.appendChild(el("h2",null, list.length===1 ? "An editor gave up a paper"
+    : list.length+" papers given up by editors"));
+  box.appendChild(el("p","sub","Each is free again: any editor can take it from "
+    +"their desk. Their work so far is in it."));
+  const ul = el("ul","people");
+  list.forEach(n=>{
+    const li = el("li");
+    const row = S.papers.find(p=>p.paper_id===n.paper);
+    li.appendChild(el("b",null,n.paper));
+    li.appendChild(document.createTextNode(
+      (row && row.title ? " — "+row.title : "")
+      +(n.mode==="qa" ? " · its QA given up by " : " · given up by ")+(n.who||"an editor")
+      +" "+when(n.at)));
+    if(n.reason) li.appendChild(el("div","muted","“"+n.reason+"”"));
+    const ok = el("button","plain","Dismiss");
+    ok.style.marginLeft="8px";
+    ok.onclick = () => dismissGivenUp(n.id);
+    li.appendChild(ok);
+    ul.appendChild(li);
+  });
+  box.appendChild(ul);
+  if(list.length>1){
+    const all = el("button","plain","Dismiss all");
+    all.onclick = () => dismissGivenUp("all");
+    box.appendChild(all);
+  }
+  return box;
+}
+
+async function dismissGivenUp(id){
+  try{
+    const d = await api("/api/chief/given-up",{dismiss:id});
+    S.sharing.given_up = d.given_up;
+    renderWorklist();
+  }catch(err){ toast(err.message, true); }
+}
+
+/* A toast for each paper given up since the page last looked. */
+function noteGivenUp(){
+  const list = (S.sharing && S.sharing.given_up) || [];
+  const fresh = list.filter(n=>!S.givenUpSeen.has(n.id));
+  list.forEach(n=>S.givenUpSeen.add(n.id));
+  if(S.givenUpPrimed && fresh.length){
+    toast(fresh.map(n=>(n.who||"An editor")+" gave up "+(n.mode==="qa" ? "the QA of " : "")
+      +n.paper).join(" · "), true);
+  }
+  S.givenUpPrimed = true;
+}
+
+function sharingPanel(){
+  const sh = S.sharing;
+  const box = el("div","card pad"); box.style.marginBottom="18px";
+  box.appendChild(el("h2",null,"Editors on the network"));
+  box.appendChild(el("p","sub","Each editor works on their own computer: their desk "
+    +"takes a paper from this one, works on a copy, and sends the work back as they "
+    +"go. They never open this folder."));
+  const t = el("table","cmp");
+  const fact = (k, v) => { const tr = el("tr"); tr.appendChild(el("th",null,k));
+    tr.appendChild(el("td","mono",v)); t.appendChild(tr); };
+  if(sh.local_only){
+    box.appendChild(el("p","muted","This computer only: the desk was started with "
+      +"--no-share, so only your own editing desk can take papers. Start it without "
+      +"--no-share to let editors on the network join."));
+  } else {
+    fact("Address", sh.addresses.join("   or   "));
+    fact("Join code", sh.code);
+    const host = (sh.addresses[0]||"").replace(/^https?:\/\//,"");
+    fact("Editors start", "uv run python main.py --join "+host+" --code "+sh.code);
+    box.appendChild(t);
+  }
+  if(sh.editors.length){
+    const ul = el("ul","people");
+    sh.editors.forEach(e=>{
+      const li = el("li",null,(e.name||"(no name yet)")
+        +(e.machine ? " · on "+e.machine : "")+" · last seen "+when(e.last_seen));
+      if(!e.indico_id) li.appendChild(el("span","tiny muted"," · no Indico account yet"));
+      else if(e.editing_manager) li.appendChild(el("span","tiny muted",
+        " · editing manager in Indico"));
+      else if(e.paper_editor===false)
+        li.appendChild(el("span","bad-text"," · neither a paper editor nor an editing "
+          +"manager in Indico: add them to the paper editing team there, or they "
+          +"cannot take papers"));
+      ul.appendChild(li);
+    });
+    box.appendChild(el("b",null,"Desks that have connected"));
+    box.appendChild(ul);
+  } else {
+    box.appendChild(el("p","muted","No editor's desk has connected yet."));
+  }
+  return box;
+}
+
+/* On an editor's desk joined to the chief's: the chief's papers, to take. */
+async function loadPoolPapers(){
+  try{
+    const res = await api("/api/pool/papers",{});
+    S.poolPapers = res.papers; S.poolYou = res.you || null; S.poolError = "";
+  }
+  catch(err){ S.poolError = err.message; }
+  if(!S.folder) renderWorklist();
+}
+
+async function takePaper(paper, btn, mode){
+  if(!(S.account && S.account.connected)){
+    toast("Paste your Indico token first: the chief editor's desk knows you by "
+      +"your Indico account", true);
+    const token = document.querySelector("#accountBox input");
+    if(token) token.focus();
+    return;
+  }
+  btn.disabled = true; btn.textContent = "Taking…";
+  try{
+    const res = await api("/api/pool/take",{paper, mode: mode||"edit"});
+    await loadWorklist();
+    loadPoolPapers();
+    toast(mode==="qa" ? paper+" is yours to QA: a copy is on this computer"
+      : paper+" is yours: a copy is on this computer");
+    openPaper(res.folder);
+  }catch(err){
+    toast(err.message, true); btn.disabled = false;
+    btn.textContent = mode==="qa" ? "Take for QA" : "Take to edit";
+    loadPoolPapers();
+  }
+}
+
+const POOL_SHOW = [["edit","To edit"],["qa","To QA"],["yours","Assigned to you"],
+                   ["all","All"]];
+
+function poolPanel(){
+  const box = el("div","card pad"); box.style.marginBottom="18px";
+  box.appendChild(el("h2",null,"Papers on the chief editor's desk"));
+  const where = S.pool.url + (S.pool.pool ? " · "+S.pool.pool : "")
+    + (S.pool.event ? " · Indico event "+S.pool.event : "");
+  box.appendChild(el("p","sub","Take a paper to work on it here. Your work is sent to "
+    +"the chief editor's desk as you go; finishing a paper, or giving it back, frees "
+    +"it for the others. ("+where+")"));
+  if(!(S.account && S.account.connected))
+    box.appendChild(accountBox("Paste your Indico token here once to take papers: the "
+      +"chief editor's desk knows you by your Indico account, and assigns you the "
+      +"papers you take there. Make one in Indico → My profile → API tokens, scope "
+      +"'read:everything'. You never need to open Indico yourself."));
+  else box.appendChild(accountBox(""));
+  const notEditor = S.poolYou && S.poolYou.why ? S.poolYou.why : "";
+  if(notEditor && S.account && S.account.connected){
+    box.appendChild(el("p","bad-text",notEditor));
+    if(S.poolYou.indico_said)
+      box.appendChild(el("p","tiny muted","Asking Indico whether you are an editing "
+        +"manager: "+S.poolYou.indico_said));
+  } else if(S.poolYou && S.poolYou.role){
+    box.appendChild(el("p","tiny muted","In Indico you are "
+      +(S.poolYou.role==="editing manager" ? "an editing manager" : "a paper editor")
+      +" of this conference."));
+  }
+  if(S.poolError){
+    box.appendChild(el("p","bad-text",S.poolError));
+    const retry = el("button",null,"Try again"); retry.onclick = loadPoolPapers;
+    box.appendChild(retry);
+    if(!S.poolPapers) return box;
+  }
+  if(!S.poolPapers){
+    const r = el("div","row"); r.appendChild(el("span","spin"));
+    r.appendChild(el("span",null,"Asking the chief editor's desk…"));
+    box.appendChild(r); return box;
+  }
+  const rows = S.poolPapers;
+  const keep = {
+    edit: p=>!p.claim && p.take==="edit" && !p.blocked,
+    qa: p=>!p.claim && p.take==="qa",
+    yours: p=>p.indico && p.indico.yours,
+    all: p=>true,
+  };
+  const filters = el("div","filters");
+  POOL_SHOW.forEach(([key,label])=>{
+    const n = rows.filter(keep[key]).length;
+    const b = el("button",null,label+" ("+n+")");
+    b.setAttribute("aria-pressed", S.poolShow===key ? "true":"false");
+    b.onclick = () => { S.poolShow = key; renderWorklist(); };
+    filters.appendChild(b);
+  });
+  box.appendChild(filters);
+  const shown = rows.filter(keep[S.poolShow] || keep.all);
+  if(!shown.length){
+    box.appendChild(el("p","muted", S.poolShow==="edit" ? "No paper is waiting to be "
+      +"edited right now." : S.poolShow==="qa" ? "No edited paper is waiting for its QA."
+      : "No papers here.")); return box;
+  }
+  const t = el("table","wl"); const hr = el("tr");
+  ["Paper","Title","Assigned to","Edited","QA","Being worked on by",""]
+    .forEach(h=>hr.appendChild(el("th",null,h)));
+  const th = el("thead"); th.appendChild(hr); t.appendChild(th);
+  const tb = el("tbody");
+  shown.forEach(p=>{
+    const tr = el("tr");
+    tr.appendChild(el("td","pid",p.paper_id));
+    const tt = el("td"); const d = el("div","ttl",p.title||p.paper); d.title = p.title||"";
+    tt.appendChild(d); tr.appendChild(tt);
+    const ind = el("td");
+    if(p.indico) ind.appendChild(el("span","pill who-"+(p.indico.yours ? "you"
+      : p.indico.editor ? "other" : "nobody"),
+      p.indico.yours ? "You" : p.indico.editor || "Nobody yet"));
+    tr.appendChild(ind);
+    tr.appendChild(stageCell(editedState(p)));
+    tr.appendChild(stageCell(qaState(p)));
+    tr.appendChild(el("td",null, !p.claim ? "—"
+      : (p.claim.mine ? "You" : p.claim.who)+(p.claim.mode==="qa" ? " (QA)" : "")));
+    const act = el("td"); act.style.textAlign="right"; act.style.whiteSpace="nowrap";
+    if(p.claim && p.claim.mine && p.here){
+      const b = el("button",null,"Open"); b.onclick = () => openPaper(p.folder);
+      act.appendChild(b);
+    } else if(!p.claim && p.take==="edit" && p.blocked){
+      act.appendChild(el("span","tiny muted","assigned to someone else"));
+    } else if(!p.claim && p.take && notEditor){
+      act.appendChild(el("span","tiny muted","not an editor in Indico"));
+    } else if(!p.claim && p.take){
+      const b = el("button","primary", p.take==="qa" ? "Take for QA"
+        : p.stage==="to_reedit" ? "Take to re-edit" : "Take to edit");
+      b.onclick = () => takePaper(p.paper, b, p.take);
+      act.appendChild(b);
+    } else if(!p.prepared){
+      act.appendChild(el("span","tiny muted","not prepared yet"));
+    } else if(p.stage==="to_qa" && p.edited_by_you){
+      act.appendChild(el("span","tiny muted","you edited it: another editor does its QA"));
+    } else if(p.stage==="qa_passed"){
+      act.appendChild(el("span","tiny muted","done"));
+    }
+    tr.appendChild(act);
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); box.appendChild(t);
+  return box;
+}
+
+/* --------------------------------------------- where a paper is in the work */
+/* Shared by the editors' list and the managing page. Each returns
+   [word, kind, detail] for stageCell; kind picks the pill's colour. */
+function stageCell(state){
+  const [word, kind, detail] = state;
+  const td = el("td");
+  td.appendChild(el("span","pill st-"+(kind||"none"), word));
+  if(detail){ const d = el("span","cell-sub",detail); d.title = detail; td.appendChild(d); }
+  return td;
+}
+
+function editedState(p){
+  const by = p.editor ? "by "+p.editor : "";
+  const claim = p.claim;
+  if(p.stage==="unprepared" || p.prepared===false || p.screened===false)
+    return ["—","none",""];
+  if(claim && claim.mode!=="qa")
+    return ["Editing","info",(claim.mine||claim.state==="mine") ? "you" : claim.who];
+  if(p.stage==="to_reedit") return ["Re-edit needed","bad",by];
+  if(p.stage==="waiting_author") return ["Sent back to author","warn",by];
+  if(p.stage==="to_qa" || p.stage==="qa_passed") return ["Edited","good",by];
+  if(p.status==="in_review") return ["Started, not finished","info",by];
+  return ["Not yet","none",""];
+}
+
+function qaState(p){
+  const qa = p.qa || {};
+  const claim = p.claim;
+  const by = (qa.by ? qa.by : "")+(qa.at ? (qa.by ? ", " : "")+when(qa.at) : "");
+  if(claim && claim.mode==="qa")
+    return ["In QA","info",(claim.mine||claim.state==="mine") ? "you" : claim.who];
+  if(p.stage==="qa_passed") return ["Passed","good",by];
+  if(p.stage==="to_reedit" || qa.status==="failed")
+    return ["Failed","bad",(qa.by ? qa.by+": " : "")+(qa.note||"")];
+  if(p.stage==="to_qa") return ["Not yet","warn", qa.rounds ? "after a re-edit" : ""];
+  return ["—","none",""];
+}
+
+function duration(seconds){
+  seconds = Math.max(0, seconds|0);
+  const m = Math.floor(seconds/60), s = seconds%60;
+  return m ? m+" min "+String(s).padStart(2,"0")+" s" : s+" s";
+}
+
+/* What a running job is doing, how far it has got, and how long it has taken:
+   a grey button alone told the editor nothing. */
+function jobBox(job){
+  const box = el("div","card pad job"); box.style.marginBottom="18px";
+  const r = el("div","row");
+  r.appendChild(el("span","spin"));
+  const line = el("b",null,(job.step ? job.step+" · " : "")+job.label
+    + (job.total ? " — "+job.done+" of "+job.total : ""));
+  r.appendChild(line);
+  box.appendChild(r);
+  if(job.total){
+    const bar = el("div","bar"); const fill = el("span");
+    fill.style.width = Math.round(job.done/job.total*100)+"%";
+    bar.appendChild(fill); bar.style.margin="10px 0 6px"; box.appendChild(bar);
+  }
+  const facts = [];
+  if(job.current) facts.push("now: "+job.current
+    + (job.current_elapsed!=null ? " ("+duration(job.current_elapsed)+")" : ""));
+  if(job.elapsed!=null) facts.push("running for "+duration(job.elapsed));
+  if(facts.length) box.appendChild(el("div","muted",facts.join(" · ")));
+  if(/^Preparing/.test(job.label)){
+    box.appendChild(el("p","sub","Preparing reads each paper once: it checks the "
+      +"formatting and looks every reference up online (Crossref, DataCite, arXiv), "
+      +"which takes most of the time — a paper with many references can take a few "
+      +"minutes. You can open papers that are already prepared meanwhile."));
+  }
+  if(job.errors && job.errors.length){
+    const d = el("details"); d.style.marginTop="8px";
+    d.appendChild(el("summary","bad-text",job.errors.length+" problem"
+      +(job.errors.length===1?"":"s")+" so far"));
+    job.errors.slice(0,20).forEach(e=>d.appendChild(el("div","muted",e)));
+    box.appendChild(d);
+  }
+  return box;
+}
+
 function renderWorklist(){
   const host = $("#viewWorklist");
   host.innerHTML = "";
   $("#viewPaper").hidden = true; host.hidden = false;
   $("#footbar").hidden = true;
 
-  const done  = S.papers.filter(p=>p.status==="done").length;
+  const done  = S.papers.filter(p=>S.chief ? p.stage==="qa_passed" : p.status==="done").length;
   const total = S.papers.length;
   const unprepared = S.papers.filter(p=>!p.screened).length;
 
   const head = el("div","wl-head");
   const left = el("div"); left.style.flex="1 1 300px";
-  left.appendChild(el("h1", null, "Papers to review"));
+  left.appendChild(el("h1", null, S.chief ? "Managing the conference" : "Papers to review"));
   left.appendChild(el("p","sub",
-    total ? "Open a paper to work through it. Your place is kept as you go."
+    S.chief ? (total ? "Download and prepare the papers, and follow the editors' work. "
+                       +"Papers are not edited here: Edit papers opens your own "
+                       +"editing desk, which takes papers like any editor's."
+                     : "Nothing downloaded yet: the papers come from Indico, below.")
+    : S.pool ? (total ? "The papers you have taken, copied to this computer. Your work "
+                      +"is sent to the chief editor's desk as you go."
+                    : "You have not taken a paper yet: take one from the chief "
+                      +"editor's list below.")
+    : total ? "Open a paper to work through it. Your place is kept as you go."
+          : S.chief ? "Nothing downloaded yet: the papers come from Indico, below."
           : "No submissions found in this folder."));
   head.appendChild(left);
 
   if(total){
     const prog = el("div","wl-progress");
     const lab = el("div","lab");
-    lab.appendChild(el("span",null,done+" of "+total+" finished"));
+    lab.appendChild(el("span",null,done+" of "+total
+      +(S.chief ? " done (edited and QA passed)" : " finished")));
     lab.appendChild(el("span","muted", Math.round(done/total*100)+"%"));
     prog.appendChild(lab);
     const bar = el("div","bar"); const fill = el("span");
@@ -594,13 +1206,20 @@ function renderWorklist(){
     prog.appendChild(bar);
     head.appendChild(prog);
   }
+  if(S.chief) head.appendChild(editingButton());
   host.appendChild(head);
+  if(S.job && !S.job.finished) host.appendChild(jobBox(S.job));
+  if(S.sharing && (S.sharing.given_up||[]).length) host.appendChild(givenUpBox());
+  if(S.chief) host.appendChild(chiefPanel());
+  if(S.sharing) host.appendChild(sharingPanel());
+  if(S.pool) host.appendChild(poolPanel());
 
-  if(unprepared){
+  if(unprepared && !S.pool){
     const box = el("div","card pad"); box.style.marginBottom="18px";
     box.appendChild(el("h2",null, unprepared+" paper"+(unprepared===1?"":"s")+" not prepared yet"));
     box.appendChild(el("p","sub",
-      "The agent needs to read each paper once before you can review it. This "
+      "The agent needs to read each paper once before "
+      +(S.chief ? "an editor can take it" : "you can review it")+". This "
       +"takes a few seconds per paper and only happens once."));
     const b = el("button","primary","Prepare "+(unprepared===1?"it":"them")+" now");
     b.onclick = () => prepare({all:true});
@@ -608,16 +1227,7 @@ function renderWorklist(){
     host.appendChild(box);
   }
 
-  if(S.job && !S.job.finished){
-    const box = el("div","card pad"); box.style.marginBottom="18px";
-    const r = el("div","row");
-    r.appendChild(el("span","spin"));
-    r.appendChild(el("span",null, S.job.label+" — "+S.job.done+" of "+S.job.total
-      + (S.job.current? " (now: "+S.job.current+")" : "")));
-    box.appendChild(r);
-    host.appendChild(box);
-  }
-
+  if(S.chief){ renderManaging(host); return; }
   if(!total) return;
 
   const filters = el("div","filters");
@@ -630,7 +1240,7 @@ function renderWorklist(){
   });
   host.appendChild(filters);
 
-  if(S.indico){
+  if(S.indico && !S.pool){
     const whose = el("div","filters");
     WHOSE.forEach(([key,label])=>{
       const n = S.papers.filter(p=>matchesStatus(p) && matchesWhose(p,key)).length;
@@ -645,12 +1255,13 @@ function renderWorklist(){
     info.appendChild(el("span",null,"Who has each paper in Indico: "
       + (S.indico.source==="indico" ? "checked "+when(S.indico.as_of)
          : "as recorded when the papers were pulled, "+when(S.indico.as_of))));
-    const chk = el("button",null,"Check Indico now");
+    const chk = el("button",null,S.pool ? "Update from the chief's desk" : "Check Indico now");
     chk.onclick = () => checkIndico(chk);
     info.appendChild(chk);
     if(!S.editor){
-      info.appendChild(el("span","muted","Type your name at the top, as Indico "
-        +"shows it, to see which papers are yours."));
+      info.appendChild(el("span","muted", S.pool
+        ? "Connect your Indico account above to see which papers are yours."
+        : "Type your name at the top, as Indico shows it, to see which papers are yours."));
     } else if(!S.papers.some(p=>p.indico && p.indico.holder==="you")){
       info.appendChild(el("span","muted","No paper here is held by “"+S.editor
         +"” in Indico. If you have taken some, type your name exactly as Indico shows it."));
@@ -670,7 +1281,8 @@ function renderWorklist(){
   const thead = el("thead");
   const htr = el("tr");
   const numeric = ["To decide","Must fix","Your notes"];
-  ["Paper","Title","Status"].concat(S.indico ? ["In Indico","Title & authors"] : [],
+  ["Paper","Title","Status"].concat(S.indico && !S.pool ? ["In Indico"] : [],
+                                     S.indico ? ["Title & authors"] : [],
                                      numeric, [""])
     .forEach(h=>{ const th=el("th",null,h);
       if(numeric.includes(h)) th.style.textAlign="right"; htr.appendChild(th); });
@@ -698,12 +1310,23 @@ function renderWorklist(){
       const cp = el("span","pill claim-"+(mine?"mine":"other"),
         mine ? "You're editing" : "Editing: "+p.claim.who);
       if(p.claim.since) cp.title = "Since "+when(p.claim.since)
-        +(p.claim.machine ? " on "+p.claim.machine : "");
-      c3.appendChild(cp);
+        +(p.claim.machine ? " on "+p.claim.machine : "")
+        +(p.received_at ? " · last sent here "+when(p.received_at) : "");
+      if(!S.pool) c3.appendChild(cp);
+    }
+    if(p.sync){
+      const s = p.sync;
+      const sp = el("span","pill "+(!s.held ? "claim-other" : s.error ? "claim-other"
+        : "claim-mine"),
+        !s.held ? "Given back" : s.error ? "Not sent yet" : s.dirty ? "Sending…"
+        : s.sent_at ? "Sent" : "Yours");
+      sp.title = s.error || (s.sent_at ? "Sent to the chief editor's desk "+when(s.sent_at) : "");
+      c3.appendChild(sp);
+      if(s.mode==="qa" && s.held) c3.appendChild(el("span","pill st-info","QA"));
     }
     tr.appendChild(c3);
 
-    if(S.indico){
+    if(S.indico && !S.pool){
       const c4 = el("td"); const ind = p.indico;
       if(ind){
         const pill = el("span","pill who-"+ind.holder,
@@ -712,7 +1335,8 @@ function renderWorklist(){
         c4.appendChild(pill);
       }
       tr.appendChild(c4);
-
+    }
+    if(S.indico){
       const c5 = el("td"); const ta = p.title_authors;
       if(ta && p.screened) c5.appendChild(verdictPill(ta, true));
       tr.appendChild(c5);
@@ -736,6 +1360,229 @@ function renderWorklist(){
   host.appendChild(table);
 }
 
+/* -------------------------------------------- the chief's managing page */
+/* The chief's desk manages: Indico, the download, preparing papers, the
+   editors' door. Papers are edited on an editor's desk; the chief's own is
+   started from here and takes papers through the door like anyone's. */
+function editingButton(){
+  const wrap = el("div","row"); wrap.style.alignSelf="flex-start";
+  const b = el("button","primary big","Edit papers");
+  b.title = "Open your own editing desk: an editor's desk joined to this one";
+  b.onclick = () => openEditingDesk(b);
+  wrap.appendChild(b);
+  if(S.editing && S.editing.url){
+    const a = el("a",null,"Your editing desk ↗"); a.href = S.editing.url;
+    a.target = "_blank"; a.rel = "noopener"; wrap.appendChild(a);
+  }
+  return wrap;
+}
+
+async function openEditingDesk(btn){
+  // Open the tab now, while the click still counts, and send it on later:
+  // a tab opened after waiting for the desk would be blocked as a pop-up.
+  const tab = window.open("", "_blank");
+  btn.disabled = true; btn.textContent = "Opening your editing desk…";
+  try{
+    const res = await api("/api/chief/editing-desk", {});
+    S.editing = {open:true, url:res.url};
+    if(tab){ tab.opener = null; tab.location = res.url; }
+    else toast("Your editing desk is open at "+res.url);
+  }catch(err){
+    if(tab) tab.close();
+    toast(err.message, true);
+  }
+  renderWorklist();
+}
+
+/* Every paper: those Indico has (from the conference box) and those in the
+   folder, side by side. */
+function managedRows(){
+  const local = new Map(S.papers.map(p=>[p.name, p]));
+  const indico = (S.chiefPapers && S.chiefPapers.papers) || [];
+  const rows = indico.filter(ip=>ip.submitted || local.has(ip.name))
+    .map(ip=>({name:ip.name, code:ip.code, ip, lp:local.get(ip.name) || null}));
+  const seen = new Set(rows.map(r=>r.name));
+  S.papers.forEach(lp=>{ if(!seen.has(lp.name))
+    rows.push({name:lp.name, code:lp.paper_id, ip:null, lp}); });
+  return rows;
+}
+
+const MANAGE_SHOW = [
+  ["all","All"], ["to_edit","To edit"], ["working","Being worked on"],
+  ["to_qa","To QA"], ["qa_failed","QA failed"], ["qa_passed","Done"],
+  ["indico_newer","Newer in Indico"], ["not_here","Not downloaded"],
+];
+const MANAGE_KEEP = {
+  all: r=>true,
+  to_edit: r=>r.lp && !r.lp.claim && ["to_edit","waiting_author","to_reedit"]
+    .includes(r.lp.stage),
+  working: r=>r.lp && r.lp.claim,
+  to_qa: r=>r.lp && !r.lp.claim && r.lp.stage==="to_qa",
+  qa_failed: r=>r.lp && r.lp.stage==="to_reedit",
+  qa_passed: r=>r.lp && r.lp.stage==="qa_passed",
+  indico_newer: r=>r.ip && (r.ip.newer==="indico" || r.ip.newer==="both"),
+  not_here: r=>!r.lp,
+};
+
+function localState(r){
+  if(!r.lp) return ["Not downloaded","none",""];
+  const rev = r.ip && r.ip.local_revisions ? "revision "+r.ip.local_revisions : "";
+  if(!r.lp.screened) return ["Not prepared","warn",rev];
+  return ["Downloaded","good",rev];
+}
+
+function newerState(r){
+  const ip = r.ip;
+  if(!r.lp) return ["—","none",""];
+  if(!ip) return ["—","none", S.chiefPapers ? "not in Indico's list" : "Indico not read yet"];
+  const counts = "revisions: "+ip.revisions+" in Indico, "+ip.local_revisions+" here";
+  return {
+    same: ["Same","good",""],
+    local: ["Local","info","edited here; not in Indico"],
+    indico: ["Indico","bad",counts],
+    both: ["Both changed","bad",counts+"; edited here too"],
+  }[ip.newer] || ["—","none",""];
+}
+
+function titleAuthorState(r){
+  const ta = r.lp && r.lp.title_authors;
+  if(!r.lp || !r.lp.screened || !ta) return ["—","none",""];
+  const until = ta.deadline ? "until "+when(ta.deadline) : "";
+  return {
+    match: ["OK","good",""],
+    differs: ["Email to send","warn","the paper and Indico differ"],
+    waiting: ["Email sent","info",until],
+    due: ["Email sent","warn","no reply: ready to apply"],
+    replied: ["Email sent","info","the author replied"],
+    changed: ["Email sent","warn","changed since the email"],
+    applied: ["Fixed","info","Indico still to update"],
+    done: ["Fixed","good",""],
+    unknown: ["Not checked","none",""],
+  }[ta.status] || [ta.status_word || "—","none",""];
+}
+
+function indicoState(r){
+  const editor = (r.ip && r.ip.editor) || (r.lp && r.lp.indico && r.lp.indico.editor) || "";
+  const state = (r.ip && r.ip.state) || (r.lp && r.lp.indico && r.lp.indico.state) || "";
+  if(!r.ip && !(r.lp && r.lp.indico)) return ["—","none",""];
+  const differs = r.lp && r.lp.claim_vs_indico==="differs";
+  const editedHere = r.lp && r.lp.claim && r.lp.claim.mode!=="qa";
+  if(!editor && editedHere){
+    const on = S.indicoSync && S.indicoSync.enabled;
+    return ["Nobody yet", "warn", on ? "assigning "+r.lp.claim.who+"…"
+      : "not told: the Indico sync is off"];
+  }
+  return [editor || "Nobody yet", differs ? "bad" : editor ? "none" : "none",
+    (state ? state.replace(/_/g," ") : "")
+    +(differs ? (state ? " · " : "")+"not the editor working on it here" : "")];
+}
+
+function renderManaging(host){
+  const rows = managedRows();
+  if(!rows.length) return;
+  const filters = el("div","filters");
+  MANAGE_SHOW.forEach(([key,label])=>{
+    const n = rows.filter(MANAGE_KEEP[key]).length;
+    if(!n && key!=="all" && key!==S.manageShow) return;
+    const b = el("button",null,label+" ("+n+")");
+    b.setAttribute("aria-pressed", S.manageShow===key ? "true":"false");
+    b.onclick = () => { S.manageShow=key; renderWorklist(); };
+    filters.appendChild(b);
+  });
+  host.appendChild(filters);
+  // Being edited here, and Indico shows nobody on it.
+  const untold = rows.filter(r=>r.lp && r.lp.claim && r.lp.claim.mode!=="qa"
+    && !((r.ip && r.ip.editor) || (r.lp.indico && r.lp.indico.editor)));
+  if(untold.length && S.indicoSync && !S.indicoSync.enabled){
+    host.appendChild(el("p","bad-text", untold.length+" paper"
+      +(untold.length===1 ? " is" : "s are")+" being edited here, but Indico is not "
+      +"told: switch on “Keep Indico's editor assignments in step” above to assign "
+      +(untold.length===1 ? "its editor" : "their editors")+" in Indico."));
+  }
+  if(S.indico){
+    const info = el("div","wl-indico");
+    info.appendChild(el("span",null,"Who has each paper in Indico: "
+      + (S.indico.source==="indico" ? "checked "+when(S.indico.as_of)
+         : "as recorded when the papers were pulled, "+when(S.indico.as_of))));
+    const chk = el("button",null,"Check Indico now");
+    chk.onclick = () => checkIndico(chk);
+    info.appendChild(chk);
+    host.appendChild(info);
+  }
+  const shown = rows.filter(MANAGE_KEEP[S.manageShow] || MANAGE_KEEP.all);
+  if(!shown.length){
+    const e = el("div","empty");
+    e.appendChild(el("b",null,"Nothing here"));
+    e.appendChild(el("div",null,"No papers match this filter."));
+    host.appendChild(e); return;
+  }
+  const table = el("table","wl manage");
+  const htr = el("tr");
+  ["Paper","Title","Local copy","Newer","Author/title","Edited","QA","In Indico",""]
+    .forEach(h=>htr.appendChild(el("th",null,h)));
+  const thead = el("thead"); thead.appendChild(htr); table.appendChild(thead);
+  const tbody = el("tbody");
+  shown.forEach(r=>{
+    const lp = r.lp;
+    const tr = el("tr");
+    const c1 = el("td"); c1.appendChild(el("div","pid", (lp && lp.paper_id) || r.code));
+    if(lp && lp.kind==="word") c1.appendChild(el("div","tiny muted","Word"));
+    tr.appendChild(c1);
+    const title = (lp && lp.title) || (r.ip && r.ip.title) || r.name;
+    const c2 = el("td"); const t = el("div","ttl", title); t.title = title;
+    c2.appendChild(t); tr.appendChild(c2);
+    tr.appendChild(stageCell(localState(r)));
+    tr.appendChild(stageCell(newerState(r)));
+    tr.appendChild(stageCell(titleAuthorState(r)));
+    tr.appendChild(stageCell(lp ? editedState(lp) : ["—","none",""]));
+    tr.appendChild(stageCell(lp ? qaState(lp) : ["—","none",""]));
+    tr.appendChild(stageCell(indicoState(r)));
+    const act = el("td"); act.style.textAlign="right"; act.style.whiteSpace="nowrap";
+    if(lp && !lp.screened){
+      const b = el("button",null,"Prepare"); b.onclick = () => prepare({folder:lp.folder});
+      act.appendChild(b);
+    }
+    if(lp && lp.claim){
+      const b = el("button",null,"Free");
+      b.title = "Free this paper so any editor can take it";
+      b.onclick = () => freePaper(lp, b);
+      act.appendChild(b);
+    }
+    tr.appendChild(act);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  const wrap = el("div","manage-wrap"); wrap.appendChild(table);
+  host.appendChild(wrap);
+  const newer = rows.filter(MANAGE_KEEP.indico_newer).length;
+  if(newer) host.appendChild(el("p","tiny bad-text", newer+" paper"+(newer===1?" has":"s have")
+    +" a newer revision in Indico than the copy here. The desk does not download new "
+    +"revisions of papers it already has yet: their copies here are the older ones."));
+  host.appendChild(el("p","tiny muted",
+    (S.chiefPapers ? "" : "Connect the Indico account above to see the papers not "
+      +"downloaded yet and which copy is newer. ")
+    +(S.indicoSync && S.indicoSync.enabled
+      ? "Editors are assigned in Indico as they take papers to edit them."
+      : "Indico is only read: switch on “Keep Indico's editor assignments in step” "
+        +"above to assign editors there automatically.")));
+}
+
+async function freePaper(p, btn){
+  const who = p.claim.state==="mine" ? "this managing desk" : (p.claim.who || "its editor");
+  if(!confirm("Free "+p.paper_id+" from "+who+"?\n\nAny editor can then take it. Work "
+    +"their desk has not sent yet stays on their computer, and their desk tells them "
+    +"the paper is no longer theirs."
+    +(S.indicoSync && S.indicoSync.enabled && p.status!=="done"
+      ? " They are unassigned in Indico too." : ""))) return;
+  btn.disabled = true;
+  try{
+    await api("/api/chief/free", {folder:p.folder});
+    toast(p.paper_id+" is free for any editor to take");
+    await loadWorklist();
+  }catch(err){ toast(err.message, true); }
+  renderWorklist();
+}
+
 /* -------------------------------------------------------------- prepare */
 async function prepare(opts){
   try{
@@ -753,9 +1600,10 @@ async function pollJob(){
     if(job.finished){
       S.job = null;
       if(job.errors && job.errors.length){
-        toast(job.errors.length+" paper(s) could not be prepared — see the list", true);
+        toast(job.errors.length+" problem(s): "+job.errors[0], true);
       } else { toast("Ready to review"); }
       await loadWorklist();
+      if(S.chief) loadChiefPapers();
       if(S.folder) await openPaper(S.folder); else renderWorklist();
       return;
     }
@@ -887,6 +1735,9 @@ function updateFoot(){
   $("#btnPrev").disabled = i<=0;
   $("#btnNext").disabled = i<0 || i>=S.papers.length-1;
   $("#btnFinish").textContent = p.status==="done" ? "Finish again" : "Finish this paper";
+  const qa = !!(S.pool && p.sync && p.sync.mode==="qa");
+  $("#btnFinish").hidden = qa;
+  $("#btnQaPass").hidden = $("#btnQaFail").hidden = !(qa && p.sync.held);
 }
 
 function backToList(){
@@ -1714,6 +2565,35 @@ function tabFiles(host){
   }
 }
 
+/* ------------------------------------------------------------------ QA */
+/* A paper taken for QA: the editor checks the editing, then passes it, or
+   fails it back to the editors with a note for whoever re-edits it. */
+$("#btnQaPass").onclick = () => {
+  if(!confirm("Pass the QA of "+(S.paper.paper_id||"this paper")+"?\n\nIt is then done: "
+    +"nothing further is needed from the editors.")) return;
+  qaVerdict("passed", "");
+};
+$("#btnQaFail").onclick = () => {
+  $("#qaFailTitle").textContent = "Fail the QA of "+(S.paper.paper_id||"this paper")+"?";
+  $("#qaFailNote").value = "";
+  $("#dlgQaFail").showModal();
+};
+$("#dlgQaFail").addEventListener("close", () => {
+  if($("#dlgQaFail").returnValue !== "ok") return;
+  qaVerdict("failed", $("#qaFailNote").value.trim());
+});
+
+async function qaVerdict(verdict, note){
+  const id = S.paper.paper_id || "The paper";
+  try{
+    const res = await api("/api/qa", {folder:S.folder, verdict, note});
+    if(res.pool_error) toast(res.pool_error, true);
+    else toast(verdict==="passed" ? "QA passed: "+id+" is done"
+      : "QA failed: "+id+" is back with the editors to re-edit");
+    await loadWorklist(); backToList(); loadPoolPapers();
+  }catch(err){ toast(err.message, true); }
+}
+
 /* ------------------------------------------------------------- finish */
 $("#btnFinish").onclick = () => {
   const c = S.paper.counts;
@@ -1752,9 +2632,16 @@ $("#dlgFinish").addEventListener("close", async (e) => {
     const ul = el("ul");
     res.written.forEach(n=>ul.appendChild(el("li",null,n)));
     body.appendChild(ul);
-    body.appendChild(el("p","tiny muted",
-      "You can reopen this paper at any time. It is no longer marked as "
-      +"yours, so another editor can pick it up."));
+    if(S.pool){
+      body.appendChild(el("p", res.pool_error ? "bad-text" : "tiny muted",
+        res.pool_error || "Sent to the chief editor's desk and given back, so "
+          +"another editor can pick it up. You can read your copy here until "
+          +"the desk is next started."));
+    } else {
+      body.appendChild(el("p","tiny muted",
+        "You can reopen this paper at any time. It is no longer marked as "
+        +"yours, so another editor can pick it up."));
+    }
     await loadWorklist();
     $("#dlgDone").showModal();
   }catch(err){ toast(err.message, true); }
@@ -1818,10 +2705,32 @@ async function loadWorklist(){
   const data = await api("/api/worklist");
   S.papers = data.papers;
   S.indico = data.indico || null;
+  if(data.sharing){ S.sharing = data.sharing; noteGivenUp(); }
+  if(data.indico_sync) S.indicoSync = data.indico_sync;
   const names = [...new Set(S.papers.map(p=>p.indico && p.indico.editor)
     .filter(Boolean))].sort();
   const list = $("#indicoEditors"); list.innerHTML = "";
   names.forEach(n=>{ const o=document.createElement("option"); o.value=n; list.appendChild(o); });
+}
+
+/* The chief's page shows who is taking which paper, and an editor's shows
+   what is still free, so both look again every few seconds while the list is
+   open (not while a paper is open or someone is typing). */
+async function keepUpToDate(){
+  if(document.hidden) return;
+  if(S.folder){
+    // Reading a paper: the chief still hears at once when one is given up.
+    if(S.sharing){
+      try{ S.sharing.given_up = (await api("/api/chief/given-up",{})).given_up;
+           noteGivenUp(); }catch(_){}
+    }
+    return;
+  }
+  const a = document.activeElement;
+  if(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+  try{ await loadWorklist(); }catch(_){ return; }
+  if(S.pool){ await loadPoolPapers(); return; }
+  if(!S.folder) renderWorklist();
 }
 
 const nameInput = $("#editorName");
@@ -1840,6 +2749,34 @@ nameInput.addEventListener("input", ()=>{
   }, 500);
 });
 
+/* Who is at this desk. Joined to the chief's desk, an editor is known by
+   their Indico account, so there is no name to type. */
+function showWho(){
+  const joined = !!S.pool, managing = !!S.chief;
+  $("#whoName").hidden = joined || managing;
+  const who = $("#whoIndico"); who.hidden = !(joined || managing);
+  if(managing){ who.textContent = "Chief editor · managing page"; return; }
+  if(!joined) return;
+  const a = S.account || {};
+  who.textContent = a.connected ? "Indico: "+(a.name || "connected")
+    : "Not connected to Indico";
+}
+
+/* After the Indico account changes, start again from the server's view. */
+async function reboot(){
+  try{
+    const setup = await api("/api/setup");
+    S.chief = setup.chief || null; S.account = setup.account || null;
+    S.indicoSync = setup.indico_sync || null; S.pool = setup.pool || null;
+    S.editor = setup.editor || (S.pool ? "" : S.editor); nameInput.value = S.editor;
+    showWho();
+    await loadWorklist();
+    if(S.chief){ S.chiefPapers = null; loadChiefPapers(); }
+    if(S.pool) loadPoolPapers();
+    if(!S.folder) renderWorklist();
+  }catch(err){ toast(err.message, true); }
+}
+
 (async function boot(){
   try{
     const setup = await api("/api/setup");
@@ -1855,10 +2792,21 @@ nameInput.addEventListener("input", ()=>{
       badge.hidden = false;
     }
     nameInput.value = S.editor;
+    S.chief = setup.chief || null;
+    S.sharing = setup.sharing || null;
+    S.account = setup.account || null;
+    S.indicoSync = setup.indico_sync || null;
+    S.pool = setup.pool || null;
+    S.editing = setup.editing || null;
+    if(S.pool) $("#rootName").textContent = "copies of papers from "+S.pool.url;
+    showWho();
     if((setup.jobs||[]).length){ S.job = setup.jobs[0]; pollJob(); }
     await loadWorklist();
     renderWorklist();
-    if(!S.editor) nameInput.focus();
+    if(S.chief) loadChiefPapers();
+    if(S.pool) loadPoolPapers();
+    if(!S.editor && !S.pool && !S.chief) nameInput.focus();
+    if(S.chief || S.pool) setInterval(keepUpToDate, 10000);
   }catch(err){
     document.body.innerHTML = '<main><div class="empty"><b>Could not start</b>'
       + '<div>'+err.message+'</div></div></main>';

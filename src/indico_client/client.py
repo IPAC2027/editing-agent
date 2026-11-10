@@ -37,6 +37,7 @@ from src.indico_client.models import (
     ContributionRow,
     EditableDetail,
     IndicoTag,
+    IndicoUser,
 )
 
 TOKEN_ENV = "INDICO_TOKEN"
@@ -64,8 +65,35 @@ class RevisionMoved(IndicoError):
     """
 
 
+#: Where the desk keeps a token typed into its page: in the editor's own
+#: settings folder (``AIAGENT_HOME``, else ``~/.aiagent``), readable by them alone.
+TOKEN_FILE = "indico_token"
+
+
+def saved_token_path() -> Path:
+    home = os.environ.get("AIAGENT_HOME", "").strip()
+    return (Path(home).expanduser() if home else Path.home() / ".aiagent") / TOKEN_FILE
+
+
+#: True on an editor's desk started on the chief editor's computer: the
+#: environment's token and the keyring there are the chief's, so only a token
+#: typed into this desk is the editor's own.
+TYPED_TOKEN_ONLY = False
+
+
 def load_token(*, keyring_user: str | None = None) -> str:
-    """The editor's personal token, from the environment or the OS keyring."""
+    """The editor's personal token: typed into the desk, else the environment or keyring."""
+    try:
+        token = saved_token_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        token = ""
+    if token:
+        return token
+    if TYPED_TOKEN_ONLY:
+        raise IndicoAuthError(
+            "No Indico account connected on this editor's desk. Paste the editor's "
+            "own token into its Indico box: this computer's other tokens are the "
+            "chief editor's, and are not used here.")
     token = os.environ.get(TOKEN_ENV, "").strip()
     if token:
         return token
@@ -77,9 +105,9 @@ def load_token(*, keyring_user: str | None = None) -> str:
         stored = None
     if not stored:
         raise IndicoAuthError(
-            "No Indico token found. Create one at <indico>/user/tokens/ with the "
-            f"'read:everything' scope (and 'full:everything' to send results "
-            f"back), then set {TOKEN_ENV} or store it in your keyring."
+            "No Indico account connected. Create a token at <indico>/user/tokens/ "
+            "(scope 'read:everything', or 'full:everything' for the chief editor so "
+            "the desk can assign editors) and paste it into the desk's Indico box."
         )
     return stored.strip()
 
@@ -201,6 +229,34 @@ class IndicoClient:
     def ping(self) -> int:
         """Number of contributions visible. The one-call 'is this set up right'."""
         return len(self.list_editables())
+
+    def whoami(self) -> dict | None:
+        """The token's owner (id, names, email), or None if Indico does not know it."""
+        try:
+            data = self._get_json(f"{self.base_url}/api/user/")
+        except ValueError:             # not JSON: a login page, not an answer
+            return None
+        return data if isinstance(data, dict) and data.get("id") else None
+
+    def editors(self) -> list[IndicoUser]:
+        """The event's editors for this type (needs the event's editing management)."""
+        raw = self._get_json(self._api(f"{self.editable_type}/editors"))
+        return [IndicoUser.model_validate(row) for row in raw]
+
+    def can_manage_editing(self) -> bool:
+        """Whether this token's owner manages the event's editing, as Indico answers.
+
+        Indico gives the editors list only to editing managers (and to event
+        managers, who have every management right): 403 for anyone else.
+        """
+        url = self._api(f"{self.editable_type}/editors")
+        self._guard("GET", url)
+        with self._client() as http:
+            response = http.request("GET", url)
+        if response.status_code == 403:
+            return False
+        self._check(response)
+        return True
 
     def list_editables(self) -> list[ContributionRow]:
         """The table an editor sees, including papers not yet submitted."""

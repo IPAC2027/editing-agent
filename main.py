@@ -1,5 +1,14 @@
 """JACoW conference-paper pre-screening agent — command line.
 
+Two modes (see ``run`` at the end of this file):
+
+    aiagent [FOLDER]                       editor: open the review desk
+    aiagent --manage [FOLDER] [--event N]  chief editor: the managing page lists
+                                           the conference in Indico, downloads
+                                           and prepares its papers
+
+Everything else is ``aiagent tools <command>`` (old names still work):
+
     desk           open the review desk in a browser (for editors)
     prescreen      screen one submission folder
     prescreen-all  screen every submission under a directory
@@ -25,6 +34,7 @@ paper.  Everything else here is for the people maintaining the tool:
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import typer
@@ -167,9 +177,9 @@ def indico(
 ) -> None:
     """List a conference's papers from Indico, using your own token.
 
-    Reads only.  The token comes from ``INDICO_TOKEN`` or your OS keyring and is
-    never printed.  Create one at ``<indico>/user/tokens/`` with the
-    ``read:everything`` scope.
+    Reads only.  The token is the one pasted into the desk's Indico box (else
+    ``INDICO_TOKEN`` or your OS keyring) and is never printed.  Create one at
+    ``<indico>/user/tokens/`` with the ``read:everything`` scope.
     """
     from src.indico_client.client import IndicoClient, IndicoError, load_token
 
@@ -815,7 +825,13 @@ def prescreen_all(
 
     console.print(f"Found [bold]{len(folders)}[/bold] submission(s) to prepare.\n")
     llm = _configure_llm(llm, model, base_url)
+    _prepare(folders, llm=llm, compile_pdf=compile_pdf, git=git, workers=workers)
 
+
+def _prepare(folders: list[Path], *, llm: bool, compile_pdf: bool, git: bool = True,
+             workers: int = 1) -> None:
+    """Pre-screen *folders*, one line each, and a total."""
+    from src.desk.state import submission_name
     from src.workflow.prescreen import WordSubmissionError
     from src.workflow.prescreen import prescreen as run
 
@@ -1055,5 +1071,298 @@ def finetune_eval(
         os.environ["LLM_ENABLED"] = "true"
     console.print(evaluate(eval_jsonl, model or None, limit or None))
 
+
+# ---------------------------------------------------------------------------
+# The front door: two modes
+# ---------------------------------------------------------------------------
+#
+#     aiagent [FOLDER]                      editor: open the desk
+#     aiagent --manage [FOLDER] [--event N] chief editor: the managing page lists
+#                                           the conference in Indico, downloads
+#                                           and prepares its papers
+#     aiagent tools <command> ...          everything above, for maintainers
+#
+# The maintainers' commands still answer to their old names too
+# (``aiagent desk``, ``aiagent prescreen-all`` …), so scripts keep working.
+
+PAPERS_SETTING = "papers"
+
+start = typer.Typer(add_completion=False)
+
+
+def _papers_folder(given: Path | None, otherwise: Path | None = None) -> Path:
+    """The folder named, else the one this computer used last, else *otherwise*, else here."""
+    from src.desk import me as me_module
+
+    if given is not None:
+        return given.expanduser().resolve()
+    remembered = me_module.load_settings().get(PAPERS_SETTING)
+    if remembered and Path(remembered).is_dir():
+        return Path(remembered)
+    if otherwise is not None:
+        otherwise = otherwise.expanduser().resolve()
+        otherwise.mkdir(parents=True, exist_ok=True)
+        return otherwise
+    return Path(".").resolve()
+
+
+@start.command()
+def run(
+    folder: Path = typer.Argument(
+        None, show_default=False,
+        help="The papers folder, for the chief editor or an editor working alone. "
+             "Default: the one this computer used last. An editor joined to the "
+             "chief's desk needs none."),
+    manage: bool = typer.Option(
+        False, "--manage",
+        help="The chief editor's managing page: the conference in Indico, "
+             "downloading and preparing its papers, and the editors' door."),
+    manage_old_name: bool = typer.Option(False, "--chief", hidden=True,
+                                         help="The old name of --manage."),
+    event: int = typer.Option(
+        None, "--event",
+        help="With --manage: the Indico event id (or choose it on the page). Needed "
+             "only the first time; the folder remembers it."),
+    url: str = typer.Option(None, "--url", envvar="INDICO_URL",
+                            help="With --manage: the Indico site. Default: "
+                                 "indico.jacow.org."),
+    share: bool = typer.Option(
+        True, "--share/--no-share",
+        help="With --manage: let editors' desks on the network take papers "
+             "(--no-share: only your own editing desk, on this computer)."),
+    pool_port: int = typer.Option(8770, "--pool-port",
+                                  help="With --manage: the port editors' desks "
+                                       "connect to."),
+    join: str = typer.Option(
+        None, "--join",
+        help="Editor: the chief editor's desk to work from, e.g. 192.168.1.20 (as "
+             "the chief's page shows it). Remembered for next time."),
+    code: str = typer.Option(None, "--code",
+                             help="Editor: the join code the chief's page shows."),
+    with_chief: bool = typer.Option(
+        False, "--with-chief", hidden=True,
+        help="The chief's own editing desk, started by the managing page: it closes "
+             "when the managing desk does."),
+    alone_in: Path = typer.Option(
+        None, "--alone-in", hidden=True,
+        help="Launchers: the folder to work on alone when this computer has "
+             "neither joined a chief editor's desk nor used a folder before."),
+    port: int = typer.Option(8765, "--port", help="Port to serve on."),
+    open_browser: bool = typer.Option(True, "--open/--no-open",
+                                      help="Open a browser automatically."),
+    compile_pdf: bool = typer.Option(True, "--compile/--no-compile",
+                                     help="Build a PDF when preparing a paper."),
+    llm: bool = typer.Option(None, "--llm/--no-llm",
+                             help="Use a local model where one is sanctioned "
+                                  "(default: LLM_ENABLED in .env)."),
+    model: str = typer.Option(None, envvar="LLM_MODEL", help="Model name."),
+    base_url: str = typer.Option(None, envvar="LLM_BASE_URL", help="Model base URL."),
+) -> None:
+    """Open the JACoW review desk.
+
+    Chief editor: add --manage (and --event, or choose the event on the page):
+    a managing page that lists the conference's papers in Indico, downloads
+    and prepares them, and lets editors' desks on the network take them
+    (--no-share: only your own). Papers are not edited there: its Edit papers
+    button opens your own editor's desk, joined to it like everyone else's.
+
+    Editors: --join ADDRESS --code CODE, as the chief's page shows them, and no
+    folder. The desk keeps its own copies of the papers you take, sends your
+    work back to the chief's desk as you go, and clears a copy once it is
+    given back. After the first time, plain 'aiagent' opens the same desk.
+    Given a FOLDER instead, the desk works on it alone.
+
+    Maintainers' commands: aiagent tools --help
+    """
+    from src.desk import me as me_module
+    from src.desk.server import serve
+
+    chief = manage or manage_old_name
+    settings = me_module.load_settings()
+    if chief and join:
+        console.print("[red]--manage and --join are two different desks: use one.[/red]")
+        raise typer.Exit(1)
+    if not chief:
+        settings = _editors_own_settings(settings, joining=bool(join), folder=folder)
+    if join or (not chief and folder is None and settings.get("pool_url")):
+        _run_joined(folder, join, code, settings, port=port, open_browser=open_browser,
+                    llm=_configure_llm(llm, model, base_url), compile_pdf=compile_pdf,
+                    with_chief=with_chief)
+        return
+
+    root = _papers_folder(folder, None if chief else alone_in)
+    if chief:
+        root.mkdir(parents=True, exist_ok=True)
+    if not root.is_dir():
+        console.print(f"[red]Not a folder:[/red] {root}")
+        raise typer.Exit(1)
+    _refuse_a_shared_folder(root, chief=chief)
+    llm_choice = llm
+    llm = _configure_llm(llm, model, base_url)
+
+    event_for_chief = None
+    sharing = None
+    if chief:
+        from src.desk.chief import Event
+
+        try:
+            event_for_chief = Event.for_folder(root, url=url, event_id=event)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+        from src.desk.indico_sync import IndicoSync
+
+        sync = IndicoSync(root, event_for_chief)
+        from src.desk import pool as pool_module
+        from src.desk.editing import EditingDesk
+
+        # The door is always open: the chief edits through it too, on an
+        # editor's desk of their own. --no-share keeps it to this computer.
+        sharing = pool_module.Pool(root, code=pool_module.join_code(), port=pool_port,
+                                   sync=sync, local_only=not share)
+        passed_on = ["--compile" if compile_pdf else "--no-compile"]
+        if llm_choice is not None:
+            passed_on.append("--llm" if llm_choice else "--no-llm")
+        editing = EditingDesk(
+            sharing, command=[sys.executable, str(Path(__file__).resolve())],
+            home=me_module.settings_dir() / me_module.EDITOR_HOME, extra_args=passed_on)
+    else:
+        sync = editing = None
+
+    me_module.update_settings(compile=compile_pdf, **{PAPERS_SETTING: str(root)})
+    serve(root, port=port, open_browser=open_browser, llm=llm, chief=event_for_chief,
+          sharing=sharing, sync=sync, editing=editing,
+          door_host="0.0.0.0" if share else "127.0.0.1")
+
+
+def _editors_own_settings(settings: dict, *, joining: bool, folder: Path | None) -> dict:
+    """On the chief's computer, an editor's desk is a desk of its own.
+
+    These settings opened the chief's door once (they hold its join code), so
+    they are the chief's: its desk id and Indico token. An editor's desk
+    started with them would take papers as the chief. It keeps a name, desk id
+    and token of its own instead, in a folder inside the chief's, and so does
+    everything this process does from here on (hence the environment).
+    """
+    from src.desk import me as me_module
+    from src.desk import pool as pool_module
+    from src.desk import remote
+
+    if not settings.get(pool_module.CODE_SETTING):
+        return settings
+    # A join made with the chief's own settings before this check existed.
+    settings = me_module.forget_settings(remote.URL_SETTING, remote.CODE_SETTING)
+    home = me_module.settings_dir() / me_module.EDITOR_HOME
+    editor = me_module.load_settings(home)
+    if not (joining or (folder is None and editor.get(remote.URL_SETTING))):
+        return settings
+    from src.indico_client import client as indico_client
+
+    os.environ[me_module.HOME_ENV] = str(home)
+    # INDICO_TOKEN and the keyring on this computer are the chief's too.
+    indico_client.TYPED_TOKEN_ONLY = True
+    console.print(f"[dim]These are the chief editor's settings, so this editor's desk "
+                  f"keeps its own (name, desk id, Indico token) in {home}.[/dim]")
+    return editor
+
+
+def _refuse_a_shared_folder(root: Path, *, chief: bool) -> None:
+    """A chief's desk is sharing *root*: nobody else opens it directly."""
+    from src.desk import pool as pool_module
+
+    door = pool_module.door_open(root)
+    if not door:
+        return
+    port = door.get("port")
+    if chief:
+        console.print(f"[red]The chief editor's desk is already open on {root} "
+                      f"(editors' door on port {port}). Use that one, or close it "
+                      "first.[/red]")
+    else:
+        console.print(
+            f"[red]{root} is the chief editor's papers folder, and the chief's desk is "
+            f"sharing it right now.[/red]\n"
+            "An editor never opens it directly. Join the chief's desk instead:\n"
+            f"  aiagent --join 127.0.0.1:{port} --code <the join code on the chief's page>")
+    raise typer.Exit(1)
+
+
+def _run_joined(folder: Path | None, join: str | None, code: str | None, settings: dict,
+                *, port: int, open_browser: bool, llm: bool, compile_pdf: bool,
+                with_chief: bool = False) -> None:
+    """An editor's desk working from the chief's: copies here, the papers there."""
+    from src.desk import editing
+    from src.desk import me as me_module
+    from src.desk import remote
+    from src.desk.server import serve
+
+    # One desk per settings folder: a second would hold the same papers.
+    already = editing.open_desk(me_module.settings_dir())
+    if already:
+        console.print(f"This editor's desk is already open: {already}")
+        if open_browser:
+            import webbrowser
+
+            webbrowser.open(already)
+        return
+    if with_chief:
+        # Started by the chief's managing page: this computer's INDICO_TOKEN
+        # and keyring are the chief's, not this desk's.
+        from src.indico_client import client as indico_client
+
+        indico_client.TYPED_TOKEN_ONLY = True
+
+    try:
+        url = remote.normalise_url(join or settings.get(remote.URL_SETTING, ""))
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if not code and url == settings.get(remote.URL_SETTING):
+        code = settings.get(remote.CODE_SETTING)
+    if not code:
+        console.print("[red]Give the join code the chief editor's page shows: "
+                      "--code xxxx-xxxx-xxxx[/red]")
+        raise typer.Exit(1)
+    if folder is not None:
+        console.print("[red]An editor joined to the chief's desk needs no folder: the "
+                      "desk keeps the papers you take by itself. Leave the folder out.[/red]")
+        raise typer.Exit(1)
+    # The desk's own working folder, one per chief's desk: papers you hold,
+    # and any work the chief has not received yet. Nothing else is kept.
+    root = remote.working_folder(url)
+    root.mkdir(parents=True, exist_ok=True)
+    me_module.update_settings(compile=compile_pdf,
+                              **{remote.URL_SETTING: url, remote.CODE_SETTING: code})
+    joined = remote.Joined(root, remote.RemotePool(url, code))
+    joined.tidy()
+    reached = joined.view()
+    if not reached["connected"]:
+        console.print(f"[yellow]{reached['error']}[/yellow]\n"
+                      "[yellow]The desk opens anyway and keeps trying.[/yellow]")
+    serve(root, port=port, open_browser=open_browser, llm=llm, pool=joined,
+          close_with_stdin=with_chief)
+
+
+def route(args: list[str]) -> tuple[str, list[str]]:
+    """``("tools", rest)`` for a maintainer's command, else ``("start", args)``."""
+    commands = {c.name or c.callback.__name__.replace("_", "-") for c in app.registered_commands}
+    if args and args[0] == "tools":
+        return "tools", args[1:]
+    if args and args[0] in commands:
+        return "tools", args
+    return "start", args
+
+
+def main(argv: list[str] | None = None) -> None:
+    """``aiagent``: the two modes, or ``aiagent tools …`` for everything else."""
+    import sys
+
+    where, args = route(list(sys.argv[1:] if argv is None else argv))
+    if where == "tools":
+        app(args=args, prog_name="aiagent tools")
+    else:
+        start(args=args, prog_name="aiagent")
+
+
 if __name__ == "__main__":
-    app()
+    main()

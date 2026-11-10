@@ -43,6 +43,8 @@ class Claim(BaseModel):
     name: str = ""
     machine: str = ""
     since: str = ""
+    mode: str = "edit"          # edit | qa: what the paper was taken for
+    indico_id: int | None = None  # the taker's Indico user, on the chief's desk
 
     @property
     def who(self) -> str:
@@ -54,7 +56,8 @@ class Claim(BaseModel):
 
     def view(self, desk_id: str) -> dict:
         return {"state": "mine" if self.desk_id and self.desk_id == desk_id else "other",
-                "who": self.who, "machine": self.machine, "since": self.since}
+                "who": self.who, "machine": self.machine, "since": self.since,
+                "mode": self.mode}
 
 
 class Held(Exception):
@@ -100,16 +103,18 @@ def view(folder: Path, desk_id: str) -> dict | None:
     return claim.view(desk_id) if claim else None
 
 
-def _record(me: Me) -> Claim:
-    return Claim(desk_id=me.desk_id, name=me.name, machine=me.machine, since=_now())
+def _record(me: Me, mode: str = "edit", indico_id: int | None = None) -> Claim:
+    return Claim(desk_id=me.desk_id, name=me.name, machine=me.machine, since=_now(),
+                 mode=mode, indico_id=indico_id)
 
 
-def take(folder: Path, me: Me) -> Claim:
+def take(folder: Path, me: Me, *, mode: str = "edit",
+         indico_id: int | None = None) -> Claim:
     """Claim *folder* for *me*; fine if *me* already has it; Held if someone else does."""
     path = path_for(folder)
     path.parent.mkdir(parents=True, exist_ok=True)
     for _ in range(3):
-        record = _record(me)
+        record = _record(me, mode, indico_id)
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
@@ -118,7 +123,7 @@ def take(folder: Path, me: Me) -> Claim:
                 continue  # let go between our attempt and our look: try again
             if existing.desk_id == me.desk_id:
                 if existing.name != me.name and me.name:
-                    return take_over(folder, me, since=existing.since)
+                    return take_over(folder, me, since=existing.since, mode=existing.mode)
                 return existing
             raise Held(existing, me.desk_id) from None
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -130,9 +135,9 @@ def take(folder: Path, me: Me) -> Claim:
     raise Held(existing, me.desk_id)
 
 
-def take_over(folder: Path, me: Me, *, since: str = "") -> Claim:
+def take_over(folder: Path, me: Me, *, since: str = "", mode: str = "edit") -> Claim:
     """Make *me* the holder whoever held it before."""
-    record = _record(me)
+    record = _record(me, mode)
     if since:
         record.since = since
     files.write_text(path_for(folder), record.model_dump_json())

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import threading
+import time
 import traceback
 import uuid
 from datetime import datetime, timezone
@@ -25,10 +26,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from src.desk import account as account_module
 from src.desk import indico as indico_module
 from src.desk import claim as claim_module
 from src.desk import me as me_module
 from src.desk import paper as paper_module
+from src.desk import remote as remote_module
 from src.desk import state as state_module
 from src.desk.state import EditorNote, ManualEdit, ReviewState
 
@@ -36,6 +39,19 @@ from src.desk.state import EditorNote, ManualEdit, ReviewState
 #: every desk opened on it. Now kept per person (see ``src.desk.me``); the
 #: name is still git-ignored so an old file never ends up in a commit.
 LEGACY_CONFIG_FILENAME = ".aiagent_desk.json"
+
+#: What the chief editor's managing page may change. It manages: Indico, the
+#: download, preparing papers, the editors' door. Papers are edited on an
+#: editor's desk, the chief's own included (src.desk.editing).
+MANAGING_ROUTES = frozenset({
+    "/api/editor", "/api/prepare", "/api/indico-refresh", "/api/format-references",
+    "/api/indico-account", "/api/chief/event", "/api/chief/papers",
+    "/api/chief/download", "/api/chief/indico-sync", "/api/chief/given-up",
+    "/api/chief/free", "/api/chief/editing-desk",
+})
+NOT_ON_THE_MANAGING_PAGE = ("This is the chief editor's managing page: papers are not "
+                            "edited here. Click Edit papers at the top to open your "
+                            "editing desk.")
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +84,8 @@ class JobRunner:
                 "current": "",
                 "finished": False,
                 "errors": [],
+                "started": time.time(),
+                "current_since": time.time(),
             }
         thread = threading.Thread(
             target=self._run, args=(job_id, folders, compile_pdf), daemon=True,
@@ -80,7 +98,8 @@ class JobRunner:
 
         for folder in folders:
             with self._lock:
-                self._jobs[job_id]["current"] = folder.name
+                self._jobs[job_id]["current"] = state_module.submission_name(folder)
+                self._jobs[job_id]["current_since"] = time.time()
             try:
                 prescreen(folder, compile=compile_pdf, git=True, llm=self.llm)
             except Exception as exc:  # noqa: BLE001 — one bad paper must not stop a batch
@@ -95,13 +114,57 @@ class JobRunner:
             self._jobs[job_id]["finished"] = True
             self._jobs[job_id]["current"] = ""
 
+    def start_task(self, label: str, work) -> str:
+        """Run *work(progress)* in the background; *progress* updates the job.
+
+        ``progress(label=, done=, total=, current=)`` changes what the page
+        shows; ``progress(error=...)`` adds a line to the job's errors.
+        """
+        job_id = uuid.uuid4().hex[:12]
+        with self._lock:
+            self._jobs[job_id] = {"id": job_id, "label": label, "total": 0, "done": 0,
+                                  "current": "", "finished": False, "errors": [],
+                                  "step": "", "started": time.time(),
+                                  "current_since": time.time()}
+
+        def progress(**changes) -> None:
+            with self._lock:
+                job = self._jobs[job_id]
+                if "error" in changes:
+                    job["errors"].append(str(changes.pop("error")))
+                if changes.get("current") and changes["current"] != job["current"]:
+                    job["current_since"] = time.time()
+                job.update(changes)
+
+        def run() -> None:
+            try:
+                work(progress)
+            except Exception as exc:  # noqa: BLE001 — reported on the page, not lost
+                progress(error=f"{type(exc).__name__}: {exc}")
+            finally:
+                progress(finished=True, current="")
+
+        threading.Thread(target=run, daemon=True).start()
+        return job_id
+
+    @staticmethod
+    def _view(job: dict) -> dict:
+        """The job as the page shows it, with how long it and its paper have taken."""
+        view = dict(job)
+        now = time.time()
+        if "started" in job:
+            view["elapsed"] = round(now - job["started"])
+            view["current_elapsed"] = round(now - job.get("current_since", now))
+        return view
+
     def status(self, job_id: str) -> dict:
         with self._lock:
-            return dict(self._jobs.get(job_id, {"id": job_id, "missing": True}))
+            job = self._jobs.get(job_id)
+            return self._view(job) if job else {"id": job_id, "missing": True}
 
     def active(self) -> list[dict]:
         with self._lock:
-            return [dict(job) for job in self._jobs.values() if not job["finished"]]
+            return [self._view(job) for job in self._jobs.values() if not job["finished"]]
 
 
 # ---------------------------------------------------------------------------
@@ -112,11 +175,25 @@ class DeskHandler(BaseHTTPRequestHandler):
     server_version = "JACoWReviewDesk/1.0"
 
     def __init__(self, *args, root: Path, jobs: JobRunner,
-                 home: Path | None = None, **kwargs) -> None:
+                 home: Path | None = None, chief=None, pool=None, sharing=None,
+                 sync=None, editing=None, **kwargs) -> None:
         self.root = root
         self.jobs = jobs
+        # An editor's desk joined to the chief's (src.desk.remote.Joined):
+        # *root* then holds this editor's copies, and the papers themselves
+        # live on the chief's desk. None for a desk on its own folder.
+        self.pool = pool
+        # The chief's door for editors (src.desk.pool.Pool), or None.
+        self.sharing = sharing
+        # The chief's desk keeping Indico in step (src.desk.indico_sync), or None.
+        self.sync = sync
+        # The chief editor's Indico event (src.desk.chief.Event), or None for
+        # an editor's desk: then the chief's routes do not exist.
+        self.chief = chief
         # Where this editor's own settings live; None means their home folder.
         self.home = home
+        # The chief's own editing desk (src.desk.editing.EditingDesk), or None.
+        self.editing = editing
         super().__init__(*args, **kwargs)
 
     # -- plumbing -------------------------------------------------------
@@ -208,7 +285,10 @@ class DeskHandler(BaseHTTPRequestHandler):
         return me_module.load_settings(self.home)
 
     def _me(self) -> me_module.Me:
-        return me_module.current(self.home)
+        return self.pool.me() if self.pool else me_module.current(self.home)
+
+    def _account(self) -> dict:
+        return account_module.view(self.home, typed_only=self.pool is not None)
 
     # -- routing --------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802
@@ -240,17 +320,38 @@ class DeskHandler(BaseHTTPRequestHandler):
                     "compile": self._config().get("compile", True),
                     "llm": _llm_state(self.jobs.llm),
                     "jobs": self.jobs.active(),
+                    "chief": self.chief.view() if self.chief else None,
+                    "sharing": self.sharing.view() if self.sharing else None,
+                    "pool": self.pool.view() if self.pool else None,
+                    "account": self._account(),
+                    "indico_sync": self.sync.view() if self.sync else None,
+                    "editing": self.editing.view() if self.editing else None,
                 })
             elif route == "/api/worklist":
                 conference = (indico_module.Conference.open(self.root)
                               if state_module.is_pulled_conference(self.root) else None)
                 me = self._me()
+                rows = [row.model_dump() for row in state_module.worklist(
+                    self.root, me=me.name, desk_id=me.desk_id)]
+                activity = self.sharing.activity().get("papers", {}) if self.sharing else {}
+                for row in rows:
+                    if self.pool:
+                        row["sync"] = self.pool.sync_view(Path(row["folder"]))
+                    if self.sharing:
+                        row["received_at"] = activity.get(row["name"], {}).get(
+                            "received_at", "")
+                        # Whether the editor with the paper here is the one
+                        # Indico says has it: the chief settles any difference.
+                        indico_editor = (row.get("indico") or {}).get("editor", "")
+                        who = (row.get("claim") or {}).get("who", "")
+                        row["claim_vs_indico"] = "" if not (who and indico_editor) else (
+                            "same" if indico_module.same_person(who, indico_editor)
+                            else "differs")
                 self._json({
-                    "papers": [
-                        row.model_dump() for row in state_module.worklist(
-                            self.root, me=me.name, desk_id=me.desk_id)
-                    ],
+                    "papers": rows,
                     "indico": conference.summary() if conference else None,
+                    "sharing": self.sharing.view() if self.sharing else None,
+                    "indico_sync": self.sync.view() if self.sync else None,
                 })
             elif route == "/api/paper":
                 self._json(self._view(self._folder(_one(query, "folder"))))
@@ -260,6 +361,8 @@ class DeskHandler(BaseHTTPRequestHandler):
                 self._serve_file(query)
             else:
                 self._error("unknown address", HTTPStatus.NOT_FOUND)
+        except remote_module.PoolError as exc:
+            self._error(str(exc), HTTPStatus.BAD_GATEWAY)
         except ValueError as exc:
             self._error(str(exc))
         except paper_module.DeskError as exc:
@@ -279,6 +382,10 @@ class DeskHandler(BaseHTTPRequestHandler):
             self._error(refusal, HTTPStatus.FORBIDDEN)
             return
         route = urlparse(self.path).path
+        if self.chief is not None and route not in MANAGING_ROUTES:
+            self._drain()
+            self._error(NOT_ON_THE_MANAGING_PAGE, HTTPStatus.FORBIDDEN)
+            return
         body = self._body()
         try:
             handler = {
@@ -299,11 +406,27 @@ class DeskHandler(BaseHTTPRequestHandler):
                 "/api/indico-refresh": self._indico_refresh,
                 "/api/title-authors": self._title_authors,
                 "/api/claim": self._claim,
+                "/api/chief/event": self._chief_event,
+                "/api/chief/papers": self._chief_papers,
+                "/api/chief/download": self._chief_download,
+                "/api/pool/papers": self._pool_papers,
+                "/api/pool/take": self._pool_take,
+                "/api/pool/send": self._pool_send,
+                "/api/qa": self._qa,
+                "/api/indico-account": self._indico_account,
+                "/api/chief/indico-sync": self._chief_indico_sync,
+                "/api/chief/given-up": self._chief_given_up,
+                "/api/chief/free": self._chief_free,
+                "/api/chief/editing-desk": self._chief_editing_desk,
             }.get(route)
             if handler is None:
                 self._error("unknown address", HTTPStatus.NOT_FOUND)
                 return
             handler(body)
+        except remote_module.Refused as exc:
+            self._error(str(exc), HTTPStatus.CONFLICT)
+        except remote_module.PoolError as exc:
+            self._error(str(exc), HTTPStatus.BAD_GATEWAY)
         except claim_module.Held as exc:
             # 409: the paper is being edited at another desk. The page gets the
             # claim with the message so it can say who, without a reload.
@@ -317,12 +440,74 @@ class DeskHandler(BaseHTTPRequestHandler):
             self._error(f"something went wrong: {exc}",
                         HTTPStatus.INTERNAL_SERVER_ERROR)
 
+    # -- the chief editor's actions ----------------------------------------
+    def _chief_only(self):
+        if self.chief is None:
+            raise ValueError("only the chief editor's desk (aiagent --manage) fetches papers")
+        return self.chief
+
+    def _chief_event(self, body: dict) -> None:
+        chief = self._chief_only()
+        try:
+            event_id = int(str(body.get("event", "")).strip())
+        except ValueError:
+            raise ValueError("an event id is a number, e.g. 194") from None
+        chief.choose(self.root, event_id)
+        self._json(chief.view())
+
+    def _chief_papers(self, body: dict) -> None:
+        import httpx
+
+        from src.desk import chief as chief_module
+        from src.indico_client.client import IndicoError
+
+        chief = self._chief_only()
+        try:
+            self._json(chief_module.papers(chief, self.root))
+        except IndicoError as exc:
+            self._error(str(exc), HTTPStatus.BAD_GATEWAY)
+        except httpx.HTTPError as exc:
+            self._error(f"Could not reach Indico ({type(exc).__name__}). Check the "
+                        "internet connection.", HTTPStatus.BAD_GATEWAY)
+
+    def _chief_download(self, body: dict) -> None:
+        from src.desk import chief as chief_module
+        from src.workflow.prescreen import prescreen
+
+        from src.indico_client.client import IndicoError
+
+        chief = self._chief_only()
+        try:
+            chief.client()                # no event or no token: say so now, not in a job
+        except IndicoError as exc:
+            raise ValueError(str(exc)) from None
+        if any(job.get("label", "").startswith(("Downloading", "Asking Indico", "Preparing"))
+               for job in self.jobs.active()):
+            raise ValueError("a download or preparation is already running")
+        compile_pdf = bool(self._config().get("compile", True))
+        llm = self.jobs.llm
+        root = self.root
+
+        def work(progress) -> None:
+            chief_module.download_and_prepare(
+                chief, root, progress,
+                prepare=lambda folder: prescreen(folder, compile=compile_pdf, git=True,
+                                                 llm=llm))
+
+        job_id = self.jobs.start_task("Asking Indico what is new", work)
+        self._json({"job": self.jobs.status(job_id)})
+
     # -- actions --------------------------------------------------------
     def _indico_refresh(self, body: dict) -> None:
         import httpx
 
         from src.indico_client.client import IndicoError
 
+        if self.pool:
+            # An editor joined to the chief's desk has no Indico token: the
+            # chief's desk keeps Indico's answer, and this copies it.
+            self._json(self.pool.refresh_conference())
+            return
         try:
             self._json(indico_module.refresh(self.root))
         except IndicoError as exc:
@@ -358,6 +543,15 @@ class DeskHandler(BaseHTTPRequestHandler):
         me = self._me()
         view = paper_module.view(folder, default_editor=me.name)
         view["claim"] = claim_module.view(folder, me.desk_id)
+        if self.pool:
+            # The claim that counts is the one on the chief's desk.
+            sync = self.pool.sync_view(folder)
+            view["claim"] = {"state": "mine" if sync["held"] else "copy",
+                             "who": me.name, "machine": me.machine, "since": ""}
+            view["sync"] = sync
+        review = ReviewState.load(folder)
+        view["qa"] = state_module.qa_view(review)
+        view["stage"] = state_module.stage_of(review, prepared=bool(view.get("screened")))
         return view
 
     def _with_state(self, body: dict):
@@ -370,9 +564,18 @@ class DeskHandler(BaseHTTPRequestHandler):
         """
         folder = self._folder(body.get("folder"))
         me = self._me()
+        if self.pool:
+            self.pool.require_held(folder)
+            # Sent to the chief's desk a few seconds after the last change
+            # (marked before the change is saved; the send comes after it).
+            self.pool.changed(folder)
         was_free = claim_module.current(folder) is None
         claim_module.take(folder, me)
+        if was_free:
+            self._indico_wants(folder)
         review = ReviewState.load(folder)
+        if self.pool and self.pool.mode_of(folder) == "qa":
+            return folder, review       # a QA does not make anyone the paper's editor
         # Whoever picks a free paper up is its editor from now on, so a paper
         # reopened for the author's next round is signed by the editor doing
         # that round, not the one who did the last.
@@ -385,17 +588,47 @@ class DeskHandler(BaseHTTPRequestHandler):
         folder = self._folder(body.get("folder"))
         me = self._me()
         action = str(body.get("action", ""))
+        if self.pool:
+            paper = self.pool.paper_of(folder)
+            problem = ""
+            if action == "take":
+                folder = self.pool.take(paper)
+            elif action == "release":
+                # Giving the paper up: the work so far goes first, and the
+                # chief's page is told, with the editor's reason.
+                reason = " ".join(str(body.get("reason", "")).split())[:500]
+                try:
+                    self.pool.give_back(folder, reason=reason)
+                except remote_module.Refused as exc:
+                    problem = str(exc)
+                except remote_module.PoolError as exc:
+                    problem = (f"{exc} The paper is given up as soon as the chief "
+                               "editor's desk answers.")
+                claim_module.release(folder, me)
+            elif action == "send":
+                self.pool.send(folder)
+            else:
+                raise ValueError("only the chief editor can take a paper over from a "
+                                 "colleague; ask them")
+            view = self._view(folder)
+            if problem:
+                view["pool_error"] = problem
+            self._json(view)
+            return
         if action == "take":
             claim_module.take(folder, me)
         elif action == "take_over":
             claim_module.take_over(folder, me)
+            self._indico_wants(folder)
             # The letter is signed by the paper's editor: from now on, that is us.
             if me.name:
                 review = ReviewState.load(folder)
                 review.editor = me.name
                 review.save(folder)
         elif action == "release":
-            claim_module.release(folder, me)
+            if claim_module.release(folder, me) and ReviewState.load(folder).status not in (
+                    "done", "needs_author"):
+                self._indico_wants(folder, unassign=True)
         else:
             raise ValueError("a claim is take, take_over or release")
         self._json(self._view(folder))
@@ -513,6 +746,9 @@ class DeskHandler(BaseHTTPRequestHandler):
     def _prepare(self, body: dict) -> None:
         # Preparing rewrites the agent's files under a paper (the editor's
         # decisions are kept), so a paper another desk is editing is left alone.
+        if self.pool:
+            raise ValueError("Papers are prepared on the chief editor's desk. Ask them "
+                             "to prepare this one again if it needs it.")
         compile_pdf = bool(self._config().get("compile", True))
         desk_id = self._me().desk_id
 
@@ -549,7 +785,13 @@ class DeskHandler(BaseHTTPRequestHandler):
         self._json({"job": self.jobs.status(job_id), "skipped": skipped})
 
     def _close(self, body: dict) -> None:
+        if self.pool and self.pool.mode_of(self._folder(body.get("folder"))) == "qa":
+            raise ValueError("this paper was taken for QA: pass or fail its QA instead")
         folder, review = self._with_state(body)
+        # Edited again after a failed QA: it waits for a new QA (the failed one
+        # stays in the history).
+        if review.qa.status == "failed":
+            review.qa = state_module.QAState(history=review.qa.history)
         editor = str(body.get("editor", "")).strip()
         if editor:
             review.editor = editor[:120]
@@ -563,6 +805,17 @@ class DeskHandler(BaseHTTPRequestHandler):
         )
         # Finished, or back with the author: either way nobody is editing it now.
         claim_module.release(folder, self._me())
+        if self.pool:
+            # Sent to the chief one last time, and given back. If the chief's
+            # desk cannot be reached now, it is sent (and given back) later.
+            try:
+                self.pool.give_back(folder)
+                result["pool"] = "sent"
+            except remote_module.Refused as exc:
+                result["pool_error"] = str(exc)
+            except remote_module.PoolError as exc:
+                result["pool_error"] = (f"{exc} It is sent as soon as the chief "
+                                        "editor's desk answers.")
         self._json(result)
 
     def _reopen(self, body: dict) -> None:
@@ -570,6 +823,127 @@ class DeskHandler(BaseHTTPRequestHandler):
         review.status = "in_review"
         review.closed_at = ""
         review.save(folder)
+        self._json(self._view(folder))
+
+    # -- Indico: the account, and keeping it in step --------------------------
+    def _indico_wants(self, folder: Path, *, unassign: bool = False) -> None:
+        """The chief's own desk took (or let go of) a paper: tell Indico."""
+        if not self.sync:
+            return
+        found = account_module.user(self.home)
+        self.sync.want(state_module.submission_name(folder), indico_id=found.get("id"),
+                       name=found.get("name") or self._me().name, unassign=unassign)
+
+    def _indico_url(self) -> str:
+        if self.chief:
+            return self.chief.url
+        if self.pool:
+            url = self.pool.view().get("indico", "")
+            if not url:
+                raise ValueError("the chief editor's desk has not said which Indico it uses "
+                                 "yet; try again once it is reachable")
+            return url
+        conference = indico_module.Conference.open(self.root)
+        from src.desk.chief import DEFAULT_URL
+
+        return (conference.base_url if conference and conference.base_url else DEFAULT_URL)
+
+    def _indico_account(self, body: dict) -> None:
+        if body.get("disconnect"):
+            account_module.disconnect(self.home)
+            self._json(self._account())
+            return
+        account_module.connect(str(body.get("token", "")), self._indico_url(), self.home)
+        if self.sync:
+            self.sync.wake.set()              # read Indico with it straight away
+        self._json(self._account())
+
+    def _chief_indico_sync(self, body: dict) -> None:
+        if not self.sync:
+            raise ValueError("only the chief editor's desk keeps Indico in step")
+        was_on = self.sync.enabled
+        self.sync.set_enabled(bool(body.get("enabled")))
+        if self.sync.enabled and not was_on and self.sharing:
+            # Papers taken while it was off are assigned now.
+            self.sharing.assign_held()
+        self._json(self.sync.view())
+
+    def _chief_given_up(self, body: dict) -> None:
+        """Papers editors gave up; with ``dismiss``, the chief has seen one (or "all")."""
+        if not self.sharing:
+            raise ValueError("only the chief editor's desk hears from editors")
+        notice = str(body.get("dismiss", "")).strip()
+        if notice:
+            self.sharing.dismiss(notice)
+        self._json({"given_up": self.sharing.given_up()})
+
+    def _chief_free(self, body: dict) -> None:
+        """Free a paper from whoever holds it, so any editor can take it."""
+        if not self.sharing:
+            raise ValueError("only the chief editor's desk frees papers")
+        folder = self._folder(body.get("folder"))
+        self._json({"freed": self.sharing.free(state_module.submission_name(folder))})
+
+    def _chief_editing_desk(self, body: dict) -> None:
+        """Open the chief's own editing desk (starting it if need be)."""
+        if not self.editing:
+            raise ValueError("this desk cannot open an editing desk")
+        self._json({"url": self.editing.open()})
+
+    # -- an editor joined to the chief's desk ------------------------------
+    def _joined(self):
+        if self.pool is None:
+            raise ValueError("this desk is not joined to a chief editor's desk "
+                             "(start it with --join)")
+        return self.pool
+
+    def _pool_papers(self, body: dict) -> None:
+        self._json(self._joined().listing())
+
+    def _pool_take(self, body: dict) -> None:
+        mode = str(body.get("mode") or "edit")
+        folder = self._joined().take(str(body.get("paper", "")), mode)
+        self._json({"folder": str(folder), "mode": mode})
+
+    def _qa(self, body: dict) -> None:
+        """The QA of a paper taken for QA: passed, or failed back to editing."""
+        pool = self._joined()
+        folder = self._folder(body.get("folder"))
+        if pool.mode_of(folder) != "qa":
+            raise ValueError("this paper was taken to edit it, not for QA")
+        verdict = str(body.get("verdict", ""))
+        if verdict not in ("passed", "failed"):
+            raise ValueError("a QA is passed or failed")
+        note = " ".join(str(body.get("note", "")).split())[:2000]
+        if verdict == "failed" and not note:
+            raise ValueError("say what needs fixing: the editor who takes it to re-edit "
+                             "reads it")
+        folder, review = self._with_state(body)
+        me = self._me()
+        at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        review.qa.status, review.qa.by, review.qa.at, review.qa.note = verdict, me.name, at, note
+        review.qa.history.append({"status": verdict, "by": me.name, "at": at, "note": note})
+        if verdict == "failed":
+            review.status, review.closed_at = "in_review", ""    # back to editing
+        review.save(folder)
+        claim_module.release(folder, me)
+        result = {"verdict": verdict}
+        # Sent to the chief one last time, and given back, as when finishing.
+        try:
+            pool.give_back(folder)
+            result["pool"] = "sent"
+        except remote_module.Refused as exc:
+            result["pool_error"] = str(exc)
+        except remote_module.PoolError as exc:
+            result["pool_error"] = (f"{exc} It is sent as soon as the chief editor's "
+                                    "desk answers.")
+        self._json(result)
+
+    def _pool_send(self, body: dict) -> None:
+        pool = self._joined()
+        folder = self._folder(body.get("folder"))
+        pool.require_held(folder)
+        pool.send(folder)
         self._json(self._view(folder))
 
     # -- files ----------------------------------------------------------
@@ -655,14 +1029,26 @@ def _llm_state(enabled: bool) -> dict:
 
 def serve(root: Path, *, host: str = "127.0.0.1", port: int = 8765,
           open_browser: bool = True, llm: bool = False,
-          home: Path | None = None) -> None:
-    """Start the desk and block until interrupted."""
+          home: Path | None = None, chief=None, pool=None, sharing=None,
+          sync=None, door_host: str = "0.0.0.0", editing=None,
+          close_with_stdin: bool = False) -> None:
+    """Start the desk and block until interrupted.
+
+    *door_host*: where the chief's door for editors listens (127.0.0.1 with
+    --no-share). *close_with_stdin*: the chief's own editing desk, started by
+    the managing desk, closes when the managing desk does (src.desk.editing).
+    """
     root = root.expanduser().resolve()
     if not root.is_dir():
         raise SystemExit(f"{root} is not a folder.")
 
     jobs = JobRunner(llm=llm)
-    handler = partial(DeskHandler, root=root, jobs=jobs, home=home)
+    if sharing is not None:
+        from src.desk import pool as pool_module
+
+        pool_module.start(sharing, host=door_host)
+    handler = partial(DeskHandler, root=root, jobs=jobs, home=home, chief=chief,
+                      pool=pool, sharing=sharing, sync=sync, editing=editing)
 
     # Find a free port rather than failing when one desk is already open.
     last_error: OSError | None = None
@@ -679,8 +1065,44 @@ def serve(root: Path, *, host: str = "127.0.0.1", port: int = 8765,
 
     url = f"http://{host}:{port}/"
     stamp = datetime.now().strftime("%H:%M")
+    if pool is not None:
+        # So the chief's managing page, or a second start, finds this desk.
+        from src.desk import editing as editing_module
+
+        editing_module.mark_open(me_module.settings_dir(home), port)
+    if close_with_stdin:
+        import sys
+
+        def close_when_the_managing_desk_does() -> None:
+            try:
+                sys.stdin.read()
+            except (OSError, ValueError, AttributeError):
+                pass
+            print("\n  The managing desk closed, so this editing desk closes too.",
+                  flush=True)
+            httpd.shutdown()
+
+        threading.Thread(target=close_when_the_managing_desk_does, daemon=True).start()
 
     jobs.llm, model_line = _settle_model(llm)
+    mode_line = ""
+    if chief is not None:
+        mode_line = "\n  Mode:     chief editor, managing" + (
+            f" (Indico event {chief.event_id})" if chief.event_id else " (no Indico event chosen yet)")
+        mode_line += ("\n  Editing:  not on this page: its Edit papers button opens "
+                      "your editing desk")
+    if sharing is not None:
+        view = sharing.view()
+        if view["local_only"]:
+            mode_line += ("\n  Editors:  this computer only (--no-share): your own "
+                          "editing desk")
+        else:
+            mode_line += ("\n  Editors:  join at " + "  or  ".join(view["addresses"])
+                          + f"\n            with the code {view['code']}")
+    papers_line = f"Papers:   {root}"
+    if pool is not None:
+        mode_line += f"\n  Mode:     editor, joined to the chief's desk at {pool.pool.url}"
+        papers_line = f"Copies:   {root}  (kept by the desk; nothing to set up)"
     # flush=True matters: Python buffers stdout when it is not a terminal, and
     # the launcher window is exactly where an editor reads the address if the
     # browser did not open by itself.  Without this the window stays blank.
@@ -689,7 +1111,7 @@ def serve(root: Path, *, host: str = "127.0.0.1", port: int = 8765,
   │  JACoW review desk                                       │
   └──────────────────────────────────────────────────────────┘
 
-  Papers:   {root}
+  {papers_line}{mode_line}
   Address:  {url}
 {model_line}
   A browser window should have opened. If it did not, copy the

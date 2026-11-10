@@ -28,6 +28,9 @@ from src.desk import files
 #: Set this to keep the settings somewhere else (the tests do).
 HOME_ENV = "AIAGENT_HOME"
 SETTINGS_FILENAME = "desk.json"
+#: On the chief editor's computer, an editor's desk keeps its settings in
+#: this folder inside the chief's: a name, desk id and Indico token of its own.
+EDITOR_HOME = "editor"
 
 
 def settings_dir(home: Path | None = None) -> Path:
@@ -53,6 +56,20 @@ def update_settings(home: Path | None = None, **changes) -> dict:
     """Change some settings and keep the rest; returns them all."""
     settings = load_settings(home)
     settings.update(changes)
+    try:
+        files.write_text(settings_path(home), json.dumps(settings, indent=2))
+    except OSError:
+        pass
+    return settings
+
+
+def forget_settings(*keys: str, home: Path | None = None) -> dict:
+    """Drop some settings and keep the rest; returns what is left."""
+    settings = load_settings(home)
+    if not any(key in settings for key in keys):
+        return settings
+    for key in keys:
+        settings.pop(key, None)
     try:
         files.write_text(settings_path(home), json.dumps(settings, indent=2))
     except OSError:

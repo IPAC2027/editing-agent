@@ -1,13 +1,17 @@
-"""Nothing in the agent writes to Indico — yet.
+"""The agent reads Indico, and writes exactly one thing: who edits a paper.
 
 Writing back (comments, judgments, revisions, a changed title or author list)
 is planned, and every write needs a ``full:everything`` token, which is the
-editor's whole account. Until that work is done on purpose, these tests make
-"the desk only reads Indico" a fact of the code rather than a habit:
+editor's whole account. The one write done so far is the chief's desk keeping
+Indico's editor assignments in step (``src.indico_client.assign``, switched on
+per event on the chief's page). These tests make that boundary a fact of the
+code rather than a habit:
 
 * a client refuses anything but GET unless it was opened to write;
 * no code opens one to write, or sends a modifying request;
-* "Check Indico now", the one place the desk talks to Indico, sends GETs only.
+* the assignment writer sends only its two requests, for its own event, and
+  only the chief's sync uses it;
+* "Check Indico now" sends GETs only.
 
 (``conftest.py`` separately stops any test from reaching a real server.)
 """
@@ -79,3 +83,23 @@ def test_check_indico_now_sends_only_gets(tmp_path: Path, monkeypatch):
     refresh(root)
 
     assert [call.request.method for call in respx.calls] == ["GET", "GET"]
+
+
+def test_only_the_chiefs_sync_uses_the_assignment_writer():
+    users = sorted(str(path.relative_to(ROOT)) for path in _sources()
+                   if "AssignmentWriter" in path.read_text(encoding="utf-8"))
+    assert users == ["src/desk/indico_sync.py", "src/indico_client/assign.py"]
+
+
+def test_the_assignment_writer_sends_nothing_but_assign_and_unassign():
+    from src.indico_client.assign import AssignmentWriter
+    from src.indico_client.client import IndicoError
+
+    writer = AssignmentWriter(base_url=BASE, event_id=194, token="t" * 20)
+    assert writer.url("assign") == f"{BASE}/event/194/editing/api/paper/editables/assign"
+    for action in ("judge", "comment", "../../manage", "assign/me"):
+        with pytest.raises(IndicoError):
+            writer.url(action)
+    with pytest.raises(IndicoError, match="insecure"):
+        AssignmentWriter(base_url="http://indico.jacow.org", event_id=194, token="t" * 20)
+    assert "t" * 20 not in repr(writer)

@@ -59,6 +59,32 @@ def write_text(path: Path, text: str) -> Path:
     return path
 
 
+def write_bytes(path: Path, data: bytes) -> Path:
+    """Write *data* to *path* so that no reader ever sees half of it."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:10]}.part")
+    try:
+        with open(temp, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(temp, path)
+                return path
+            except PermissionError:
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+    finally:
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+    return path
+
+
 def relative_to_paper(path: Path | str, folder: Path) -> str:
     """*path* as recorded in a paper's files: relative to the paper if it is inside.
 
