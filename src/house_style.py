@@ -22,6 +22,9 @@ conference label            HOUSE_STYLE_APOSTROPHE ``straight`` (IPAC'23) or
 Applied Physics journals    HOUSE_STYLE_APPLIED   ``App.`` (Annex C) or
                                                   ``Appl.`` (ISO 4)
 ==========================  ====================  ===========================
+
+References follow one standard everywhere (Annex B); how strictly it is
+applied is each editor's decision, made card by card at the desk.
 """
 
 from __future__ import annotations

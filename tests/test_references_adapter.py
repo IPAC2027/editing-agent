@@ -29,6 +29,9 @@ def stub(monkeypatch):
 
 RAW = ("J. Halvorsen, K. Lindqvist and P. Ortiz, “Lattice design”, in Proc. IPAC’23, "
        "Venice, Italy, May 2023, pp. 112-115. DOI: 10.18429/JACoW-IPAC2023-MOPA001")
+# What the JACoW rules make of RAW on their own: Annex B's comma before "and"
+# for three authors, and the DOI's form. Nothing else.
+RULED = RAW.replace("Lindqvist and", "Lindqvist, and").replace("DOI: ", "doi:")
 
 
 def test_presentation_only_changes_are_automatic(stub):
@@ -68,7 +71,7 @@ def test_integrity_verdicts_become_findings(stub, monkeypatch, verdict, check_id
     stub(formatted=RAW, integrity={"verdict": verdict})
     result = references.screen_reference(RAW)
     assert [f.check_id for f in result.findings] == [check_id]
-    assert result.after == references.doi_form_only(RAW)   # only the DOI form changes
+    assert result.after == RULED          # only what the rules fix changes
 
 
 def test_unverifiable_is_reported_as_not_checked(stub, monkeypatch):
@@ -81,7 +84,16 @@ def test_unverifiable_is_reported_as_not_checked(stub, monkeypatch):
 def test_a_rewrite_that_damages_the_reference_is_discarded(stub):
     stub(formatted="J. Halvorsen et al., “Lattice design”, 2023.")
     result = references.screen_reference(RAW)
-    assert result.after == references.doi_form_only(RAW)   # only the DOI form changes
+    assert result.after == RULED          # the damaging rewrite is not used; the rules' fixes are
+    # The rejection is not reported: the rules corrected the reference instead.
+    assert not any(f.check_id == "FMT-REF-03" for f in result.findings)
+
+
+def test_a_rejected_rewrite_is_reported_when_nothing_was_corrected(stub):
+    raw = "D. Okonkwo, “Thermal shields”, Cryogenics, vol. 12, p. 101, 2019."
+    stub(formatted="D. Okonkwo, “Thermal shields”, 2019.")
+    result = references.screen_reference(raw)
+    assert result.after is None
     assert any(f.check_id == "FMT-REF-03" and "rejected" in f.message for f in result.findings)
 
 
@@ -106,7 +118,8 @@ def test_a_formatter_crash_keeps_the_author_text(monkeypatch):
             raise RuntimeError("boom")
     monkeypatch.setattr(references, "_agent", lambda offline, llm: Broken())
     result = references.screen_reference(RAW)
-    assert result.after == references.doi_form_only(RAW) and "NOT CHECKED" in result.findings[0].message
+    # No lookup was possible (said so), but the rules still apply: they need none.
+    assert result.after == RULED and "NOT CHECKED" in result.findings[0].message
 
 
 def test_settings_come_from_one_env_file(monkeypatch, tmp_path):
@@ -246,7 +259,8 @@ def test_a_rejected_rewrite_still_gets_the_doi_form(stub):
     assert result.after.endswith("Springfield, 2025. doi:10.22323/1.999.0001")
     assert result.after.startswith("M.Kappa (ed.), “Accelerator Overview”")         # nothing else changed
     assert result.tier is Tier.AUTO
-    assert any(f.check_id == "FMT-REF-03" for f in result.findings)                   # rejection still reported
+    # The formatter's rejection is not reported once the rules corrected the reference.
+    assert not any(f.check_id == "FMT-REF-03" for f in result.findings)
 
 
 def test_qwen3_is_the_default_model_with_thinking_off(monkeypatch):

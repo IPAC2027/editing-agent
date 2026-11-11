@@ -327,9 +327,11 @@ def bibitem_rewrite_edits(
             message=result.message,
             rule="JACoW Annex B: reference layout",
             evidence=Evidence(
-                source=result.evidence_source if result.added_from else "local-rule",
+                source=(result.evidence_source if result.added_from
+                        or result.evidence_source == "llm" else "local-rule"),
                 detail=(f"added from {result.added_from}" if result.added_from
-                        else "jacow_formatter, verified by check_rewrite"),
+                        else result.evidence_detail
+                        or "jacow_formatter, verified by check_rewrite"),
             ),
         ))
 

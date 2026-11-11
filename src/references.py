@@ -280,18 +280,60 @@ def presentation_only(before: str, after: str) -> bool:
 # ---------------------------------------------------------------------------
 
 _LATEX_TO_PLAIN = (
+    # Whatever follows the end of the bibliography is not the reference's.
+    (re.compile(r"\\end\s*\{thebibliography\}.*$|\\endthebibliography\b.*$", re.DOTALL), ""),
+    # Quote commands (often written with no space: \textquotedblleft{}Title).
+    (re.compile(r"\\textquotedblleft(?:\{\})?\s*"), "\u201c"),
+    (re.compile(r"\\textquotedblright(?:\{\})?"), "\u201d"),
+    (re.compile(r"\\textquoteleft(?:\{\})?\s*"), "\u2018"),
+    (re.compile(r"\\textquoteright(?:\{\})?"), "\u2019"),
+    (re.compile(r"\\enquote\*?\{([^{}]*)\}"), "\u201c\\1\u201d"),
     (re.compile(r"\\doi\{([^}]*)\}"), r"doi:\1"),
     (re.compile(r"\\url\{([^}]*)\}"), r"\1"),
-    (re.compile(r"\\(?:emph|textit|textbf|textrm|NoCaseChange)\{([^{}]*)\}"), r"\1"),
+    (re.compile(r"\\href\{[^}]*\}\{([^{}]*)\}"), r"\1"),
+    (re.compile(r"\\(?:emph|textit|textbf|textrm|textsc|textsl|textup|textnormal|mbox|NoCaseChange)"
+                r"\{([^{}]*)\}"), r"\1"),
+    # Font switches: {\it Title}, \bf 17.
+    (re.compile(r"\\(?:it|bf|em|sl|sc|rm|tt|itshape|bfseries|upshape|normalfont)\b\s*"), ""),
+    (re.compile(r"\\newblock\b\s*"), ""),
+    (re.compile(r"\\\\(?:\[[^\]]*\])?"), " "),           # \\ line breaks
+    (re.compile(r"\\[ ,;:!/]"), " "),                        # \  \, \; spaces
     (re.compile(r"``"), "\u201c"), (re.compile(r"''"), "\u201d"),
     (re.compile(r"(?<!\\)~"), " "), (re.compile(r"---"), "\u2014"), (re.compile(r"--"), "\u2013"),
     (re.compile(r"\\([&%#_$])"), r"\1"),
     (re.compile(r"(?<!\\)[{}]"), ""),
 )
 
+# Accents: \"o, \'{e}, \c{c}, \v{s} -> ö, é, ç, š.
+_ACCENT_MARKS = {"'": "\u0301", "`": "\u0300", "^": "\u0302", '"': "\u0308", "~": "\u0303",
+                 "=": "\u0304", ".": "\u0307", "c": "\u0327", "v": "\u030c", "u": "\u0306",
+                 "H": "\u030b", "r": "\u030a", "k": "\u0328"}
+_ACCENT_RE = re.compile(r"\{?\\(['`^\"~=.]|[cvuHrk](?=[\s{]))\s*\{?\\?([A-Za-z])\}?\}?")
+_LETTERS = {"\\ss": "\u00df", "\\o": "\u00f8", "\\O": "\u00d8", "\\aa": "\u00e5",
+            "\\AA": "\u00c5", "\\ae": "\u00e6", "\\AE": "\u00c6", "\\l": "\u0142",
+            "\\L": "\u0141", "\\i": "i"}
+_LETTER_RE = re.compile(r"\{?(\\(?:ss|aa|AA|ae|AE|o|O|l|L|i))\b\}?")
+
+
+def _accents(text: str) -> str:
+    import unicodedata
+
+    text = _ACCENT_RE.sub(lambda m: unicodedata.normalize(
+        "NFC", m.group(2) + _ACCENT_MARKS[m.group(1)]), text)
+    return _LETTER_RE.sub(lambda m: _LETTERS[m.group(1)], text)
+
+
+_GREEK = {"alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε",
+          "varepsilon": "ε", "zeta": "ζ", "eta": "η", "theta": "θ", "kappa": "κ",
+          "lambda": "λ", "mu": "μ", "nu": "ν", "xi": "ξ", "pi": "π", "rho": "ρ",
+          "sigma": "σ", "tau": "τ", "phi": "φ", "varphi": "φ", "chi": "χ", "psi": "ψ",
+          "omega": "ω", "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ", "Xi": "Ξ",
+          "Pi": "Π", "Sigma": "Σ", "Phi": "Φ", "Psi": "Ψ", "Omega": "Ω"}
+_GREEK_RE = re.compile(r"\$\s*\\(" + "|".join(_GREEK) + r")\s*\$")
+
 
 def latex_to_plain(body: str) -> str:
-    text = body
+    text = _GREEK_RE.sub(lambda m: _GREEK[m.group(1)], _accents(body))
     for pattern, replacement in _LATEX_TO_PLAIN:
         text = pattern.sub(replacement, text)
     return re.sub(r"\s+", " ", text).strip()
@@ -334,6 +376,10 @@ class ReferenceResult:
     declared: dict = field(default_factory=dict)
     # Values the lookups supplied, as given to the fine-tuned reference model.
     record: dict = field(default_factory=dict)
+    # What is still wrong after the rules (and the local model), described for
+    # the editor: src.refcheck.Difficulty.view(), or None when nothing is.
+    difficulty: dict | None = None
+    evidence_detail: str = ""
 
 
 # Formatter stages whose values come from an authoritative source rather than
@@ -386,12 +432,21 @@ def _replaced_values(result: dict) -> list[str]:
 
 
 def _changes_note(plain: str, result: dict) -> tuple[str, str]:
-    """('DOI and pages added from Crossref; year corrected …', main source)."""
+    """('DOI and pages added from Crossref; year corrected …', main source).
+
+    Only values the reformatted reference shows are named: a publisher or an
+    ISSN the lookup found but the reference does not print is not news.
+    """
     added: dict[str, list[str]] = {}
     corrected: list[str] = []
     sources: list[str] = []
     folded = plain.lower()
+    shown = re.sub(r"\s+", " ", str(result.get("formatted") or "")).lower()
     for change in lookup_changes(result):
+        value = change.new.lower().rstrip(".")
+        if shown and value and value not in shown.replace("\u2013", "-") \
+                and value.replace("\u2013", "-") not in shown.replace("\u2013", "-"):
+            continue
         source = _SOURCE_NAMES.get(change.source.lower(), change.source) or "a lookup"
         if change.old:
             corrected.append(f"{change.field} corrected from {source} "
@@ -425,6 +480,10 @@ def _journal_substitutions(raw: str, result: dict) -> list[tuple[str, str]]:
         for name in candidates:
             if not name or name == journal or name.rstrip(".") == journal.rstrip("."):
                 continue
+            # A journal's name never hides a number ("KEK Preprint 2005-109" is
+            # not "KEK Preprint" abbreviated: the report number would be lost).
+            if re.findall(r"\d+", name) != re.findall(r"\d+", journal):
+                continue
             try:
                 if normalize_journal(name) == journal:
                     pairs.append((name, journal))
@@ -457,7 +516,7 @@ def _try_reference_model(raw: str, outcome: ReferenceResult, *, label: str,
     if not model or llm is False:
         return
     mode = os.getenv("REFERENCE_MODEL_MODE", "fallback").strip().lower()
-    if outcome.after is not None and mode != "prefer":
+    if outcome.after is not None and mode != "prefer" and outcome.difficulty is None:
         return
     from src.finetune.prompt import messages
     from src.llm import client
@@ -477,12 +536,27 @@ def _try_reference_model(raw: str, outcome: ReferenceResult, *, label: str,
                                 plain, {"rec": {"journal": _abbrev_in(answer)}}))
     if not verdict.ok:
         return
+    import src.refcheck as refcheck
+    current = outcome.after or plain
+    if outcome.after is not None and len(refcheck.errors(refcheck.lint(answer))) > \
+            len(refcheck.errors(refcheck.lint(current))):
+        return                           # no better than what the rules already offer
     outcome.after = answer
+    outcome.difficulty = None
     outcome.tier = Tier.SUGGEST
     outcome.message = (f"{label} reformatted to JACoW Annex B style by the fine-tuned "
                        f"reference model ({model}); verified to preserve every number, "
                        "DOI, word and name.")
-    outcome.findings = [f for f in outcome.findings if f.check_id != "FMT-REF-03"]
+    outcome.findings = [f for f in outcome.findings
+                        if f.check_id not in ("FMT-REF-03", "REF-CHECK-01")]
+    left = refcheck.errors(refcheck.lint(answer))
+    if left:
+        d = refcheck.describe(answer, left, label=label)
+        outcome.difficulty = d.view()
+        outcome.findings.append(Finding(
+            check_id="REF-CHECK-01", severity=Severity.INFO,
+            message=f"{label} still breaks JACoW rules (difficulty: {d.level}).\n"
+                    + d.for_editor(), original=answer[:240]))
 
 
 def _abbrev_in(answer: str) -> str:
@@ -525,12 +599,238 @@ def screen_reference(raw: str, *, label: str = "", line: int | None = None,
 
 def _screen_reference(raw: str, *, label: str = "", line: int | None = None,
                      offline: bool = False, llm: bool | None = None) -> ReferenceResult:
+    """The formatter's answer, then the JACoW rules and the local model (src.refcheck)."""
+    outcome, result = _formatter_screen(raw, label=label, line=line, offline=offline, llm=llm)
+    if not raw.strip():
+        return outcome
+    try:
+        return _with_rules(outcome, result or {}, label=label or "Reference", line=line,
+                           llm=llm, offline=offline)
+    except Exception:  # noqa: BLE001 — the rules never stop a paper
+        import logging
+        logging.getLogger(__name__).exception("reference rules failed on %r", raw[:80])
+        return outcome
+
+
+def _facts(result: dict) -> dict:
+    """Values a lookup verified: ``{field: (value, source)}`` (no model's guesses)."""
+    facts: dict[str, tuple[str, str]] = {}
+    for change in lookup_changes(result):
+        source = _SOURCE_NAMES.get(change.source.lower(), change.source)
+        if not source or "language model" in source or change.source.lower().startswith("llm"):
+            continue
+        facts[change.field] = (change.new, source)
+    return facts
+
+
+def _model_wanted(llm: bool | None) -> bool:
+    if llm is False or os.getenv("REFERENCE_FIX", "on").strip().lower() in ("off", "0", "no"):
+        return False
+    from src.llm import client
+    return client.is_enabled()
+
+
+def _doi_facts(plain: str, kind: str, facts: dict) -> object | None:
+    """The DOI's verdict (src.refcheck.doi) folded into the facts the rules use.
+
+    A DOI the formatter's lookup supplied is kept only if it passes the same
+    strict check (the same title, author, year, journal, volume and page).
+    """
+    from src.refcheck import doi as doi_module
+
+    try:
+        report = doi_module.check(plain, kind)
+    except Exception:  # noqa: BLE001 — no verdict: nothing changes
+        return None
+    if report.status == "found":
+        facts["doi"] = (report.doi, report.source)
+    elif report.status == "corrected":
+        facts["doi_fix"] = (report.written, report.doi, report.source, report.reason)
+        facts.pop("doi", None)
+    elif report.status in ("wrong", "unresolved"):
+        facts["doi_problem"] = (report.written, report.reason)
+        facts.pop("doi", None)
+    elif report.status == "possible":
+        facts["doi_possible"] = (report.written, report.doi, report.source, report.reason)
+        facts.pop("doi", None)
+    elif report.status == "none" and facts.get("doi"):
+        if not _doi_fits(plain, kind, facts["doi"][0]):
+            facts.pop("doi", None)
+    return report
+
+
+def _doi_fits(plain: str, kind: str, doi: str) -> bool:
+    from src.refcheck import doi as doi_module
+
+    work = doi_module.lookup(doi)
+    if not isinstance(work, doi_module.Work) or not work.title:
+        return False
+    return doi_module.match(doi_module.fields_of(plain, kind), work)[0]
+
+
+def _with_rules(outcome: ReferenceResult, result: dict, *, label: str, line: int | None,
+                llm: bool | None, offline: bool = False) -> ReferenceResult:
+    """Fix what the JACoW rules can, have the model fix what they describe, report the rest.
+
+    The formatter's rewrite (already in *outcome*) and the rules' (and model's)
+    version compete: the one the rules find fewer problems in wins, the rules'
+    on a tie, because it changes only what is wrong.
+    """
+    import src.refcheck as refcheck
+    from src.refcheck.rules import FIXED
+
+    plain = outcome.raw.strip()
+    facts = _facts(result)
+    report = None
+    if not (offline or _env_bool("AIAGENT_OFFLINE")):
+        report = _doi_facts(plain, refcheck.kind_of(plain, str(result.get("type") or "")), facts)
+        if report is not None and report.status in ("corrected", "wrong") or \
+                (report is not None and report.status == "possible" and report.written):
+            # The verdict below says which DOI is right; the formatter's
+            # "belongs to a different paper" would only repeat it.
+            outcome.findings = [f for f in outcome.findings if f.check_id != "REF-INT-01"]
+        if report is not None and report.status in ("ok", "found", "corrected"):
+            # A registry knows the reference: "not found anywhere" is not so.
+            outcome.findings = [f for f in outcome.findings if f.check_id != "REF-INT-03"]
+    checked = refcheck.check_reference(plain, kind=str(result.get("type") or ""), facts=facts,
+                                       label=label, llm=_model_wanted(llm))
+    kind = checked.kind
+
+    def problems(text: str) -> list:
+        return refcheck.errors(refcheck.lint(text, kind=kind, facts=facts))
+
+    formatter_text = outcome.after
+    ours = checked.text if checked.changed else None
+    if formatter_text is not None:
+        # The rules on top of the formatter's rewrite, checked against the author's text.
+        polished = refcheck.fix(formatter_text, kind=kind, facts=facts)
+        if polished.changed:
+            declared = dict(outcome.declared or {})
+            verdict = check_rewrite(
+                plain, polished.text,
+                allowed_substitutions=list(declared.get("allowed_substitutions", []))
+                + polished.declared["allowed_substitutions"],
+                allowed_additions=list(declared.get("allowed_additions", []))
+                + polished.declared["allowed_additions"],
+                allowed_removals=list(declared.get("allowed_removals", []))
+                + polished.declared["allowed_removals"])
+            if verdict.ok:
+                formatter_text = polished.text
+                if not polished.presentation_only:
+                    outcome.tier = Tier.SUGGEST
+                outcome.after = formatter_text
+    # The formatter's rewrite passed the damage check and may carry verified
+    # values and layouts the rules cannot make (a book's): it wins unless the
+    # rules find it worse. A sign that a reference was garbled (names in the
+    # title, LaTeX left over, a word twice) weighs more than a missing comma.
+    def score(text: str) -> int:
+        return sum(5 if i.code in _GARBLED else 1 for i in problems(text))
+
+    if formatter_text is not None and report is not None:
+        # A DOI the formatter added must pass the strict check too.
+        added = {d.lower() for d in re.findall(r"10\.\d{4,9}/[^\s\"<>]+", formatter_text)} - \
+            {d.lower() for d in re.findall(r"10\.\d{4,9}/[^\s\"<>]+", plain)}
+        verified = {facts["doi"][0].lower()} if facts.get("doi") else set()
+        if facts.get("doi_fix"):
+            verified.add(facts["doi_fix"][1].lower())
+        if any(d.rstrip(".,;)") not in verified and
+               not _doi_fits(plain, checked.kind, d.rstrip(".,;)")) for d in added):
+            formatter_text = None
+            if ours is None:
+                outcome.after, outcome.tier = None, None
+    if formatter_text is not None and not _keeps_links(plain, formatter_text):
+        formatter_text = None            # it lost a DOI or a web address the author gave
+        if outcome.after is not None and ours is None:
+            outcome.after, outcome.tier = None, None
+    if formatter_text is not None and (ours is None or score(formatter_text) <= score(ours)):
+        final = formatter_text
+    elif ours is not None:
+        final = ours
+        outcome.after = ours
+        done = list(dict.fromkeys(
+            (i.message.rstrip(".") if i.code in ("REF-DOI-WRONG", "REF-DOI-POSSIBLE") else
+             FIXED.get(i.code, i.code) + (f" from {i.fix.source}" if i.fix.source else ""))
+            for i in checked.fixed.applied if i.code != "REF-PUNCT"))
+        sources = checked.fixed.sources
+        if checked.repair is not None:
+            outcome.tier = Tier.SUGGEST
+            outcome.evidence_source = "llm"
+            fixed_by_model = list(dict.fromkeys(FIXED.get(c, c) for c in checked.repair.fixed))
+            outcome.message = (
+                f"{label} corrected: " + "; ".join(done + fixed_by_model) + ". The JACoW rules "
+                f"fixed what they could; the local model ({checked.repair.model}) fixed "
+                + (", ".join(fixed_by_model) or "the rest")
+                + ", and its answer was checked again by the rules and the damage check.")
+            outcome.evidence_detail = (f"JACoW rules, then {checked.repair.model} "
+                                       f"({'; '.join(checked.repair.how)}), checked by "
+                                       "the rules and check_rewrite")
+        else:
+            automatic = checked.fixed.presentation_only and not sources
+            outcome.tier = Tier.AUTO if automatic else Tier.SUGGEST
+            outcome.message = (f"{label} corrected by the JACoW reference rules: "
+                               + ("; ".join(done) or "punctuation") + ".")
+            outcome.evidence_source = ("jacow-refdb" if any("jacow" in s.lower() or
+                                                            "refs." in s for s in sources)
+                                       else "crossref" if sources else "local-rule")
+            outcome.added_from = ", ".join(sources)
+            outcome.evidence_detail = ("JACoW reference rules, each fix checked by "
+                                       "check_rewrite")
+        # The formatter's rejected rewrite no longer matters: this one was not.
+        outcome.findings = [f for f in outcome.findings if not _rejection(f)]
+    else:
+        final = plain
+
+    left = problems(final)
+    description = refcheck.describe(final, left, kind=kind, facts=refcheck.model_facts(facts),
+                                    label=label)
+    if description is not None:
+        outcome.difficulty = description.view()
+        outcome.difficulty["model_tried"] = bool(checked.repair or checked.model_refused)
+        serious = any(i.severity == refcheck.ERROR for i in left)
+        tried = (" The local model was asked and its answers were refused."
+                 if checked.model_refused and not checked.repair else "")
+        outcome.findings.append(Finding(
+            check_id="REF-CHECK-01",
+            severity=Severity.WARNING if serious else Severity.INFO, line=line,
+            message=f"{label} still breaks JACoW rules (difficulty: {description.level})."
+                    f"{tried}\n{description.for_editor()}",
+            original=final[:240]))
+    return outcome
+
+
+#: Problems that mean a reference has been garbled, not merely mis-punctuated.
+_GARBLED = frozenset({"REF-TITLE-NAMES", "REF-LATEX", "REF-REPEATED", "REF-AUTH-FORM"})
+
+
+def _keeps_links(before: str, after: str) -> bool:
+    """Every DOI and web address of *before* is still in *after* (a URL may become its DOI)."""
+    low = after.lower()
+    for doi in re.findall(r"10\.\d{4,9}/[^\s\"<>]+", before):
+        if doi.rstrip(".,;)").lower() not in low:
+            return False
+    for url in re.findall(r"https?://\S+", before):
+        url = url.rstrip(".,;)")
+        inner = re.search(r"10\.\d{4,9}/\S+", url)
+        if url.lower() not in low and not (inner and inner.group(0).lower() in low) \
+                and not re.search(r"(?:accelconf|jacow)", url, re.I):
+            return False
+    return True
+
+
+def _rejection(finding: Finding) -> bool:
+    """The formatter's 'a rewrite was computed but rejected' note."""
+    return finding.check_id == "FMT-REF-03" and "rejected" in finding.message
+
+
+def _formatter_screen(raw: str, *, label: str = "", line: int | None = None,
+                      offline: bool = False, llm: bool | None = None
+                      ) -> tuple[ReferenceResult, dict | None]:
     """Format, look up and verify one reference; decide what the agent does."""
     label = label or "Reference"
     outcome = ReferenceResult(raw=raw)
     plain = raw.strip()
     if not plain:
-        return outcome
+        return outcome, None
 
     try:
         result = _agent(offline, llm).process_record(plain)
@@ -540,7 +840,7 @@ def _screen_reference(raw: str, *, label: str = "", line: int | None = None,
             message=(f"{label}: NOT CHECKED — the reference could not be processed "
                      f"({type(exc).__name__}); left exactly as submitted."),
             original=plain[:240]))
-        return outcome
+        return outcome, None
 
     integrity = (result.get("integrity") or {}).get("verdict", "")
     outcome.integrity = integrity
@@ -568,7 +868,7 @@ def _screen_reference(raw: str, *, label: str = "", line: int | None = None,
     formatted = re.sub(r"\s+", " ", formatted)
     flags = [str(f) for f in result.get("flags") or []]
     if not formatted or formatted == plain:
-        return outcome
+        return outcome, result
 
     declared = {"allowed_additions": _derived_values(result),
                 "allowed_removals": _replaced_values(result),
@@ -583,7 +883,7 @@ def _screen_reference(raw: str, *, label: str = "", line: int | None = None,
                      f"it {reason}. The reference is unchanged — check it by hand if "
                      "the formatting looks wrong."),
             original=plain[:240]))
-        return outcome
+        return outcome, result
 
     # The formatter leaves capitalised words it cannot classify as written.
     # When a local model is available, it is asked about exactly those words —
@@ -602,7 +902,7 @@ def _screen_reference(raw: str, *, label: str = "", line: int | None = None,
             formatted, lowered = candidate, words
 
     if formatted == plain:
-        return outcome
+        return outcome, result
 
     changes_note, main_source = _changes_note(plain, result)
     added_from = main_source
@@ -624,7 +924,7 @@ def _screen_reference(raw: str, *, label: str = "", line: int | None = None,
     if lowered:
         outcome.message += (" Lowercased on the local model's unanimous advice: "
                             + ", ".join(f"'{w}'" for w in lowered) + ".")
-    return outcome
+    return outcome, result
 
 
 _QUOTED_TITLE_RE = re.compile(r"\u201c([^\u201d]+)\u201d")

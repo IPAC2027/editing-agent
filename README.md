@@ -346,6 +346,62 @@ still discards the rewrite. Set `REFERENCE_CORRECTIONS=false` to let lookups
 fill gaps only, never change a value the author gave. Word and LaTeX differ only in the output:
 tracked changes for Word, source edits for LaTeX.
 
+### The JACoW reference rules (src/refcheck)
+
+The formatter rewrites a whole reference from the fields it parsed, and on a
+messy reference that rewrite is often refused (rightly: it once turned a
+NeurIPS paper into an arXiv preprint). On its own that left the author's text
+untouched with "check it by hand". Every reference now also goes through
+`src/refcheck`, in three stages, each checked by the one before:
+
+1. **Rules find and fix.** About forty JACoW rules (Annex B, the "Formatting
+   references" and "DOIs for arXiv" pages, the Editor Quality Matrix), each
+   finding its own errors and fixing those it can with no judgement:
+   `doi:` form and place, a bare or repeated DOI, an arXiv DOI derived from the
+   identifier, "et al.", initials, names surname-first or with first names,
+   "and" / ", and", more than six authors, quotes and the comma after them,
+   sentence case (when the formatter's sentence case is sure), "in Proc.
+   IPAC'21" (also from a JACoW DOI when the text gives the long name), month
+   abbreviations, "p." for an article number, "Journal, vol. V, no. N, p. P,
+   Year" from "Journal V, P (Year)", ISO 4 journal names, "to be published",
+   an old JACoW paper's PDF address as its paper ID. Each fix is small and
+   local, and is checked against the author's text by `check_rewrite`, told
+   exactly what that fix may change. A value a lookup verified (a JACoW
+   paper's pages, a missing DOI or volume) is added with its source named.
+2. **Difficulty description.** What the rules could not fix, why, and who can:
+   the **local model** (a title with no quotes, a title in capitals whose
+   words are not all decided, an author list mixed with a year) or the
+   **editor** (a DOI for a different conference than the text names, a JACoW
+   DOI with no paper ID, one page where a range belongs, pages that disagree
+   with the DOI's record, a conference year that disagrees with the date,
+   "in preparation"). Problems for the editor are never sent to a model.
+3. **AI skill.** With `LLM_ENABLED=true`, the local model gets the problems
+   meant for it, the JACoW layout and Annex B's own example for that kind of
+   reference, and the verified facts. A title's capitals are decided word by
+   word (unanimous labels, rebuilt in code); anything else is a corrected
+   reference, accepted only if `check_rewrite` finds nothing lost or invented
+   beyond what the problems allow and the rules, run again, find none of those
+   problems and no new one. One retry with the reasons; then the editor.
+
+The formatter's rewrite and the rules' version compete: the formatter's wins
+when it passed `check_rewrite` (with the rules applied on top) and is left
+with no more problems than the rules' version, since it can carry verified
+values the rules cannot add. Whatever still breaks a rule is one finding per
+reference, **REF-CHECK-01**, with the description and its difficulty (low:
+layout; medium: judgement; high: a fact or a decision). Fixes that are only
+presentation are **auto**; anything else is **suggest**. Every rule is in
+`docs/reference_checker.md`.
+
+`src/refcheck/doi.py` checks every DOI and looks for missing ones (lookups are always on).
+A DOI that does not exist or is another paper's is corrected when Crossref or DataCite
+gives the right one for the reference. A missing DOI is added when exactly one record
+agrees on the title, first author, year, and journal or proceedings (a conference paper's
+DOI is never given to the journal article of the same title). When nothing fits that
+strictly, a looser search offers its closest record as a *possible* DOI for the editor to
+check, naming what differs. A failed lookup changes nothing.
+References follow one standard (Annex B) in every conference; how strictly is each
+editor's choice at the desk.
+
 ### House style
 
 Choices the Style Guide leaves open are a per-conference profile
@@ -453,6 +509,7 @@ Crossref, DataCite, refs.jacow.org or the author's own text:
 | Where | What the model does | Kept in check by |
 |---|---|---|
 | Agent: titles of every reference (`.bib`, `\bibitem`, Word) | Labels the words sentence case left as written: proper noun or ordinary word | One label per word, unanimous samples, text rebuilt in code, damage check rerun; always a suggestion |
+| Agent: references the rules could not fix (`src/refcheck/skill.py`) | Fixes the problems the rules described for it (a title with no quotes, an author list mixed with a year), given the JACoW layout, Annex B's example and the verified facts | `check_rewrite` (only what the problems allow may change, only verified facts added), then the rules again (none of those problems left, no new one, no name lowercased); one retry with the reasons; always a suggestion. `REFERENCE_FIX=off` switches it off |
 | Agent: LaTeX findings | Hides a finding it judges a false positive | May only hide, never add; the report counts what was hidden |
 | Agent: `llm_suggestions.md` | Advisory review notes | A separate file; never an edit or a finding |
 | Formatter: run-on citations | Points at where authors end and the title begins | Every span must be an exact substring of the citation, in order |
@@ -505,8 +562,9 @@ so an editor can always tell which kind of run they are looking at.
 `cp .env.example .env` and edit. Everything is optional: with no `.env` the
 agent runs fully deterministically. One file configures both tools: the
 reference formatter takes its Crossref address, lookup cache
-(`AIAGENT_CACHE_DIR`), model server and house style from these settings, and
-`AIAGENT_OFFLINE=1` switches its lookups off.
+(`AIAGENT_CACHE_DIR`), model server and house style from these settings.
+References are always looked up (Crossref, DataCite, refs.jacow.org, doi.org);
+only the test suite turns lookups off (`AIAGENT_OFFLINE=1`).
 
 ```
 LLM_ENABLED=false
@@ -516,6 +574,9 @@ LLM_API_KEY=ollama
 LLM_SAMPLES=3                    # samples that must agree before a label is used
 LLM_TEMPERATURE=                 # default 0.3; see below
 LLM_TIMEOUT=60
+REFERENCE_FIX=on                 # the model fixes what the reference rules describe
+REFERENCE_FIX_MODEL=             # a different model for that (default: LLM_MODEL)
+REFERENCE_FIX_TIMEOUT=120
 CROSSREF_EMAIL=you@example.com   # for polite Crossref lookups
 ```
 
@@ -557,6 +618,11 @@ src/
 │   ├── reference_edits.py    .bib fields and \bibitem bodies
 │   └── structural.py         reference-list reordering (applied after span edits)
 ├── references.py             the only door to jacow_formatter: tiers, settings, LaTeX round trip
+├── refcheck/                 the JACoW reference rules: fix, describe, have the model fix, check
+│   ├── rules.py              one function per rule: find the error, fix it if it can
+│   ├── fixer.py              apply the fixes in rounds, each checked by check_rewrite
+│   ├── difficulty.py         what is left, why, and who can fix it (model or editor)
+│   └── skill.py              the local model's fix, accepted only if the rules pass it
 ├── house_style.py            per-conference presentation choices
 ├── llm/
 │   ├── classify.py           the only sanctioned uses of a model

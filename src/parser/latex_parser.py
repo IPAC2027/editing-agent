@@ -311,8 +311,12 @@ def parse_latex(tex_path: Path) -> Paper:
             # Split on \bibitem{key}
             item_pat = re.compile(r'\\bibitem\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}')
             positions = [(m.start(), m.end(), m.group(1)) for m in item_pat.finditer(bib_block)]
+            # The last item ends where the environment does, not after it
+            # (its body would otherwise end in "\end{thebibliography}").
+            end_tag = bib_block.rfind("\\end{thebibliography}")
+            block_end = end_tag if end_tag >= 0 else len(bib_block)
             for idx, (start, end, key) in enumerate(positions):
-                next_start = positions[idx + 1][0] if idx + 1 < len(positions) else len(bib_block)
+                next_start = positions[idx + 1][0] if idx + 1 < len(positions) else block_end
                 raw_text = bib_block[end:next_start].strip()
                 pt.bibitems.append((key.strip(), raw_text))
 

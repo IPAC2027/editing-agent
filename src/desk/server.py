@@ -537,7 +537,7 @@ class DeskHandler(BaseHTTPRequestHandler):
         text = str(body.get("text") or "")
         if not text.strip():
             raise ValueError("paste at least one reference")
-        self._json(check_reference_list(text, lookups=bool(body.get("lookups", True))))
+        self._json(check_reference_list(text))     # always looked up
 
     def _view(self, folder: Path) -> dict:
         me = self._me()

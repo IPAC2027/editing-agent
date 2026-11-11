@@ -16,7 +16,7 @@ from src.references import screen_reference, split_refs
 MAX_REFERENCES = 200
 
 
-def check_reference_list(text: str, *, lookups: bool) -> dict:
+def check_reference_list(text: str, *, lookups: bool = True) -> dict:
     """Screen every reference in *text*; the payload the page renders."""
     raw_refs = [r for r in split_refs(text or "") if r.strip()][:MAX_REFERENCES]
     rows = []
@@ -76,7 +76,6 @@ Each one is formatted to JACoW style and checked against Crossref, DataCite and 
 JACoW proceedings. Nothing is saved.</p>
 <textarea id="refs" placeholder="[1] A. Alpha, B. Beta and C. Gamma, &ldquo;Title&rdquo;, in Proc. IPAC 2023, …"></textarea>
 <div class="bar"><button id="go">Check</button>
-<label><input type="checkbox" id="lookups" checked> Look references up online</label>
 <span id="status"></span></div>
 <div id="out"></div>
 </main>
@@ -89,7 +88,7 @@ $("#go").onclick = async () => {
   try {
     const res = await fetch("/api/format-references", {method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({text: $("#refs").value, lookups: $("#lookups").checked})});
+      body: JSON.stringify({text: $("#refs").value})});
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     $("#status").textContent = data.references.length + " reference(s)" +

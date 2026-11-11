@@ -28,6 +28,16 @@ def _own_settings(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.
 
 
 @pytest.fixture(autouse=True)
+def _no_doi_registries(monkeypatch: pytest.MonkeyPatch):
+    """DOI lookups (src.refcheck.doi) answer "unreachable" unless a test fakes a registry."""
+    from src.refcheck import doi
+
+    monkeypatch.setattr(doi, "_get", lambda *a, **k: doi.UNREACHABLE)
+    monkeypatch.setattr(doi, "CACHE", doi._Cache())
+    monkeypatch.setattr(doi.CACHE, "_load", lambda: {})
+
+
+@pytest.fixture(autouse=True)
 def _offline(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
     """No test may open a connection off this machine — above all not to a live
     Indico, where the editor's token is their whole account.
