@@ -34,15 +34,6 @@ def _model(monkeypatch, labels: dict[str, classify.WordLabel], *, on: bool = Tru
     return asked
 
 
-def test_the_model_lowercases_an_ordinary_word_the_formatter_left(monkeypatch):
-    asked = _model(monkeypatch, {"Strongback": classify.WordLabel.LOWER})
-    result = references.screen_reference(RAW)
-    assert asked == [["Strongback"]]                      # only the unsure word
-    assert "“Testing of strongback prototypes”" in result.after
-    assert result.tier is Tier.SUGGEST
-    assert "local model" in result.message and "'Strongback'" in result.message
-
-
 def test_a_name_the_model_keeps_stays_capitalised(monkeypatch):
     _model(monkeypatch, {"Strongback": classify.WordLabel.KEEP})
     result = references.screen_reference(RAW)

@@ -1,160 +1,228 @@
-# The JACoW reference rules
+# References in Appendix B's exact layout (`src/annexb`)
 
-`src/refcheck` checks every reference in three stages: the **rules** find and
-fix what they can, a **difficulty description** says what is left, why, and
-who can fix it, and the **local model** fixes what is meant for it, with its
-answer checked again by the rules and by `check_rewrite`. This page lists the
-rules.
+Every reference is rewritten in the exact layout of Appendix B of the JACoW style
+guide (v2026-02-23): the same fields, in the same order, with the same words and
+punctuation as Appendix B's own examples. This replaced the earlier engine (the
+reference formatter's rewrite plus about fifty patching rules in `src/refcheck`),
+which could correct punctuation but could not rebuild a reference into the layout.
 
-Sources: JACoW Annex B (the reference examples of the template), the JACoW
-*Formatting references* and *DOIs for arXiv* pages
-(ipac-docs.jacow.org/Paper/Writing/general/), and the Editor Quality Matrix
-(ipac-docs.jacow.org/PaperEditing/Editing/TemplateReview/).
+## Two paths, one engine
 
-**Fix**:
-- **auto**: a presentation change, applied without asking.
-- **suggest**: changes content (moves, adds or removes words, or adds a value
-  from a lookup), so the editor decides.
-- **model**: needs judgement; the local model may fix it.
-- **editor**: needs a fact nobody has, or a decision only the author can make.
-
-Every fix, whoever makes it, must pass `check_rewrite` against the author's
-text, told exactly what that fix may change.
-
-## DOIs, arXiv, URLs
-
-| Code | Rule | Fix |
+| Source | What is changed | How |
 |---|---|---|
-| REF-DOI-URL | A DOI written as `https://doi.org/…` is written `doi:10.…` | auto |
-| REF-DOI-FORM | `DOI: 10.…`, `doi 10.…`, `doi://10.…` or a bare `10.…` is written `doi:10.…` | auto |
-| REF-DOI-TWICE | The same DOI given twice: the second goes | auto |
-| REF-DOI-SEP | The DOI follows a full stop: `…, pp. 57-59. doi:…` | auto |
-| REF-DOI-END | No full stop after the DOI | auto |
-| REF-DOI-LAST | Something follows the DOI; the DOI comes last | model |
-| REF-DOI-INCOMPLETE | A JACoW DOI with no paper ID (`10.18429/JACoW-HIAT2025`) | suggest with refs.jacow.org's DOI, else editor |
-| REF-DOI-OTHER-CONF | The JACoW DOI names another conference than the text (HIAT'25 with an IPAC'24 DOI) | editor |
-| REF-DOI-FORM (spelling) | What clings to a DOI goes: `\vskip3mm`, a trailing `\\` or `:`, `,journal`, `%2F`; `10,1103/…` is `10.1103/…` | auto |
-| REF-DOI-WRONG | The DOI does not exist (`10.1103/PhysRevSTAB.2114202`, `10.1080/00295450.2021`), or is another paper's, and a registry gives the right one for this reference (`src/refcheck/doi.py`) | suggest, with the reason and source |
-| REF-DOI-POSSIBLE | No DOI fits strictly, but a looser search's closest record does (titles 75% alike, at most one difference): offered as "Possible DOI, check it", with what differs and any other close records | suggest, never automatic |
-| REF-DOI-UNRESOLVED | The DOI does not exist, or is another paper's, and no registry gives one that fits | editor |
-| REF-DOI-MISSING | No DOI, and a lookup verified one; it takes the place of a web address. Never for a talk, a manuscript or a private communication; a JACoW DOI only if it names the conference the text names; an arXiv DOI only for a paper cited as arXiv | suggest, source named |
-| REF-ARXIV-DOI | An arXiv paper gets `doi:10.48550/arXiv.<id>` (derived from the identifier, version dropped) | suggest |
-| REF-ARXIV-URL | `https://arxiv.org/abs/<id>` is written `arXiv:<id>` | suggest |
-| REF-ARXIV-PREPRINT | "arXiv preprint arXiv:…" is written "arXiv:…" | suggest |
-| REF-URL-ONLINE | "[Online]. Available:" is not written | auto |
-| REF-URL-DOI | A web address that repeats a DOI given elsewhere goes; a web address that holds the only DOI (`https://link.aps.org/doi/10.1103/…`) becomes `doi:10.1103/…` | auto / suggest |
-| REF-URL-JACOW | A JACoW paper's PDF address: removed when there is a DOI, else replaced by its paper ID (`paper TU6RFP048`) | auto / suggest |
-| REF-PAPER-ID | With a JACoW DOI, "paper …" is not given | suggest |
+| `\bibitem` (LaTeX) and Word | the reference's **text** | rewritten from Appendix B's template; LaTeX gets `\emph{Proc.\ IPAC'23}`, `\emph{journal}`, `vol.~114`, `\doi{…}`; Word gets a tracked change |
+| `.bib` (biblatex) | the entry's **fields** | set so that `jacow.bbx` (`\documentclass[biblatex]{jacow}`) prints Appendix B's layout, checked by compiling with the class |
 
-## Authors
+Both read a reference into the same fields, sort it into the same 16 kinds, and
+normalise and complete it by the same steps. Every rewrite is the editor's decision
+(suggest), with what changed and where each new value came from.
 
-| Code | Rule | Fix |
+```
+text or .bib entry
+  └─ read into fields                 parse.py (text) / bib.py (BibTeX)
+      └─ which of the 16 kinds        classify.py
+          └─ JACoW's forms             engine.normalise: initials, sentence case, ISO 4 journal,
+              │                          IPAC’23, Oct., Menlo Park, CA, USA
+              └─ complete              complete.py: refs.jacow.org, JACoW conference list,
+                  │                      Crossref, DataCite, abbrevIso, laboratories' places
+                  └─ write              categories.py (text) / bib.target (fields for jacow.bbx)
+```
+
+## The 16 kinds (Appendix B's headings)
+
+| # | Kind | Appendix B's example |
 |---|---|---|
-| REF-ETAL | "et al", "et. al." is written "et al." | auto |
-| REF-ETAL-COMMA | No comma before "et al." after one name; a comma after several | auto |
-| REF-AUTH-INITIALS | Spaced initials: `P. N. Ostroumov` | auto |
-| REF-AUTH-INITIAL | An initial written with a comma or no full stop (`Y, Momozaki`) | suggest |
-| REF-AUTH-ORDER | Initials first: `T. Boltz`, not `Boltz, T.` or `Alamprese H.` | suggest |
-| REF-AUTH-GIVEN | Initials, not first names: `J. Gonzalez`, not `Javier Gonzalez` | suggest |
-| REF-AUTH-AND | Two names: "A and B"; three to six: "A, B, and C"; "and", not "&" | auto |
-| REF-AUTH-MANY | More than six authors: the first, then "et al." | suggest |
-| REF-AUTH-FORM | The author list is mixed with something else (a year) | model |
+| 1 | Conference proceedings | A. Alpha and B. T. Beta, “An overview of modern control systems”, in Proc. ICALEPCS’23, Cape Town, South Africa, Oct. 2023, pp. 57-59. doi:10.18429/JACoW-ICALEPCS2023-PAPERID |
+| 2 | Unpublished paper from a previous conference | A. Alpha, “An interesting talk but paper not submitted”, presented at IPAC’14, Dresden, Germany, Jun. 2014, paper MOP057, unpublished. |
+| 3 | Paper at the current conference | …, presented at IPAC’25, Taipei, Taiwan, Jun. 2025, paper MOAB01, this conference. |
+| 4 | Periodical | A. Alpha et al., “Low dose irradiation impact on modern silicon detectors”, Nucl. Instrum. Methods Phys. Res. A, vol. 773, pp. 1-7, 2015. doi:10.1016/j.nima.2014.11.022 |
+| 5 | Accepted for publication | J. B. Good, “Title …”, Phys. Rev. Lett., to be published. |
+| 6 | Submitted for publication | G. D. Read, “Title of paper”, submitted for publication. |
+| 7 | arXiv preprint | A. Alpha, “Title of arXiv preprint”, Jan. 2025. doi:10.48550/arXiv.2501.10602 |
+| 8 | Online source | EPICS, https://www.epics-controls.org |
+| 9 | Book, or a chapter | A. Alpha, Title of Book. Cambridge, MA, USA: MIT Press, 1986. |
+| 10 | Internal report | A. Alpha et al., “Title of report”, CERN, Geneva, Switzerland, Rep. CERN-2012-333, Oct. 2012. |
+| 11 | Technical report | SLS-2 Conceptional Design Report, A. Streun, Ed., Paul Scherrer Institute, Villigen, Switzerland, Rep. 17-03, Dec. 2017. https://… |
+| 12 | Thesis | A. Student, “Title of thesis”, Ph.D. thesis, Phys. Dept., Karlsruher Institut für Technologie, Karlsruhe, Germany, 2014. |
+| 13 | Handbook | Motorola Semiconductor Handbook, Motorola Semiconductor Products Inc., Phoenix, AZ, USA, Nov. 2021, https://… |
+| 14 | Reference, manual | IEEE Editorial Style Manual for Authors, IEEE Periodicals, Piscataway, NJ, USA, Mar. 2025. https://… |
+| 15 | Patent | A. N. Inventor, “Title of patent”, U.S. Patent 9 123 456, Jan. 20, 2016. |
+| 16 | Unpublished work, private communication | P. Neptune, “Title of paper”, unpublished. / P. Uranus, private communication, Jun. 2015. |
 
-The author rules act only when every name in the list looks like a person's
-name. A book title or a year among the "authors" stops them, so the list is
-never cut down by mistake.
+All 33 of Appendix B's examples are tests (`tests/data/annexb_examples.py`): each must be
+read as its kind and come out exactly as printed. Three printed examples have typos the
+layout itself rules out ("Aug.-Sep", "Aug", "May."); they are corrected there.
 
-## Title
+Each kind has the fields its layout cannot do without (`categories.CATEGORIES[...].required`).
+One that no source could give is left out of the text and named on the card ("Pages
+missing: Appendix B needs it and no source gave it"); nothing is invented. Words of the
+reference that the layout has no room for (a proceedings volume, "IEEE Cat. No.", a
+non-DOI web address after a DOI, "github") are left out and named too.
 
-| Code | Rule | Fix |
+## Normalising
+
+- **Authors** (Table 2): initials and family name ("Zampetakis, M." → "M. Zampetakis",
+  "MJ Hogan" → "M. J. Hogan", "Andrey V. Mishin" → "A. V. Mishin"); one, two ("and"),
+  three to six (", and"), more than six ("et al."); "et al." with six or fewer real
+  authors is written out from the record.
+- **Title**: in “…”, comma after the quote, sentence case with names and acronyms kept
+  (the formatter's sentence case; possessives such as "Green's" keep their capital; with a
+  local model, the words it is unsure of are decided word by word).
+- **Journal**: ISO 4. Annex C first (full name, abbreviation, or the usual variants
+  "PRAB", "Phys. Rev. ST Accel. Beams", "NIM A", "JINST"), then Annex C with a typo
+  (small and unambiguous only), then abbrevIso (the ISO 4 tool Appendix B cites, [13]),
+  then JabRef's lists, then the journal's short title in Crossref. Where Annex C as printed
+  is not ISO 4 ("App. Phys. Lett." for "Appl. Phys. Lett.", "Phys. Plasma", "IEEE Trans.
+  Magnetics", "J. Superconductivity", "Opt. Communic."), ISO 4 wins, since the guide makes
+  ISO 4 mandatory (`journals.ANNEX_C_ERRATA`; delete a line to follow Annex C as printed).
+- **Conference**: the label Appendix B uses ("IPAC 2021", "IPAC2021", "Linac’24", "PAC99",
+  "6th International Particle Accelerator Conference" in 2015 → IPAC’15), in the short
+  form "in Proc. IPAC’21".
+- **Date, place, pages**: "Oct.", "Sep."; "Chicago, IL, USA" (a state written out becomes
+  its code; "Sacramento, CA" gets "USA"); "pp. 57-59", "p. 050511".
+- **DOI**: `doi:10.…`, last, in its registered capitals; checked, corrected, found (see the
+  DOI section). An arXiv identifier gives the DOI, month and year.
+- Cyrillic letters typed for Latin ones ("РАС2003", "рр.") are read as Latin.
+
+## Completing
+
+- **JACoW papers**: refs.jacow.org (JACoW's own reference database) gives the full author
+  list, pages, place, month, paper ID and DOI; failing that, the JACoW conference list
+  (311 conferences) gives place and month, and every paper since 2015 (and IPAC2014) has
+  the DOI 10.18429/JACoW-<CONF><YEAR>-<ID>, checked with DataCite.
+- **Journal articles**: the DOI's Crossref record gives volume, pages, year, a missing
+  title, the full author list and the journal's short title.
+- **Reports and theses**: the laboratory's place (CERN → Geneva, Switzerland; Fermilab →
+  Batavia, IL, USA; `places.INSTITUTIONS`).
+- A registry value fills a gap; it replaces the author's own only when the record is
+  certainly the same paper (the DOI matched, or the title alike and the conference or
+  journal the same), and the card says so: "pages corrected from refs.jacow.org: 861-865 →
+  878-882".
+
+## The local model reads; it never writes
+
+When the rules cannot tell a reference's kind, cannot find its title or authors, or leave
+words they cannot place, the local model (`LLM_ENABLED=true`, Ollama by default) is asked
+one thing: which piece of the reference is which field, and which kind it is
+(`reader.py`). Every value it gives must be copied exactly from the reference, checked
+character by character; an answer that fails is sent back once with the reasons. The
+fields then go through the same normalising, registries and template, so the text the
+editor sees is always written by the template, never by the model. The model can point
+at words; it cannot add one.
+
+## BibTeX: what `jacow.bbx` needs
+
+Checked by compiling one entry per kind with `\documentclass[biblatex]{jacow}`:
+
+| Kind | Entry | Fields |
 |---|---|---|
-| REF-TITLE-QUOTES | Curly quotes around the title | auto |
-| REF-TITLE-COMMA | The comma after the closing quote; no full stop ending the title; a comma between authors and title | auto |
-| REF-TITLE-CAPS / REF-TITLE-CASE | Sentence case: first word, names and acronyms capitalised | suggest when the formatter's sentence case decides every word, else model (word-by-word labels, unanimous) |
-| REF-TITLE-NAME | A name keeps its capital (`Gaussian`, `Hamiltonians`) | suggest |
-| REF-TITLE-MISSING | No title in quotes where Annex B quotes one (not books or web pages) | model |
-| REF-TITLE-NAMES | The quoted "title" holds author names (a garbled rewrite) | model |
-| REF-TITLE-HYPHEN | A hyphen left from a line break, with a space after it ("multi- charge") | auto |
+| conference | `@inproceedings` | booktitle = `Proc. IPAC'23`, **venue** = `City, Country`, **eventdate** = `2023-05`, pages, doi (else paper = ID). With `address`/`month` the date prints after the pages; `volume` prints after the proceedings |
+| previous / current conference | `@atevent` / `@thisevent` | eventtitle = `IPAC'14`, venue, eventdate, paper |
+| journal | `@article` | journal (or the entry's `journaltitle`) = ISO 4 (a differing `shortjournal` would print instead), volume, number, pages, date, doi |
+| accepted / submitted | `@submittedto` / `@submitted` | journal / none |
+| arXiv | `@article` with no journal | date = `2025-01`, doi = `10.48550/arXiv.<id>` |
+| online | `@online` | title = `{{EPICS}}`, url, no date |
+| book / chapter | `@book` / `@inbook` | edition as `titleaddon`; booktitle, editor |
+| report | `@techreport` with a number, `@report` without (no lone "Rep.") | institution, address, number, date |
+| thesis | `@phdthesis` / `@mastersthesis` | school = `{Dept., University}` |
+| handbook / manual | `@manual` | title braced, organization, location, date |
 
-## Proceedings
+`jacow.bbx` writes every title in sentence case, so the words that keep their capitals are
+braced (`{Oak Ridge National Laboratory}`, `{SwissFEL}`); a title it already sentence-cases
+correctly is left alone. It mis-prints run-together initials ("Holmes, J.A." → "J.
+Holmes", "Kutsaev, SV" → "SV. Kutsaev"), Vancouver order and braced whole names, so such an
+author list is rewritten "Holmes, J. A.". Three names and "and others" would print all
+three before "et al.", so the entry keeps the first author and "others". Each changed entry
+is one edit, kept as written apart from the fields that change. Known limits of
+`jacow.bbx`: a technical report's title is quoted, a patent's day is not printed, an
+article number such as P10008 gets no "p.". TeX Live's biber fails to unpack itself on
+some Macs (`lipo`); `bib.render_with_jacow` then unpacks its arm64 binary into the cache,
+and the desk's PDF builds (`latex_build`) use the same binary.
 
-| Code | Rule | Fix |
+## On the desk
+
+Preparing a paper writes `references.json`: one record per reference (a `\bibitem`, a
+Word reference or a `.bib` entry) with the text as written, the Appendix B result, the
+kind, what is missing, the problems, where values came from, and the ids of the edits
+inside it. The desk's References tab shows each record as written beside its result, green
+(rewritten, nothing missing), red (something only the editor or author can supply) or grey
+(already right). The editor accepts, keeps, or writes the reference themselves
+(`ReviewState.ref_texts`, which replaces the whole reference). `.bib` edits are decided
+there too (ids `B…`); finishing writes `<name>_final.bib` and builds the PDF with it.
+
+A `\bibitem` rewrite is one decision: narrower fixes inside the same reference (a DOI's
+form, a page dash) are left out of the edit set, because the rewrite already contains them
+and letting them win the overlap used to throw the rewrite away.
+
+## Why references could not be fixed before, and where the limits are now
+
+The earlier engine patched the author's text: about fifty rules each fixed one local
+thing, and each fix went through a damage check (`check_rewrite`) that refused anything it
+could not account for. That kept references safe, but:
+
+1. **It could not rebuild a reference.** Moving the date before the pages, writing "in
+   Proc. IPAC’21" for "Proceedings of IPAC 2021", turning "Phys. Rev. ST Accel. Beams 2,
+   114202 (1999)" into "…, vol. 2, p. 114202, 1999": each needs the reference rewritten
+   from its fields, which patches cannot do and the damage check often refused.
+2. **It had no idea of the 16 kinds**, so it could not say what was missing (a
+   conference's place and month, a report's institution).
+3. **It did not complete a reference**: refs.jacow.org, the conference list and the DOI
+   records were used to check, not to fill the layout.
+4. **The model was asked to rewrite whole references**, and an answer such as
+   "J. Qiang, …, 2018, (submitted…), 2025" could pass every check.
+
+Measured on NAPAC'25 (2265 references as the authors wrote them, real registries, no
+model): 152 (7%) were already exactly in Appendix B's layout. The new engine writes 1760
+(78%) complete, with every field Appendix B requires:
+
+| Kind | References | Complete |
 |---|---|---|
-| REF-PROC-FORM | "in Proc. …", not "Proceedings of …" or "Proc. of"; "in" before "Proc."; a JACoW paper named only by its conference gets "in Proc."; a talk is "presented at" a conference, not its proceedings | auto / suggest |
-| REF-PROC-LABEL | The conference as JACoW names it: `IPAC'21`, `PAC'09`, `HIAT'25`, not `IPAC2021`, `PAC09`, `HIAT 2025` | auto |
-| REF-PROC-NAME | A JACoW paper whose DOI names its conference, written with the long name only: the author's name stays, with "in Proc." and the label added — "in Proc. 12th Int. Particle Acc. Conf. (IPAC’21)", as in Annex B's "(ICAP'18)" | suggest, else model |
-| REF-PLACE | A US state written out before "USA" is its postal code (`Newport News, VA, USA`) | suggest |
-| REF-PROC-YEAR | The conference's year and the date disagree (`PAC'09`, `May 2010`) | editor |
-| REF-MONTH | `Jan.`, `Feb.`, `Mar.`, `Apr.`, `May`, `Jun.`, `Jul.`, `Aug.`, `Sep.`, `Oct.`, `Nov.`, `Dec.`; no comma before the year | auto |
-| REF-PAGES | `pp.` for a range, `p.` for one article number; `pp,` is `pp.`; an article number without a space | auto |
-| REF-PAGES-RANGE | `pp. 1656` gives one page where a range belongs | suggest with a verified range, else editor |
-| REF-PAGES-MISSING | A published JACoW paper, or a journal article, with no pages | suggest with a verified value, else editor |
+| journal | 1061 | 94% |
+| conference | 563 | 82% |
+| online | 135 | 96% |
+| arXiv | 66 | 88% |
+| report | 123 | 33% |
+| conference talk (past, current) | 64 | 52% |
+| book / chapter | 66 | 11% |
+| thesis | 17 | 18% |
+| kind not read by the rules | 124 | — |
 
-## Journals
+What is still missing, and why:
 
-| Code | Rule | Fix |
-|---|---|---|
-| REF-JOURNAL | JACoW's own abbreviation from Annex C first (`Nucl. Instrum. Methods Phys. Res. A`, `Phys. Rev. Accel. Beams`, `Nat. Photonics`; 158 journals, `src/knowledge/…/journal-abbreviations.md`), else ISO 4 (`Opt. Commun.`); abbreviated words end with a full stop (`Sci. Rep.`); no "in" before the journal | auto / suggest |
-| REF-JOURNAL-LAYOUT | "Journal, vol. V, no. N, p. P, Year", not "Journal V, P (Year)" or "16(10):T10002" | suggest |
-| REF-JOURNAL-ORDER | Pages before the year | suggest |
-| REF-VOLUME | `vol.` and `no.`, with a comma before `vol.` | auto |
-| REF-VOLUME-MISSING | A journal article with no volume | suggest with a verified value, else editor |
-| REF-YEAR / REF-YEAR-MISSING | The year without brackets; a journal article gives its year | auto / editor |
-| REF-FACT-PAGES / REF-FACT-VOLUME | The pages or volume disagree with the record of the reference's own DOI | editor |
-| REF-STATUS | "Accepted …" is "to be published"; "in preparation" is not an Annex B status | suggest / editor |
+- **Facts no registry has.** A report's number, a book's publisher city (it changes with
+  the edition, and most books have no DOI), a laboratory not in the list, a non-JACoW
+  conference's place and month when it has no DOI. These are named for the editor;
+  filling them would be inventing.
+- **References the rules cannot read** (5%): no quotes, a title running into the journal,
+  a missing quote mark, two references in one. The local model reads these, and the
+  template writes them.
+- **Mistakes in the reference itself**: a title that is not the paper's, a wrong year, an
+  author list that disagrees with the record. The registry's value is shown; the editor
+  decides.
 
-## Everything else
+BibTeX, NAPAC'25's 52 biblatex papers (1149 entries), offline: after the fields are set,
+874 entries print exactly Appendix B's text when compiled with the JACoW class (80% of the
+1093 that compile; one paper's `.bib` does not compile even as submitted).
 
-| Code | Rule | Fix |
-|---|---|---|
-| REF-LATEX | A LaTeX command left in the reference | model |
-| REF-LOOKALIKE | Cyrillic letters that look Latin, from copying out of a PDF (`Proc. РАС'О3, рр. 470` → `Proc. PAC'03, pp. 470`) | auto |
-| REF-PUNCT | Stray spaces and doubled punctuation | auto |
-| REF-REPEATED | The same word twice in a row ("May, May 1996") | auto |
-| REF-END | A full stop at the end, except after a DOI or URL | auto |
+## Where it is
 
-## What the editor sees
+| Module | Does |
+|---|---|
+| `src/annexb/categories.py` | the 16 kinds, their required fields, their templates (plain text and LaTeX) |
+| `src/annexb/parse.py` | text → fields (masked reading: identifiers, title, authors, kind words, conference, numbers, place, date) |
+| `src/annexb/names.py` | author lists in any form → initials and family names |
+| `src/annexb/classify.py` | the kind; leftover words to the field the kind has room for |
+| `src/annexb/journals.py` | ISO 4 journal names (Annex C, abbrevIso, JabRef, Crossref) |
+| `src/annexb/conferences.py` | conference labels, the JACoW conference list, refs.jacow.org |
+| `src/annexb/places.py` | countries, states, laboratories' places |
+| `src/annexb/complete.py` | the registries (refs.jacow.org, Crossref, DataCite, DOI checks) |
+| `src/annexb/reader.py` | the local model's reading, checked |
+| `src/annexb/engine.py` | the path for one reference; what changed, what is missing |
+| `src/annexb/bib.py` | BibTeX entries: read, fields for `jacow.bbx`, the edits, compiling to check |
 
-- **A correction card** for each reference changed. The message lists what was
-  fixed and by whom (the rules, a lookup with its source, or the local model).
-- **REF-CHECK-01** when something is still wrong: one bullet per problem, with
-  why it was not fixed and what would settle it, and the difficulty (low:
-  layout; medium: judgement; high: a fact or a decision).
-
-The same description, in full, is what the local model is given:
-- the problems meant for it;
-- the JACoW layout for that kind of reference, and Annex B's own example;
-- the verified facts it may use.
-
-## One standard
-
-References follow Annex B in every conference. How strictly it is applied is each
-editor's decision: presentation fixes are automatic, everything else is a card the
-editor accepts or rejects. The conference label's apostrophe (`IPAC’23`) follows the
-desk's house style, as the formatter's does.
-
-## Measured on NAPAC'25
-
-There are 2265 references from 216 papers, each the author's original paired with the
-editors' final version (`NAPAC2025/<code>/original` and `current`). Counting single
-edits (a word or a punctuation mark changed, added or removed), offline:
-
-| | Editors' edits also made | Edits also made by an editor |
-|---|---|---|
-| Formatter only (before) | 13.3% | 26.1% |
-| Formatter + rules (now) | 26.0% | 30.5% |
-
-About 19% of the editors' edits add facts the author's text does not have (pages, a
-volume, a DOI, a month, a place). Those come from refs.jacow.org and Crossref through the
-lookups, not from the rules.
-
-Many of the rules' edits that no editor made are Annex B corrections NAPAC's editors did
-not enforce: ISO 4 journal names, spaced initials, arXiv DOIs, `“Title”,`.
-
-With lookups on (a random 400 of the pairs), the editors' edits also made rise from 30.8%
-to 31.7%, and about 28 more of the editors' added facts are reproduced. The share of our
-edits an editor also made falls from 33.6% to 26.2%. That is mostly verified values the
-editors did not bother to add (DOIs, months, issue numbers), not errors.
+`src/references.py` (`screen_reference`) is the adapter the Word path, the `\bibitem` path
+and the desk's "Check a reference list" page call. `src/refcheck/doi.py` is kept and used
+(below); the rest of `src/refcheck` (the patching rules) is no longer on any path.
 
 ## DOIs: found, checked, corrected
 
@@ -167,7 +235,19 @@ suite turns them off).
 - **The right DOI.** A wrong or missing DOI is looked for by what the reference says:
   - a JACoW DOI built from the reference's conference and paper ID, checked with DataCite;
   - Crossref's bibliographic search;
-  - DataCite's search of JACoW's prefix (10.18429).
+  - DataCite's search of JACoW's prefix (10.18429);
+  - for a DOI that does not exist (or is another paper's), its **near spellings**, what a
+    web search would turn up: a dot left out (`PhysRevSTAB.2114202` →
+    `PhysRevSTAB.2.114202`), a digit wrong, dropped or swapped against the reference's own
+    volume, page and year, a mistyped prefix (`10.1130/PhysRev…` → `10.1103/…`), a doubled
+    dot, a letter O for a zero. At most 24 are asked of doi.org, in parallel, and one is
+    taken only if it exists and its record agrees with the reference (the title, or the
+    volume and page, or the first author, year and volume or page) and no other near
+    spelling fits as well. With nothing in the reference to check against (a bare DOI) the
+    only near spelling that exists is offered as a possible DOI, never taken.
+  - The volume and page are read after the journal's name with or without a title
+    (`Phys. Rev. ST Accel. Beams 2, 114202 (1999)`), so a title-less journal reference can
+    be checked too.
 - **Taking a DOI.** It is taken only when the record agrees on the title (85%, 95% for short
   titles), the first author, the year (±1), and the volume and first page when both give
   them. A journal article is never given a conference paper's DOI, nor the reverse. Two
@@ -194,3 +274,15 @@ With the looser search added (a possible DOI is always the editor's decision):
 | 15 DOIs the editor corrected | 6 corrected + 3 possible = 9 the editor's DOI; 4 flagged for the editor; 2 missed |
 | 150 DOIs author and editor agree on | unchanged: 147 confirmed, 3 real errors corrected |
 | 150 references with no DOI on either side | 44 found, 1 possible |
+
+With near spellings, the volume and page read without a title, and Crossref paced (at most
+5 requests a second, a "429 Too Many Requests" waited out and asked again):
+
+| Case | Result |
+|---|---|
+| 260 references the editor gave a DOI | 150 found + 17 possible = 167 the editor's DOI (64%); 5 possible and 7 found differ; 81 none |
+| 15 DOIs the editor corrected | unchanged: 9 the editor's DOI |
+| 150 DOIs author and editor agree on | unchanged: 147 confirmed, 3 real errors corrected (`PhysRevSTAB.2114202` among them: the editor kept it) |
+| 150 references with no DOI on either side | 45 found, 1 possible |
+
+Before pacing, a fast run lost a dozen DOIs to Crossref's 429 answers without saying so.

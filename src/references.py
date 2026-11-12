@@ -47,10 +47,20 @@ from src.edits import Tier
 from src.house_style import HouseStyle, load_house_style
 from src.models import Finding, Severity
 
+# The formatter logs "All DOI resolution paths failed for: <DOI>" when the DOI
+# as written does not resolve. That is where src.refcheck.doi starts (near
+# spellings, a search by the reference's own details), and its verdict, a
+# correction or a problem for the editor, is on the reference's card; the
+# formatter's line in the terminal read as the final word.
+import logging as _logging
+
+_logging.getLogger("jacow_formatter.constants").addFilter(
+    lambda record: not str(record.msg).startswith("All DOI resolution paths failed"))
+
 __all__ = [
     "ReferenceResult", "screen_reference", "doi_form_only", "formatter_config", "presentation_only",
     "latex_to_plain", "plain_to_latex", "lowercase_evidence", "check_rewrite", "proper_noun_risk",
-    "sent_case_report", "TitleCasing", "normalize_journal", "split_refs",
+    "sent_case_report", "TitleCasing", "normalize_journal", "split_refs", "reference_record",
 ]
 
 # Formatter source/stage names, as an editor would recognise them.
@@ -380,6 +390,11 @@ class ReferenceResult:
     # the editor: src.refcheck.Difficulty.view(), or None when nothing is.
     difficulty: dict | None = None
     evidence_detail: str = ""
+    # The new engine's view (src.annexb): the kind, the LaTeX form, what is missing.
+    category: str = ""
+    latex: str | None = None
+    missing: list[str] = field(default_factory=list)
+    annexb: object | None = None
 
 
 # Formatter stages whose values come from an authoritative source rather than
@@ -576,24 +591,101 @@ def doi_form_only(text: str) -> str:
     return _DOI_PREFIX_RE.sub("doi:", text)
 
 
+def reference_record(result: "ReferenceResult | None", *, n: int, key: str, origin: str,
+                     source: str, outcome=None, **extra) -> dict:
+    """What the desk's References tab shows for one reference, as JSON.
+
+    *origin* is ``bibitem``, ``word`` or ``bib``; *source* is the reference as the
+    author wrote it (a \\bibitem body, a Word paragraph's text, a .bib entry).
+    *outcome* is the engine's :class:`src.annexb.model.Outcome` when there is no
+    :class:`ReferenceResult` (the .bib path). *extra* carries what the path needs
+    to write the editor's own version back (spans, paragraph indices, edit ids).
+    """
+    from src.annexb.categories import CATEGORIES, HEADINGS
+
+    out = outcome if outcome is not None else (result.annexb if result else None)
+    problems = []
+    if out is not None:
+        problems = [{"code": p.code, "message": p.message, "field": p.field,
+                     "severity": p.severity} for p in out.problems]
+    elif result is not None:
+        problems = [{"code": f.check_id, "message": f.message.split(": ", 1)[-1],
+                     "field": "", "severity": "error"} for f in result.findings]
+    category = out.category if out is not None else ""
+    return {
+        "n": n, "key": key, "origin": origin, "source": source,
+        "text": (out.text or "") if out is not None else "",
+        "latex": (out.latex or "") if out is not None else "",
+        "category": category,
+        "kind": HEADINGS[CATEGORIES[category].number] if category in CATEGORIES else "",
+        "conforms": bool(out.conforms) if out is not None else False,
+        "missing": list(out.missing) if out is not None else [],
+        "dropped": (out.dropped or "") if out is not None else "",
+        "changes": list(dict.fromkeys(out.changes)) if out is not None else [],
+        "sources": list(out.sources) if out is not None else [],
+        "parsed_by": out.parsed_by if out is not None else "",
+        "problems": problems,
+        **extra,
+    }
+
+
 def screen_reference(raw: str, *, label: str = "", line: int | None = None,
                      offline: bool = False, llm: bool | None = None) -> ReferenceResult:
-    """Format, look up and verify one reference; decide what the agent does.
+    """One reference written exactly as Appendix B of the JACoW style guide lays it out.
 
-    When no full rewrite is offered — rejected by the damage check, or nothing
-    to reformat — the DOI is still put in the ``doi:…`` form on its own, as a
-    presentation fix: it changes no information.
+    The engine is :mod:`src.annexb`: the reference is read into fields, sorted
+    into one of Appendix B's 16 kinds, completed from refs.jacow.org, the JACoW
+    conference list, Crossref and DataCite, and written from that kind's
+    template. The rewrite is always the editor's decision; what is still
+    missing, what was dropped, and every value a registry supplied are on the
+    card. The local model, when there is one, only reads references the rules
+    cannot read; it never writes the text.
     """
-    outcome = _screen_reference(raw, label=label, line=line, offline=offline, llm=llm)
-    _try_reference_model(raw, outcome, label=label or "Reference", llm=llm)
-    if outcome.after is None:
-        plain = raw.strip()
-        fixed = doi_form_only(plain)
-        if fixed != plain:
-            outcome.after = fixed
-            outcome.tier = Tier.AUTO
-            outcome.message = (f"{label or 'Reference'}: DOI written in the JACoW form "
-                               "doi:…; the rest of the reference is unchanged.")
+    from src.annexb import format_reference
+
+    label = label or "Reference"
+    outcome = ReferenceResult(raw=raw)
+    plain = raw.strip()
+    if not plain:
+        return outcome
+    lookups = not (offline or _env_bool("AIAGENT_OFFLINE"))
+    try:
+        result = format_reference(plain, lookups=lookups, llm=_model_wanted(llm))
+    except Exception as exc:  # noqa: BLE001 — never let one reference stop a paper
+        import logging
+        logging.getLogger(__name__).exception("reference engine failed on %r", plain[:80])
+        outcome.findings.append(Finding(
+            check_id="FMT-REF-03", severity=Severity.INFO, line=line,
+            message=(f"{label}: NOT CHECKED — the reference could not be processed "
+                     f"({type(exc).__name__}); left exactly as submitted."),
+            original=plain[:240]))
+        return outcome
+    outcome.annexb = result
+    outcome.category = result.category
+    outcome.missing = list(result.missing)
+    if result.text and not result.conforms and result.text.strip() != plain:
+        outcome.after = result.text
+        outcome.latex = result.latex
+        outcome.tier = Tier.SUGGEST
+        outcome.message = f"{label}: {result.summary()}"
+        outcome.added_from = ", ".join(result.sources)
+        if result.parsed_by == "model":
+            outcome.evidence_source = "llm"
+            outcome.evidence_detail = ("read by the local model (every field a piece of the "
+                                       "reference), written by the Appendix B template")
+        elif any("jacow" in s.lower() or "conference list" in s for s in result.sources):
+            outcome.evidence_source = "jacow-refdb"
+        elif result.sources:
+            outcome.evidence_source = "crossref"
+        if not outcome.evidence_detail:
+            outcome.evidence_detail = ("Appendix B template"
+                                       + (f", values from {outcome.added_from}"
+                                          if outcome.added_from else ""))
+    severity = {"error": Severity.WARNING, "warning": Severity.WARNING, "info": Severity.INFO}
+    for problem in result.problems:
+        outcome.findings.append(Finding(
+            check_id=problem.code, severity=severity.get(problem.severity, Severity.INFO),
+            line=line, message=f"{label}: {problem.message}", original=plain[:240]))
     return outcome
 
 

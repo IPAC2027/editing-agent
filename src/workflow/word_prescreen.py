@@ -33,7 +33,7 @@ from src.lookup_status import STATUS
 from src.models import Finding, Severity
 from src.output.word_report import write_word_reference_report
 from src.parser.word_parser import parse_word
-from src.references import screen_reference
+from src.references import reference_record, screen_reference
 
 
 class WordPrescreenResult:
@@ -102,6 +102,7 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
     findings_by_ref: dict[int, list] = {}
     rewrites: list = []
     corrections: list[dict] = []
+    reference_records: list[dict] = []
     rejected_rewrites = 0
 
     from src.output.docx_tracked import ParagraphRewrite
@@ -112,6 +113,11 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
         # One engine for Word and LaTeX: the formatter formats, looks up and
         # verifies; the adapter decides the tier (src/references.py).
         result = screen_reference(ref.raw_text, label=f"Reference [{ref.n}]", line=ref.n)
+        record = reference_record(
+            result, n=ref.n, key=str(ref.n), origin="word", source=ref.raw_text,
+            paragraph_index=ref.paragraph_index, paragraph_text=ref.paragraph_text,
+            paragraph_count=ref.paragraph_count, edit_id="", edit_ids=[])
+        reference_records.append(record)
         fix_findings = list(result.findings)
         corrected = ref.raw_text
         if result.after is not None and result.tier is not None:
@@ -183,6 +189,8 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
         # every decision at the desk and receive a Word file containing only
         # what they accepted.
         tier = "auto" if result.tier is Tier.AUTO else "suggest"
+        record["edit_id"] = f"W{len(corrections) + 1:03d}"
+        record["edit_ids"] = [record["edit_id"]]
         corrections.append({
             "id": f"W{len(corrections) + 1:03d}",
             "tier": tier,
@@ -389,6 +397,9 @@ def prescreen_word(folder: Path) -> WordPrescreenResult:
         tracked_name,
         revisions,
     )
+    from src.workflow.prescreen import stamp_report, write_reference_records
+    stamp_report(out_dir)
+    write_reference_records(out_dir, reference_records, file=doc_path.name)
     (out_dir / "word_edits.json").write_text(
         json.dumps({"schema_version": 1, "document": doc_path.name,
                     "corrections": corrections}, indent=2),

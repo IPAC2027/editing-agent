@@ -111,8 +111,17 @@ chief editor's desk**, with what each one needs next:
 
 Nobody else can take a paper while you have it, and the chief's page shows
 who has it and what for. **Assigned to you** shows the papers the chief has
-given you; papers Indico gives to someone else cannot be taken to edit (anyone
-may QA them).
+given you.
+
+**A paper taken in Indico is taken here too.** If an editor assigns a paper to
+themselves in Indico (or the chief assigns it there), nobody else can take it
+on the desk to edit it. The list says *taken in Indico* and shows who has it;
+anyone may still QA it. This holds whether or not the chief's desk writes to
+Indico, and the desk reads Indico again just before it hands a paper out, so a
+paper taken there a moment ago is not given to you as well. The editor Indico
+shows can take it on the desk themselves. If it should be yours, ask the
+chief: only the chief frees it. Giving a paper up on the desk gives it up in
+Indico too, as far as the desk is concerned.
 
 **Doing a QA.** A paper taken for QA has **QA passed** and **QA failed…** at
 the bottom instead of **Finish this paper**. Check the editor's work (you can
@@ -162,7 +171,24 @@ folder stops and says how to join instead.
 **The chief edits on an editor's desk too.** The chief's page is a managing
 page: Indico, downloading and preparing papers, the sync, the editors' door,
 who is editing what, and **Free** to take a paper back from an editor. It does
-not edit papers. **Edit papers**, at the top, opens the chief's own editing
+not edit papers.
+
+**Who has each paper.** The managing page's **Taken by** column shows both ways
+of taking a paper: *on this desk* (an editor took it here), *took it in Indico,
+not on this desk*, both (the same person), or in red when one editor has it
+here and Indico gives it to another. Until it is freed, nobody else can take a
+paper either way. **Free** frees it from whoever has it:
+
+- taken on the desk: their desk is told on its next send; their unsent work
+  stays on their computer;
+- taken in Indico, with *Keep Indico's editor assignments in step* on: they are
+  unassigned in Indico (an unfinished paper);
+- taken in Indico, with it off: the desk stops holding the paper for them, and
+  the page reminds you, in red, that Indico still shows them, so you can
+  unassign them there. If Indico later shows someone else, or the same person
+  again after it showed nobody, the paper is held again.
+
+The filters **Free to edit** and **Taken** count both kinds. **Edit papers**, at the top, opens the chief's own editing
 desk in a new tab: an editor's desk like everyone's, joined to the chief's
 desk, with its own settings in `~/.aiagent/editor`. Paste your Indico token
 into it once, as any editor does (it never uses the managing page's token, nor
@@ -204,62 +230,43 @@ The tool has to read a paper once before you can review it. That takes a few
 seconds. Press **Prepare them now** and go and make coffee; you only ever do
 this once per paper.
 
+### Preparing again
+
+When the agent has improved (better reference rules, say), papers prepared
+earlier do not change by themselves. The list says how many were prepared by an
+older version, and **Prepare all again…** reads them again with the agent as it
+is now. On the chief editor's desk it is on the managing page; an editor joined
+to the chief's desk does not have it, because papers are prepared on the
+chief's.
+
+Before anything happens it tells you how many papers it will prepare and which
+it leaves alone:
+
+- **papers an editor is working on**, so nobody's files change under them (a
+  paper taken while the run is going is left alone too, and nobody can take a
+  paper while it is being prepared);
+- **finished papers** and papers sent back to the author, whose reviewed files
+  and letters are already written.
+
+Your work is kept: decisions, notes, your wording, hand edits, the references
+you wrote yourself, the title and author check. A decision follows the
+suggestion it was about, even when that suggestion has a new number. If a
+suggestion has changed or gone, the decision on it is dropped, and the paper
+says so at the top (*Prepared again … 1 earlier decision no longer applies*),
+listing what you had decided, so you can look at the new suggestion in its place.
+
 ---
 
 ## Working on one paper
 
-At the top you see four numbers:
+A paper has four tabs, in the order you work through it. The number on each tab
+is what is still waiting for you there; <kbd>1</kbd>–<kbd>4</kbd> switch tabs.
+The address in the browser follows you, so reloading the page comes back to the
+same paper and tab.
 
-- **already corrected** — the tool fixed these. You do not need to look at
-  them. These are things like the spacing between a number and its unit: the
-  same correction, made the same way, thousands of times, with no judgement
-  involved. They are listed at the top of *Your decisions*, folded away, and
-  **any one of them can be put back** — see below.
-- **need your decision** — this is your work.
-- **must be fixed** — problems the tool will not touch, because fixing them
-  needs something only the author has.
-- **your notes & edits** — what you have added.
+### 1. Title & authors
 
-Then six tabs.
-
-### Your decisions
-
-At the top is a folded line — *"8 corrections already applied"*. Open it and
-you get one card per automatic correction: what it changed, where, and why.
-Each has a **Put back as submitted** button.
-
-You will not normally open this. But if the tool has done something that is
-wrong for *this* paper — it read a megatesla as a millitesla, say — put it
-back, and add a note saying why. The reviewed file, the Word file and the
-letter to the author all follow what you choose: a correction you put back is
-not mentioned to the author at all, so if they should still be told about it,
-add it under *Your notes*. **change** or *apply it again* undoes the undo.
-
-Below that, one card per change the tool wants you to decide. Each card says what would change, why JACoW wants it, and
-shows the text before and after.
-
-- **Accept** — make this change.
-- **Keep as submitted** — leave the author's text exactly as it is.
-
-Nothing is permanent. Press **change** on any card to think again.
-
-You can also use the keyboard, which is much faster over forty papers:
-
-| Key | Does |
-|---|---|
-| <kbd>a</kbd> | Accept, and move to the next undecided card |
-| <kbd>r</kbd> | Keep as submitted, and move on |
-| <kbd>j</kbd> / <kbd>k</kbd> | Move down / up |
-| <kbd>n</kbd> | Add a note to this card |
-
-**Add a note** to any decision. This is worth doing whenever you reject
-something: in three weeks, when the author writes back to argue, the note is
-the only reason you will remember why. Notes stay with the paper and go into
-your review summary.
-
-### Title & authors
-
-Only for a conference pulled from Indico. The proceedings' table of contents,
+For a conference pulled from Indico. The proceedings' table of contents,
 author index and DOI metadata come from Indico, so the paper's title and author
 list have to match it. This tab compares them, ignoring capitals and
 punctuation and matching "Y. Luo" with "Yun Luo".
@@ -283,11 +290,26 @@ When they differ, two rules decide what happens:
   Indico is added to Indico; anyone Indico lists as an author but the paper does
   not is added to the paper, with the affiliation Indico gives.
 
-The tab drafts an email to the author saying what does not match, and the title
-and author list the paper will be published with if they do not reply within 48
-hours. Edit it if you like, paste it into
-a comment on the paper in Indico (Indico tells the submitter) or send it by mail,
-and press **I've sent it**. The desk sends nothing itself.
+**The email.** The tab drafts an email to the author saying what does not
+match, and the title and author list the paper will be published with if they
+do not reply within 48 hours. Change anything you like in the box (your wording
+is kept with the paper), then:
+
+- **Open in my mail program** opens a new message with the subject and text
+  filled in; add the author's address and send it from there. Or **Copy** it
+  into a comment on the paper in Indico, which notifies the submitter. The desk
+  sends nothing itself.
+- Press **I've sent it**.
+
+**Setting the paper aside.** Once the email is sent, the tab asks whether to
+**set the paper aside until the author replies**. The paper stays yours (nobody
+else can take it), but it leaves *Still to do* on your list and *Open the next
+paper* skips it. On the list it shows *Set aside until …*, and the filter
+**Set aside** shows all of them. When the deadline passes it says *the wait is
+over*. **Take it up again** at the top of the paper brings it back at any time,
+and answering for the author (*agreed*, *replied otherwise*, *Apply the
+changes*) does so too. Choose **Keep working on it** to go on with the
+references and the paper meanwhile.
 
 Then one of three things happens:
 
@@ -306,78 +328,128 @@ you. **Undo the changes** takes them back out.
 Press **Check Indico now** on the paper list before you send anything: it reads
 each paper's authors with their roles and affiliations. Without it the tab says
 so and compares against the names the pull recorded, which include speakers.
-Only when the file itself cannot be read as a paper does it say *Not checked*
-rather than guess.
 
-### Problems
+Below that, **Title and author formatting in the paper** lists the changes to
+how the title and the names are written in the paper itself (sentence case,
+initials), with the same buttons as everywhere else.
 
-Sorted by who has to act, which is the only sorting that matters:
+### 2. References
 
-- **Only the author can fix these** — a missing figure file, a bibliography
-  file that is not in the submission, a paper that does not compile. These go
-  into the letter automatically. Tick one off if you have dealt with it
-  yourself and it should not be in the letter.
-- **For you to check** — judgement calls, and checks the tool could not
-  finish.
-- **For the record** — what the tool did, and any check that could not run.
-  Nothing to do.
+Every reference, one row each: **as the author wrote it on the left, and what
+it becomes in Appendix B's layout on the right**, with the words that change
+marked on both sides. The colour of the row says how sure the desk is:
 
-If a problem says **NOT CHECKED**, the tool could not reach the service it
-needed (usually because the computer is offline). That is a statement about the
-tool, not about the paper. It never means "there is a problem here".
+- **Green** — rewritten in the layout, nothing missing. Accept it, edit it, or
+  keep the author's.
+- **Red** — something the desk cannot put right by itself: a part Appendix B
+  requires that no registry had (it is named, never invented), a reference
+  whose kind it could not tell, a DOI that points elsewhere. Edit it yourself,
+  or leave it for the author (it goes into the letter).
+- **Grey** — already in the layout.
 
-### Your notes
+What the right-hand side shows depends on the paper:
 
-The tool only checks what it knows how to check. Everything else — an
-unreadable figure, a claim in the abstract that is not in the paper, a table
-that runs off the page — goes here.
+- a `\bibitem` paper: the reference as LaTeX, ready to go into the source;
+- a Word paper: the reference as text; what you accept becomes a tracked change;
+- a `.bib` paper: the entry with the fields the JACoW bibliography style needs,
+  and under it **Prints as**, the reference as it will appear in the paper.
+  What you accept goes into the reviewed `.bib`.
 
-Fill in what you found, roughly where, and how serious it is. Leave **Tell the
-author** ticked and it appears in the letter; untick it to keep it as an
-internal record only.
+Under each row: what is missing, any problem found, what was changed, and where
+values came from (Crossref, refs.jacow.org, …).
 
-There is also a box at the bottom for a note about the paper as a whole, which
-is added to the end of the letter.
+- **Accept** / **Keep as submitted** — as everywhere; **change** thinks again.
+- **Edit…** — write the reference yourself (the box starts from the suggestion).
+  Your version replaces the whole reference, whatever was suggested; **Drop my
+  version** takes it back out.
+- **Accept all N green** accepts every green suggestion still to decide.
+- The filters show only what is **To decide**, **Fixed**, **Problems** or
+  **Already right**.
+- Keyboard: <kbd>a</kbd> accept, <kbd>r</kbd> keep, <kbd>e</kbd> edit,
+  <kbd>j</kbd>/<kbd>k</kbd> move.
 
-### The paper
+*About the list as a whole* (folded at the top) has what concerns the list
+rather than one reference: citation order, citations with no reference, the
+bibliography style. If the list is not in the order the paper cites it, a card
+there offers to reorder it.
 
-The paper as it stands, with your accepted corrections already in it.
+### 3. The paper
 
-- Green line numbers were corrected by the tool.
-- Orange line numbers you changed yourself.
-- **Click any line to edit it.** Type your version, press *Save this line*.
-- The buttons above jump to the **Title**, the **Authors**, the **Body**, the
-  **References**, or the **First change** — so you never have to scroll through
-  the technical preamble at the top.
-- **Only changed lines** hides everything you have not touched.
-- The search box finds a word anywhere in the paper.
+Laid out like an online LaTeX editor: **the source on the left, and on the right
+the list of changes to review, or the PDF**.
 
-Your hand edits are listed under *Your notes*, where each has an **undo this
-change** link.
+In the source every change is where it is:
 
-For a **Word** submission the text is edited in Word, not here — see below.
+- <del>red, struck through</del> followed by **green** — a suggestion still to
+  decide. Click it and its card opens on the right.
+- green, underlined — a correction that stands (made by the tool, or accepted).
+  Hover to see what it was.
+- orange — your own text.
+- A blue line number has a suggestion to decide; a green one was corrected; an
+  orange one you changed yourself; a red mark is a problem on that line.
+- **Click any other text to edit its line.** Type your version and press
+  *Save this line* (or <kbd>Enter</kbd>; <kbd>Esc</kbd> cancels). A line you
+  changed has *Undo my change to this line*.
+- The buttons jump to the **Title**, **Authors**, **Abstract**, **Body** or
+  **References**; *Go to a section…* to any section. **Only changed lines**
+  hides the rest; the search box finds a word.
 
-### Letter to the author
+The **Review** panel on the right:
 
-A letter, written for you from your decisions and your notes. It lists what was
-corrected for the author and what they still have to do.
+- **To decide** — one card per suggestion: what would change, why JACoW wants
+  it, before and after. **Accept**, **Keep as submitted**, or **Modify…** to
+  accept it in your own words. *show in source* scrolls to it.
+- **Decided** (folded) — everything you have answered; **change** on any card.
+- **Corrected automatically** (folded) — the corrections the tool makes the
+  same way every time, with no judgement involved, so it does not ask. If one
+  is wrong for *this* paper — a megatesla read as a millitesla, say — press
+  **Put back as submitted** and add a note. The reviewed file and the letter
+  follow what you choose.
+- **Problems**, sorted by who has to act: *only the author can fix these* (they
+  go into the letter unless you tick them off), *for you to check*, and *for
+  the record* (what the tool did, and checks that could not run — **NOT
+  CHECKED** is a statement about the tool, never about the paper).
+- **Lines you changed**, each with *undo this change*.
 
-Edit it however you like and press **Save my wording**. **Start again from the
-automatic version** throws your edits away and regenerates it — useful after
-you have changed a lot of decisions. **Copy to clipboard** puts it in an email.
+| Key | Does |
+|---|---|
+| <kbd>a</kbd> | Accept, and move to the next undecided card |
+| <kbd>r</kbd> | Keep as submitted, and move on |
+| <kbd>j</kbd> / <kbd>k</kbd> | Move down / up |
+| <kbd>n</kbd> | Add a note to this card |
 
-### Files
+**Add a note** to any decision, especially when you reject something: in three
+weeks, when the author writes back to argue, the note is the only reason you
+will remember why.
 
-Everything the tool wrote, with an **Open** button each. The useful ones:
+The **PDF** panel shows the paper as it stands. **Recompile** builds it again
+from your decisions, your wording and your lines (a few seconds); the list
+above the PDF also offers the version with only the automatic corrections and
+the author's own PDF, for comparison.
 
-- **The corrected paper (PDF)** — what the paper looks like with the automatic
-  corrections in it.
-- **The author's original PDF** — what they sent, for comparison.
-- **Word file with tracked changes** — for Word submissions.
-- **Letter to the author**, once you have finished the paper.
+For a **Word** submission the text is edited in Word, so this tab lists the
+changes beside the author's PDF — see *Word submissions* below.
 
-Nothing the author sent is ever changed. Every file the tool writes sits in a
-folder called `aiagent_prescreen` next to their files.
+### 4. Editor's panel
+
+- **JACoW tags** — the editorial tags for this paper (TC12 for units, TC06 for
+  references, TC14 for a DOI added, FC03 for `.bib` entries, …), proposed from
+  what was actually corrected and what the author must fix, each with the
+  reason. Tick or untick any of them, or tick another code. **Copy the codes**
+  puts them on the clipboard for Indico — the desk does not write tags to
+  Indico itself. The QA tags are the editing service's and are not offered.
+- **Letter to the author** — written for you from your decisions, the problems
+  only the author can fix and your notes. Edit it and press **Save my
+  wording**; **Open in my mail program** or **Copy** to send it; **Start again
+  from the automatic version** regenerates it after you have changed a lot.
+- **Something you found yourself** — anything the tool does not check (an
+  unreadable figure, a table off the page). Leave **Tell the author** ticked
+  and it appears in the letter. A box below takes a note about the paper as a
+  whole, added to the end of the letter.
+- **Files** — everything the tool wrote, with **Open**: the corrected PDF, the
+  author's original PDF, the Word file with tracked changes, the letter once
+  you have finished. Nothing the author sent is ever changed; every file the
+  tool writes sits in a folder called `aiagent_prescreen` next to theirs.
 
 ---
 
@@ -390,13 +462,14 @@ things is true:
   author.
 - **Send back to the author.** The letter lists what they must fix.
 
-Then the tool writes your reviewed paper, the letter, and a summary of
-everything you decided. Finishing also stops marking the paper as yours, so a
+Then the tool writes your reviewed paper (and, for a `.bib` paper, the reviewed
+`.bib` as `..._final.bib`), the letter, and a summary of everything you decided,
+with the tags you chose. Finishing also stops marking the paper as yours, so a
 colleague can pick it up. You can reopen a finished paper at any time.
 
 **Open the next paper** takes you straight to the next one that is not
 finished, so you can work down a conference without going back to the list.
-It skips papers another editor has in Indico.
+It skips papers another editor has in Indico, and papers you have set aside.
 
 ---
 
@@ -451,12 +524,12 @@ corrects automatically. If the label is absent, the tool is running without it,
 which is the normal setting.
 
 **Something in the paper is wrong and the tool said nothing.**
-That is expected — it only checks a fixed list of things. Put it under *Your
-notes* and it goes to the author.
+That is expected — it only checks a fixed list of things. Add it under
+*Something you found yourself* on the editor's panel and it goes to the author.
 
 **The tool corrected something automatically and it is wrong.**
-Open *"corrections already applied"* at the top of *Your decisions* and press
-**Put back as submitted** on it. Add a note saying what was wrong — that note
+Open *Corrected automatically* in the review panel of *The paper* (or find the
+reference on *References*) and press **Put back as submitted** on it. Add a note saying what was wrong — that note
 is how a bad rule gets found and moved out of the automatic list.
 
 **Why did it not just fix everything?**

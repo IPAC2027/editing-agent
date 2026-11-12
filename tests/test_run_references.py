@@ -1,8 +1,7 @@
 """References from an October 2026 test run, offline.
 
-Each was either rejected or left unconfirmed in that run.  Offline, the
-formatting must now pass the damage check; finding the title-less ones in
-Crossref is tested in the formatter with simulated answers.
+Each was either rejected or left unconfirmed in that run. Offline, each must
+now come out in Appendix B's layout (src.annexb).
 """
 from __future__ import annotations
 
@@ -25,19 +24,23 @@ TEST_RUN = {
 @pytest.fixture(autouse=True)
 def _fresh(monkeypatch):
     monkeypatch.setenv("HOUSE_STYLE", "jacow")
-    references._agents.clear()
 
 
 def test_ieee_era_proceedings_is_offered():
+    # Appendix B's layout for a proceedings paper has no volume or catalogue number: they
+    # are left out and named on the card.
     result = references.screen_reference(TEST_RUN[1], offline=True)
-    assert result.after and "in Proc. PAC’95" in result.after and "vol. 183" in result.after
+    assert result.after.startswith("A. Vettel, “Design study for a compact x-ray source driven "
+                                   "by the SLAC linac”, in Proc. PAC’95, ")
     assert result.tier is Tier.SUGGEST
+    assert any("volume “183”" in f.message for f in result.findings)
 
 
-def test_book_keeps_edition_and_chapter():
+def test_book_keeps_edition():
+    # A whole book has no chapter in Appendix B's layout ("Chap. 12" is named as left out).
     result = references.screen_reference(TEST_RUN[8], offline=True)
     assert result.after == ("H. P. Alpha and T. M. Beta, Jr., Principles of Beam-Driven "
-                            "Lasers, 4th ed. Cham, Switzerland: Springer Nature, 2024, ch. 12.")
+                            "Lasers, 4th ed. Cham, Switzerland: Springer Nature, 2024.")
 
 
 def test_spaced_initials_and_journal_forms():

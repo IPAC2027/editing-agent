@@ -73,7 +73,8 @@ class JobRunner:
         # the launcher window announced is exactly what every paper gets.
         self.llm = llm
 
-    def start(self, label: str, folders: list[Path], *, compile_pdf: bool) -> str:
+    def start(self, label: str, folders: list[Path], *, compile_pdf: bool,
+              desk_id: str | None = None) -> str:
         job_id = uuid.uuid4().hex[:12]
         with self._lock:
             self._jobs[job_id] = {
@@ -84,24 +85,40 @@ class JobRunner:
                 "current": "",
                 "finished": False,
                 "errors": [],
+                "notes": [],
                 "started": time.time(),
                 "current_since": time.time(),
             }
         thread = threading.Thread(
-            target=self._run, args=(job_id, folders, compile_pdf), daemon=True,
+            target=self._run, args=(job_id, folders, compile_pdf, desk_id), daemon=True,
         )
         thread.start()
         return job_id
 
-    def _run(self, job_id: str, folders: list[Path], compile_pdf: bool) -> None:
+    def _run(self, job_id: str, folders: list[Path], compile_pdf: bool,
+             desk_id: str | None = None) -> None:
+        from src.desk.reprepare import prepare_keeping_work
         from src.workflow.prescreen import prescreen
 
         for folder in folders:
+            name = state_module.submission_name(folder)
             with self._lock:
-                self._jobs[job_id]["current"] = state_module.submission_name(folder)
+                self._jobs[job_id]["current"] = name
                 self._jobs[job_id]["current_since"] = time.time()
             try:
-                prescreen(folder, compile=compile_pdf, git=True, llm=self.llm)
+                # Prepared again, the editor's decisions follow their edits to
+                # the new ids (src.desk.reprepare).
+                kept = prepare_keeping_work(folder, lambda f: prescreen(
+                    f, compile=compile_pdf, git=True, llm=self.llm), desk_id=desk_id)
+                if kept.get("skipped"):
+                    with self._lock:
+                        self._jobs[job_id]["notes"].append(
+                            f"{name}: left alone, an editor took it meanwhile")
+                if kept["dropped"]:
+                    with self._lock:
+                        self._jobs[job_id]["notes"].append(
+                            f"{name}: {len(kept['dropped'])} earlier decision(s) no longer "
+                            "apply, because the suggestion changed")
             except Exception as exc:  # noqa: BLE001 — one bad paper must not stop a batch
                 with self._lock:
                     self._jobs[job_id]["errors"].append(
@@ -340,6 +357,9 @@ class DeskHandler(BaseHTTPRequestHandler):
                     if self.sharing:
                         row["received_at"] = activity.get(row["name"], {}).get(
                             "received_at", "")
+                        # Taken here, in Indico, or both: what the chief frees.
+                        row["holder"] = self.sharing.holder(
+                            Path(row["folder"]), conference=conference, activity=activity)
                         # Whether the editor with the paper here is the one
                         # Indico says has it: the chief settles any difference.
                         indico_editor = (row.get("indico") or {}).get("editor", "")
@@ -397,6 +417,11 @@ class DeskHandler(BaseHTTPRequestHandler):
                 "/api/my-note/delete": self._delete_my_note,
                 "/api/my-edit": self._my_edit,
                 "/api/my-edit/delete": self._delete_my_edit,
+                "/api/edit-text": self._edit_text,
+                "/api/ref-text": self._ref_text,
+                "/api/tags": self._tags,
+                "/api/hold": self._hold,
+                "/api/compile": self._compile,
                 "/api/paper-note": self._paper_note,
                 "/api/letter": self._letter,
                 "/api/prepare": self._prepare,
@@ -472,6 +497,7 @@ class DeskHandler(BaseHTTPRequestHandler):
 
     def _chief_download(self, body: dict) -> None:
         from src.desk import chief as chief_module
+        from src.desk.reprepare import prepare_keeping_work
         from src.workflow.prescreen import prescreen
 
         from src.indico_client.client import IndicoError
@@ -491,8 +517,8 @@ class DeskHandler(BaseHTTPRequestHandler):
         def work(progress) -> None:
             chief_module.download_and_prepare(
                 chief, root, progress,
-                prepare=lambda folder: prescreen(folder, compile=compile_pdf, git=True,
-                                                 llm=llm))
+                prepare=lambda folder: prepare_keeping_work(folder, lambda f: prescreen(
+                    f, compile=compile_pdf, git=True, llm=llm)))
 
         job_id = self.jobs.start_task("Asking Indico what is new", work)
         self._json({"job": self.jobs.status(job_id)})
@@ -522,11 +548,15 @@ class DeskHandler(BaseHTTPRequestHandler):
 
         folder, review = self._with_state(body)
         conference = indico_module.Conference.open(folder.parent.parent)
+        action = str(body.get("action", ""))
         title_check.act(
-            review, str(body.get("action", "")), body,
+            review, action, body,
             front=title_check.front_for(folder, paper_module.Paper(folder).report),
             record=conference.record(folder) if conference else None,
         )
+        if action in ("agreed", "declined", "apply", "restart"):
+            # The author answered (or the wait is over): the paper is back in work.
+            review.hold = state_module.HoldState()
         review.touch()
         review.save(folder)
         self._json(self._view(folder))
@@ -705,14 +735,16 @@ class DeskHandler(BaseHTTPRequestHandler):
         if "\n" in after or "\r" in after:
             raise ValueError("a line edit cannot add new lines — edit one line at a time")
 
-        # Verify the line still says what the editor was shown.
+        # Verify the line still says what the editor was shown: at its number,
+        # or (when an addition above it moved it) anywhere in the text.
         current = paper_module.compose(paper_module.Paper(folder))
         lines = current.splitlines()
         if not (0 < line <= len(lines)) or lines[line - 1] != before:
-            raise ValueError(
-                "that line has changed since the page was loaded. Reload the paper "
-                "and try again — nothing was saved."
-            )
+            if before not in lines:
+                raise ValueError(
+                    "that line has changed since the page was loaded. Reload the paper "
+                    "and try again — nothing was saved."
+                )
 
         edit = review.add_manual_edit(ManualEdit(
             line=line, before=before, after=after,
@@ -720,6 +752,122 @@ class DeskHandler(BaseHTTPRequestHandler):
         ))
         review.save(folder)
         self._json({"edit": edit.model_dump(), "paper": self._view(folder)})
+
+    def _edit_text(self, body: dict) -> None:
+        """Accept a suggestion in the editor's own wording (``text`` null: drop it)."""
+        folder, review = self._with_state(body)
+        edit_id = str(body.get("id", ""))
+        edit = paper_module.Paper(folder).find_edit(edit_id)
+        if edit is None:
+            raise ValueError("that suggestion is not part of this paper any more; reload it")
+        text = body.get("text")
+        if text is not None:
+            text = str(text)[:20000]
+            if text == edit.before:
+                raise ValueError("that is the text as submitted: choose “Keep as submitted”")
+        review.set_edit_text(edit_id, text)
+        review.save(folder)
+        self._json(self._view(folder))
+
+    def _ref_text(self, body: dict) -> None:
+        """The editor's own text for a whole reference (``text`` null: drop it)."""
+        folder, review = self._with_state(body)
+        ref = str(body.get("ref", ""))
+        paper = paper_module.Paper(folder)
+        record = next((r for r in paper.reference_records
+                       if paper_module.ref_id(r) == ref), None)
+        if record is None:
+            raise ValueError("that reference is not part of this paper any more; reload it")
+        text = body.get("text")
+        if text is not None:
+            text = str(text).strip()[:20000]
+            if not text:
+                raise ValueError("the reference is empty")
+            if record.get("origin") == "bibitem" and "\\bibitem" in text:
+                raise ValueError("write the reference without its \\bibitem{…}: only the "
+                                 "text after it")
+            if record.get("origin") == "bib":
+                if not text.startswith("@") or text.count("{") != text.count("}"):
+                    raise ValueError("a .bib entry starts with @type{key, and its braces "
+                                     "must balance")
+            if record.get("origin") == "word" and record.get("paragraph_count", 1) != 1:
+                raise ValueError("this reference spans several paragraphs in the Word file, "
+                                 "so it is changed in Word; add a note instead")
+        review.set_ref_text(ref, text)
+        review.save(folder)
+        self._json(self._view(folder))
+
+    def _tags(self, body: dict) -> None:
+        """Tick or untick one JACoW tag (``reset``: back to what the desk proposes)."""
+        from src.indico_client.tags import SERVICE_OWNED, VOCABULARY
+
+        folder, review = self._with_state(body)
+        if body.get("reset"):
+            review.tags = {}
+        else:
+            code = str(body.get("code", "")).strip()
+            if code not in VOCABULARY or code in SERVICE_OWNED:
+                raise ValueError(f"{code or 'that'} is not a tag an editor sets")
+            review.tags[code] = bool(body.get("on"))
+        review.touch()
+        review.save(folder)
+        self._json(self._view(folder))
+
+    def _hold(self, body: dict) -> None:
+        """Set a paper aside while waiting for the author, or take it up again.
+
+        The paper stays this editor's: it only leaves their list of papers to
+        work on now. Until when is the deadline in the email to the author, if
+        one was sent.
+        """
+        folder, review = self._with_state(body)
+        action = str(body.get("action", ""))
+        if action == "set":
+            ta = review.title_authors
+            review.hold = state_module.HoldState(
+                since=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                until=ta.deadline if ta.sent_at else "",
+                reason=" ".join(str(body.get("reason", "")).split())[:300]
+                or "waiting for the author's reply",
+                by=self._me().name)
+            review.touch()
+        elif action == "clear":
+            review.hold = state_module.HoldState()
+        else:
+            raise ValueError("set a paper aside (set) or take it up again (clear)")
+        review.save(folder)
+        if self.pool:
+            try:
+                self.pool.send(folder)
+            except remote_module.PoolError:
+                pass                  # sent with the next change, as any change is
+        self._json(self._view(folder))
+
+    def _compile(self, body: dict) -> None:
+        """Compile the paper as it stands into ``<ID>_preview.pdf``, in the background."""
+        folder = self._folder(body.get("folder"))
+        paper = paper_module.Paper(folder)
+        if paper.kind != "latex" or not paper.source:
+            raise ValueError("only a LaTeX paper is compiled here; a Word paper's PDF is the "
+                             "author's")
+        label = f"Compiling {paper.paper_id}"
+        if any(job.get("label") == label for job in self.jobs.active()):
+            raise ValueError("this paper is already being compiled")
+
+        def work(progress) -> None:
+            fresh = paper_module.Paper(folder)
+            text = paper_module.compose(fresh)
+            stem = paper_module.preview_name(fresh)[:-4]
+            result = paper_module.build_pdf(fresh, text, stem)
+            if result is None:
+                progress(error="No LaTeX was found on this computer, so the paper could "
+                               "not be compiled.")
+            elif not result.success:
+                first = (result.errors or [result.log_excerpt or "the build failed"])[0]
+                progress(error=f"The paper did not compile: {first}")
+
+        job_id = self.jobs.start_task(label, work)
+        self._json({"job": self.jobs.status(job_id)})
 
     def _delete_my_edit(self, body: dict) -> None:
         folder, review = self._with_state(body)
@@ -757,32 +905,61 @@ class DeskHandler(BaseHTTPRequestHandler):
             return held if held and held.desk_id != desk_id else None
 
         skipped = 0
+        left = {"held": 0, "finished": 0}
         if body.get("all"):
+            from src.desk.reprepare import left_alone
+
             folders = []
             for folder in state_module.submission_folders(self.root):
-                if not body.get("force") and (
-                        folder / "aiagent_prescreen" / "report.json").exists():
+                prepared = (folder / "aiagent_prescreen" / "report.json").exists()
+                if not body.get("force") and prepared:
                     continue
+                if body.get("force"):
+                    # Prepare all again: not a paper someone is editing, and not
+                    # one whose reviewed files are written (unless asked).
+                    why = left_alone(folder, desk_id)
+                    if why == "finished" and body.get("include_finished"):
+                        why = ""
+                    if why:
+                        left[why] += 1
+                        continue
                 if theirs(folder):
                     skipped += 1
                     continue
                 folders.append(folder)
-            label = f"Preparing {len(folders)} paper(s)"
+            label = (f"Preparing {len(folders)} paper(s) again" if body.get("force")
+                     else f"Preparing {len(folders)} paper(s)")
+            if body.get("dry_run"):
+                from src.workflow.prescreen import preparation_build
+
+                build = preparation_build()
+                outdated = sum(1 for f in folders if json.loads(
+                    (f / "aiagent_prescreen" / "report.json").read_text(encoding="utf-8")
+                    if (f / "aiagent_prescreen" / "report.json").exists() else "{}"
+                ).get("prepared_by") != build)
+                self._json({"would_prepare": len(folders), "outdated": outdated,
+                            "held": left["held"] + skipped, "finished": left["finished"]})
+                return
         else:
             folders = [self._folder(body.get("folder"))]
             held = theirs(folders[0])
             if held:
                 raise claim_module.Held(held, desk_id)
             label = f"Preparing {state_module.submission_name(folders[0])}"
+        held = skipped + left["held"]
         if not folders:
             message = "Every paper is already prepared."
-            if skipped:
-                message = (f"Nothing to prepare: {skipped} paper(s) left alone because "
-                           "another editor is working on them.")
+            if held or left["finished"]:
+                message = "Nothing to prepare: " + "; ".join(part for part in (
+                    f"{held} paper(s) left alone because another editor is working on them"
+                    if held else "",
+                    f"{left['finished']} finished paper(s) left alone" if left["finished"]
+                    else "") if part) + "."
             self._json({"job": None, "message": message})
             return
-        job_id = self.jobs.start(label, folders, compile_pdf=compile_pdf)
-        self._json({"job": self.jobs.status(job_id), "skipped": skipped})
+        job_id = self.jobs.start(label, folders, compile_pdf=compile_pdf, desk_id=desk_id)
+        self._json({"job": self.jobs.status(job_id), "skipped": held,
+                    "finished": left["finished"]})
 
     def _close(self, body: dict) -> None:
         if self.pool and self.pool.mode_of(self._folder(body.get("folder"))) == "qa":

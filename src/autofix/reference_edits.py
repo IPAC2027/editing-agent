@@ -280,6 +280,7 @@ def bibitem_rewrite_edits(
     file: str = "",
     evidence_words: set[str] | None = None,
     offline: bool = False,
+    records: list[dict] | None = None,
 ) -> tuple[list[Edit], list[Finding]]:
     """Offer a JACoW-formatted rewrite of each ``\\bibitem`` body.
 
@@ -287,8 +288,16 @@ def bibitem_rewrite_edits(
     same engine and the same tiers as a Word reference — after conversion to
     plain text; the result is converted back with DOIs as ``\\doi{…}``.
     A rewrite that fails ``check_rewrite`` is dropped and reported.
+
+    *records*, when given, receives one :func:`src.references.reference_record`
+    per ``\\bibitem`` (with its body span), for the desk's References tab.
     """
-    from src.references import latex_to_plain, plain_to_latex, screen_reference
+    from src.references import (
+        latex_to_plain,
+        plain_to_latex,
+        reference_record,
+        screen_reference,
+    )
 
     edits: list[Edit] = []
     findings: list[Finding] = []
@@ -303,10 +312,17 @@ def bibitem_rewrite_edits(
             continue
         result = screen_reference(plain, label=f"Reference {{{key}}}", offline=offline)
         findings.extend(result.findings)
+        if records is not None:
+            records.append(reference_record(
+                result, n=number, key=key, origin="bibitem", source=original_body.strip(),
+                start=body_start, end=body_end,
+                line=source.count("\n", 0, body_start) + 1,
+                end_line=source.count("\n", 0, body_end) + 1))
         if result.after is None or result.tier is None:
             continue
 
-        rewritten = plain_to_latex(result.after)
+        # The Appendix B layout written as LaTeX (\emph{Proc.\ IPAC'23}, \doi{…}).
+        rewritten = getattr(result, "latex", None) or plain_to_latex(result.after)
         leading = original_body[: len(original_body) - len(original_body.lstrip())]
         trailing = original_body[len(original_body.rstrip()):]
         after = f"{leading}{rewritten}{trailing}"

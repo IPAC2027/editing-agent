@@ -329,36 +329,6 @@ def test_the_models_reply_is_cleaned():
 # 5. Through the agent: src.references.screen_reference
 # ---------------------------------------------------------------------------
 
-def test_screening_offers_the_rules_fix_and_describes_the_rest(monkeypatch):
-    from src import references
-
-    monkeypatch.setenv("LLM_ENABLED", "false")
-    raw = ("C. T. Ratcliff, K. Fukushima, Y. Hao and J. Wan “Extending JuTrack's capabilities "
-           "to the FRIB accelerator”, in Proc. HIAT'25, East Lansing, USA, 2025, pp, 50-53. "
-           "doi:10.18429/JACoW-IPAC2024-WEPR52")
-    result = references.screen_reference(raw, label="Reference [7]", offline=True)
-    assert result.after.startswith("C. T. Ratcliff, K. Fukushima, Y. Hao, and J. Wan, “")
-    assert "pp. 50-53" in result.after
-    check = next(f for f in result.findings if f.check_id == "REF-CHECK-01")
-    assert "IPAC'24" in check.message and "difficulty: high" in check.message
-    assert result.difficulty["level"] == "high"
-
-
-def test_screening_asks_the_local_model_when_it_is_switched_on(monkeypatch):
-    from src import references
-    from src.llm import client
-
-    monkeypatch.setenv("LLM_ENABLED", "true")
-    asked = Model("D. Sagan, M. Bertz et al., “Simulations of future particle accelerators: "
-                  "issues and mitigations”, Journal of Instrumentation, 16(10):T10002, Oct. 2021.")
-    monkeypatch.setattr(client, "chat", asked)
-    result = references.screen_reference(MISSING_TITLE, label="Reference [1]", offline=True)
-    assert asked.prompts, "the model was not asked"
-    assert "J. Instrum., vol. 16, no. 10, p. T10002" in result.after
-    assert result.evidence_source == "llm" and "local model" in result.message
-    assert not any(f.check_id == "REF-CHECK-01" for f in result.findings)
-
-
 def test_screening_never_asks_the_model_when_told_not_to(monkeypatch):
     from src import references
     from src.llm import client

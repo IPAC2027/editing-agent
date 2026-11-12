@@ -35,6 +35,13 @@ def _no_doi_registries(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(doi, "_get", lambda *a, **k: doi.UNREACHABLE)
     monkeypatch.setattr(doi, "CACHE", doi._Cache())
     monkeypatch.setattr(doi.CACHE, "_load", lambda: {})
+    # The Appendix B engine's other sources: abbrevIso and JabRef (journals), the JACoW
+    # conference list (venues). A test that needs one fakes it.
+    from src.annexb import conferences, journals
+
+    monkeypatch.setattr(journals, "_fetch_text", lambda *a, **k: None)
+    monkeypatch.setattr(journals, "_jabref", {})
+    monkeypatch.setattr(conferences, "venue", lambda label: {})
 
 
 @pytest.fixture(autouse=True)

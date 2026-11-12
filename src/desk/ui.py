@@ -300,6 +300,126 @@ input[type=text]{width:100%;padding:9px 11px;border:1px solid var(--rule);
 .srcedit{padding:11px 12px;background:var(--surface2);border-top:1px solid var(--rule)}
 .srcedit textarea{font-family:var(--mono);font-size:.84rem;min-height:52px}
 
+/* wide pages: the paper's source and the reference list use the whole window */
+main.wide{max-width:none;padding-left:18px;padding-right:18px}
+.tabs .n.attn{color:var(--bad);font-weight:700}
+.tabs .n.soft{font-family:var(--sans)}
+select{padding:7px 10px;border-radius:6px;border:1px solid var(--rule);background:var(--surface2)}
+.where.link{cursor:pointer;text-decoration:underline;color:var(--accent)}
+.modbox{margin-top:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--rule);
+        border-radius:6px}
+.modbox textarea{font-family:var(--mono);font-size:.84rem}
+.setaside{margin:0 0 16px;border-left:4px solid var(--accent)}
+.setaside b{display:block;margin-bottom:4px}
+.mailtext{font-family:var(--mono);font-size:.84rem;min-height:320px}
+.names-cols{display:grid;gap:4px 28px}
+@media(min-width:900px){.names-cols{grid-template-columns:1fr 1fr}}
+
+/* the paper: source left, review or PDF right, like an online LaTeX editor */
+.ol{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(340px,1fr);gap:14px;
+    align-items:start}
+@media(max-width:1000px){.ol{grid-template-columns:1fr}}
+.ol-box{max-height:none;height:calc(100vh - 290px);min-height:380px}
+.ol-side{background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius);
+         display:flex;flex-direction:column;height:calc(100vh - 290px);min-height:380px}
+.ol-side.solo{height:calc(100vh - 330px)}
+.side-tabs{display:flex;border-bottom:1px solid var(--rule);flex:none}
+.side-tabs button{flex:1;border:0;border-radius:0;background:none;padding:10px;
+                  border-bottom:2px solid transparent;color:var(--ink2)}
+.side-tabs button[aria-selected="true"]{border-bottom-color:var(--accent);color:var(--ink);
+                                        font-weight:600}
+.side-body{flex:1;overflow:auto;padding:12px 12px 4px;position:relative}
+.side-body.pdf{padding:0;display:flex;flex-direction:column;overflow:hidden}
+.side-body .item{padding:12px 13px}
+.side-body .ba{grid-template-columns:1fr!important}
+.side-body .group>h2{font-size:.95rem}
+.pdfbar{display:flex;gap:8px;align-items:center;padding:8px 10px;
+        border-bottom:1px solid var(--rule2);flex-wrap:wrap;flex:none}
+.pdfbar select{flex:1;min-width:160px}
+.pdfframe{flex:1;width:100%;border:0;background:#525659;min-height:300px}
+.secsel{max-width:220px}
+.legend{margin-top:8px}
+.lgx{font-family:var(--mono);padding:0 3px;border-radius:3px}
+.lgx del{background:var(--bad-soft);color:var(--bad)}
+.lgx ins{background:var(--good-soft);color:var(--good);text-decoration:none}
+.lgx.ok{background:var(--good-soft);box-shadow:inset 0 -2px 0 var(--good)}
+.lgx.own{background:var(--warn-soft);box-shadow:inset 0 -2px 0 var(--warn)}
+.sg{border-radius:3px;cursor:pointer}
+.sg.undecided del{background:var(--bad-soft);color:var(--bad);text-decoration:line-through;
+                  text-decoration-color:var(--bad)}
+.sg.undecided ins{background:var(--good-soft);color:var(--good);text-decoration:none;
+                  font-weight:650}
+.sg.applied,.sg.accepted{background:var(--good-soft);box-shadow:inset 0 -2px 0 var(--good)}
+.sg.rejected,.sg.reverted{text-decoration:underline dotted var(--muted);
+                          text-underline-offset:3px}
+.sg.own{background:var(--warn-soft);box-shadow:inset 0 -2px 0 var(--warn)}
+.sg.ref{opacity:.82}
+.sg.focus{outline:2px solid var(--accent);outline-offset:1px}
+.sg:hover{filter:brightness(.96)}
+.srcline.pending .ln{background:var(--accent-soft);color:var(--accent);font-weight:700}
+.srcline .ln.flag{box-shadow:inset 3px 0 0 var(--bad)}
+.srcline.flash .tx{animation:fl 1.4s ease-out}
+@keyframes fl{from{background:var(--warn-soft)}to{background:transparent}}
+
+/* the reference list: as written | what it becomes */
+.reflegend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.82rem;color:var(--ink2);
+           margin:-4px 0 4px}
+.reflegend .lg{display:inline-flex;gap:7px;align-items:center}
+.reflegend i{width:12px;height:12px;border-radius:3px;display:inline-block;background:var(--surface3)}
+.reflegend .fixed i{background:var(--good)} .reflegend .problem i{background:var(--bad)}
+.ref{background:var(--surface);border:1px solid var(--rule);border-left:5px solid var(--rule);
+     border-radius:var(--radius);padding:11px 14px 12px;margin-bottom:10px}
+.ref.fixed{border-left-color:var(--good)}
+.ref.problem{border-left-color:var(--bad)}
+.ref.own{border-left-color:var(--warn)}
+.ref.kept{opacity:.72}
+.ref.focus{box-shadow:0 0 0 2px var(--accent)}
+.ref-top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:8px}
+.ref-top .num{font-family:var(--mono);font-weight:700}
+.ref-top .kind{font-size:.8rem;color:var(--ink2)}
+.ref-top .decided{font-size:.82rem}
+.ref-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:860px){.ref-grid{grid-template-columns:1fr}}
+.ref-grid .lab{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;
+               color:var(--muted);font-weight:650;margin-bottom:3px}
+.reftext{font-family:var(--mono);font-size:.81rem;line-height:1.5;white-space:pre-wrap;
+         word-break:break-word;padding:8px 10px;border-radius:6px;background:var(--surface2);
+         min-height:2.4em}
+.ref.fixed .res .reftext{background:var(--good-soft)}
+.ref.problem .res .reftext{background:var(--bad-soft)}
+.ref.own .res .reftext{background:var(--warn-soft)}
+.reftext .del{background:var(--bad-soft);color:var(--bad);text-decoration:line-through;
+              border-radius:2px}
+.reftext .ins{color:var(--good);font-weight:700;text-decoration:underline;
+              text-decoration-color:var(--good);text-underline-offset:2px}
+.ref.problem .reftext .ins{color:var(--bad);text-decoration-color:var(--bad)}
+.reftext.muted-box{font-family:var(--sans);color:var(--ink2);font-size:.86rem}
+.reftext .nearest{font-family:var(--mono);font-size:.8rem;margin-top:6px;color:var(--ink)}
+.prints{font-size:.84rem;margin-top:6px;color:var(--ink2)}
+.refmeta{font-size:.85rem;color:var(--ink2);margin-top:9px;display:grid;gap:3px}
+.refmeta .missing{color:var(--bad);font-weight:600}
+.refmeta .prob{display:block}
+.refmeta .prob .sevdot{margin-right:4px;vertical-align:middle}
+.refmeta label.inline{font-size:.78rem;color:var(--muted);margin-left:8px;cursor:pointer}
+.ref .acts{margin-top:10px}
+
+/* tags */
+.tagrow{margin-bottom:10px}
+.tagc{display:inline-block;font-family:var(--mono);font-size:.8rem;font-weight:650;
+      padding:2px 9px;border-radius:12px;background:var(--surface3);color:var(--ink)}
+.tagc.small{font-size:.72rem;padding:1px 7px}
+.tagc.red{background:#f6d5da;color:#7d1426} .tagc.orange{background:#fbe0c8;color:#7a3d06}
+.tagc.yellow{background:#f7edc0;color:#5f4b00} .tagc.violet{background:#e6dcf5;color:#4a2a7a}
+.tagc.pink{background:#f8d9ea;color:#7a1f52} .tagc.green{background:#d3efdf;color:#13603a}
+.tagc.brown{background:#eadfd3;color:#5a3d22}
+.tagfams{display:grid;gap:6px}
+.tagfam>summary{cursor:pointer;padding:6px 0;font-size:.9rem}
+.tagopt{margin:4px 0 6px 6px}
+
+.reprepare{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+.reprepare .grow{flex:1;min-width:260px}
+ul.dropped{flex-basis:100%;margin:4px 0 0;padding-left:20px;font-size:.84rem}
+
 /* letter */
 .letter textarea{min-height:340px;font-family:var(--mono);font-size:.85rem}
 
@@ -445,7 +565,7 @@ kbd{font-family:var(--mono);font-size:.75rem;border:1px solid var(--rule);
 /* ------------------------------------------------------------------ state */
 const S = {
   root:"", editor:"", papers:[], filter:"all", whose:"any", indico:null,
-  folder:null, paper:null, tab:"decisions", cursor:0, job:null,
+  folder:null, paper:null, tab:"names", cursor:0, job:null, refFilter:"all", side:"review",
   showApplied:false, givenUpSeen:new Set(), givenUpPrimed:false,
   chief:null, chiefPapers:null, chiefLoading:false, chiefError:"", chiefListOpen:null,
   sharing:null, pool:null, poolPapers:null, poolYou:null, poolError:"", poolShow:"edit", manageShow:"all",
@@ -589,7 +709,7 @@ $("#dlgGiveUp").addEventListener("close", () => {
 /* ------------------------------------------------------------- worklist */
 const FILTERS = [
   ["all","All papers"], ["todo","Still to do"], ["new","Not started"],
-  ["in_review","In progress"], ["done","Finished"],
+  ["in_review","In progress"], ["aside","Set aside"], ["done","Finished"],
 ];
 
 /* Who holds each paper in Indico; shown only for a conference pulled from it. */
@@ -600,7 +720,9 @@ const WHOSE = [
 
 function matchesStatus(p, f=S.filter){
   if(f==="all") return true;
-  if(f==="todo") return p.status!=="done";
+  // A paper set aside for the author is not "to do" until the wait is over.
+  if(f==="todo") return p.status!=="done" && !(p.hold && !p.hold.over);
+  if(f==="aside") return !!p.hold;
   return p.status===f;
 }
 
@@ -1058,14 +1180,17 @@ function poolPanel(){
     tr.appendChild(ind);
     tr.appendChild(stageCell(editedState(p)));
     tr.appendChild(stageCell(qaState(p)));
-    tr.appendChild(el("td",null, !p.claim ? "—"
+    tr.appendChild(el("td",null, !p.claim
+      ? (p.blocked && p.indico ? p.indico.editor+" (in Indico)" : "—")
       : (p.claim.mine ? "You" : p.claim.who)+(p.claim.mode==="qa" ? " (QA)" : "")));
     const act = el("td"); act.style.textAlign="right"; act.style.whiteSpace="nowrap";
     if(p.claim && p.claim.mine && p.here){
       const b = el("button",null,"Open"); b.onclick = () => openPaper(p.folder);
       act.appendChild(b);
     } else if(!p.claim && p.take==="edit" && p.blocked){
-      act.appendChild(el("span","tiny muted","assigned to someone else"));
+      const s2 = el("span","tiny muted","taken in Indico");
+      s2.title = p.blocked+" Ask the chief editor if it should be yours.";
+      act.appendChild(s2);
     } else if(!p.claim && p.take && notEditor){
       act.appendChild(el("span","tiny muted","not an editor in Indico"));
     } else if(!p.claim && p.take){
@@ -1226,6 +1351,7 @@ function renderWorklist(){
     box.appendChild(b);
     host.appendChild(box);
   }
+  if(!S.pool && total-unprepared>0 && !(S.job && !S.job.finished)) host.appendChild(reprepareBox());
 
   if(S.chief){ renderManaging(host); return; }
   if(!total) return;
@@ -1305,6 +1431,13 @@ function renderWorklist(){
     const c3 = el("td");
     c3.appendChild(el("span","pill "+(p.screened?p.status:"new"),
       p.screened? p.status_word : "Not prepared"));
+    if(p.hold){
+      const hp = el("span","pill "+(p.hold.over?"st-bad":"st-warn"),
+        p.hold.over ? "Set aside: the wait is over"
+          : "Set aside"+(p.hold.until ? " until "+when(p.hold.until) : ""));
+      hp.title = p.hold.reason || "Waiting for the author";
+      c3.appendChild(document.createTextNode(" ")); c3.appendChild(hp);
+    }
     if(p.claim){
       const mine = p.claim.state==="mine";
       const cp = el("span","pill claim-"+(mine?"mine":"other"),
@@ -1408,15 +1541,15 @@ function managedRows(){
 }
 
 const MANAGE_SHOW = [
-  ["all","All"], ["to_edit","To edit"], ["working","Being worked on"],
+  ["all","All"], ["to_edit","Free to edit"], ["working","Taken"],
   ["to_qa","To QA"], ["qa_failed","QA failed"], ["qa_passed","Done"],
   ["indico_newer","Newer in Indico"], ["not_here","Not downloaded"],
 ];
 const MANAGE_KEEP = {
   all: r=>true,
-  to_edit: r=>r.lp && !r.lp.claim && ["to_edit","waiting_author","to_reedit"]
-    .includes(r.lp.stage),
-  working: r=>r.lp && r.lp.claim,
+  to_edit: r=>r.lp && !r.lp.claim && !(r.lp.holder && r.lp.holder.taken)
+    && ["to_edit","waiting_author","to_reedit"].includes(r.lp.stage),
+  working: r=>r.lp && (r.lp.claim || (r.lp.holder && r.lp.holder.taken)),
   to_qa: r=>r.lp && !r.lp.claim && r.lp.stage==="to_qa",
   qa_failed: r=>r.lp && r.lp.stage==="to_reedit",
   qa_passed: r=>r.lp && r.lp.stage==="qa_passed",
@@ -1428,6 +1561,7 @@ function localState(r){
   if(!r.lp) return ["Not downloaded","none",""];
   const rev = r.ip && r.ip.local_revisions ? "revision "+r.ip.local_revisions : "";
   if(!r.lp.screened) return ["Not prepared","warn",rev];
+  if(r.lp.outdated) return ["Downloaded","good",(rev ? rev+" · " : "")+"prepared by an older version"];
   return ["Downloaded","good",rev];
 }
 
@@ -1461,25 +1595,43 @@ function titleAuthorState(r){
   }[ta.status] || [ta.status_word || "—","none",""];
 }
 
-function indicoState(r){
-  const editor = (r.ip && r.ip.editor) || (r.lp && r.lp.indico && r.lp.indico.editor) || "";
+/* Who holds a paper, for the chief: taken on this desk, taken in Indico, or
+   both. Either way nobody else can take it to edit it until it is freed. */
+function takenState(r){
+  const h = r.lp && r.lp.holder;
   const state = (r.ip && r.ip.state) || (r.lp && r.lp.indico && r.lp.indico.state) || "";
-  if(!r.ip && !(r.lp && r.lp.indico)) return ["—","none",""];
-  const differs = r.lp && r.lp.claim_vs_indico==="differs";
-  const editedHere = r.lp && r.lp.claim && r.lp.claim.mode!=="qa";
-  if(!editor && editedHere){
-    const on = S.indicoSync && S.indicoSync.enabled;
-    return ["Nobody yet", "warn", on ? "assigning "+r.lp.claim.who+"…"
-      : "not told: the Indico sync is off"];
+  const st = state ? state.replace(/_/g," ") : "";
+  const sep = (a, b) => [a, b].filter(Boolean).join(" · ");
+  if(!h){
+    const editor = (r.ip && r.ip.editor) || (r.lp && r.lp.indico && r.lp.indico.editor) || "";
+    return editor ? [editor,"warn",sep("in Indico", st)] : ["Free","none",st];
   }
-  return [editor || "Nobody yet", differs ? "bad" : editor ? "none" : "none",
-    (state ? state.replace(/_/g," ") : "")
-    +(differs ? (state ? " · " : "")+"not the editor working on it here" : "")];
+  const sync = S.indicoSync && S.indicoSync.enabled;
+  const qa = h.here && h.here.mode==="qa";
+  if(h.taken==="here") return [h.here.who+(qa ? " (QA)" : ""), "info",
+    qa ? "QA, on this desk" : sep("on this desk", sync ? "assigning in Indico…"
+      : "not in Indico: the sync is off")];
+  if(h.taken==="both") return [h.here.who, "info", sep("on this desk and in Indico", st)];
+  if(h.taken==="indico") return [h.indico, "warn", sep("took it in Indico, not on this desk", st)];
+  if(h.taken==="conflict") return [h.here.who, "bad", "on this desk; Indico gives it to "+h.indico];
+  if(h.freed) return ["Free", "warn", "freed here; Indico still shows "+h.freed+": unassign them there"];
+  return ["Free", "none", st];
 }
 
 function renderManaging(host){
   const rows = managedRows();
   if(!rows.length) return;
+  const inIndico = rows.filter(r=>r.lp && r.lp.holder && r.lp.holder.taken==="indico");
+  const freed = rows.filter(r=>r.lp && r.lp.holder && r.lp.holder.freed);
+  if(inIndico.length) host.appendChild(el("p","tiny muted", inIndico.length+" paper"
+    +(inIndico.length===1 ? " was" : "s were")+" taken in Indico by an editor who is not "
+    +"working on it here: nobody else can take "+(inIndico.length===1 ? "it" : "them")
+    +" on the desk until you free "+(inIndico.length===1 ? "it" : "them")+"."));
+  if(freed.length) host.appendChild(el("p","bad-text", freed.length+" paper"
+    +(freed.length===1 ? " you freed is" : "s you freed are")+" still assigned in Indico ("
+    +freed.map(r=>(r.lp.paper_id)+": "+r.lp.holder.freed).join(", ")+"). The desk lets other "
+    +"editors take "+(freed.length===1 ? "it" : "them")+"; unassign "+(freed.length===1 ? "the editor" : "them")
+    +" in Indico too."));
   const filters = el("div","filters");
   MANAGE_SHOW.forEach(([key,label])=>{
     const n = rows.filter(MANAGE_KEEP[key]).length;
@@ -1518,7 +1670,7 @@ function renderManaging(host){
   }
   const table = el("table","wl manage");
   const htr = el("tr");
-  ["Paper","Title","Local copy","Newer","Author/title","Edited","QA","In Indico",""]
+  ["Paper","Title","Local copy","Newer","Author/title","Edited","QA","Taken by",""]
     .forEach(h=>htr.appendChild(el("th",null,h)));
   const thead = el("thead"); thead.appendChild(htr); table.appendChild(thead);
   const tbody = el("tbody");
@@ -1536,15 +1688,15 @@ function renderManaging(host){
     tr.appendChild(stageCell(titleAuthorState(r)));
     tr.appendChild(stageCell(lp ? editedState(lp) : ["—","none",""]));
     tr.appendChild(stageCell(lp ? qaState(lp) : ["—","none",""]));
-    tr.appendChild(stageCell(indicoState(r)));
+    tr.appendChild(stageCell(takenState(r)));
     const act = el("td"); act.style.textAlign="right"; act.style.whiteSpace="nowrap";
     if(lp && !lp.screened){
       const b = el("button",null,"Prepare"); b.onclick = () => prepare({folder:lp.folder});
       act.appendChild(b);
     }
-    if(lp && lp.claim){
+    if(lp && (lp.holder ? lp.holder.can_free : lp.claim)){
       const b = el("button",null,"Free");
-      b.title = "Free this paper so any editor can take it";
+      b.title = "Free this paper so any editor can take it: whoever has it, here or in Indico";
       b.onclick = () => freePaper(lp, b);
       act.appendChild(b);
     }
@@ -1568,22 +1720,93 @@ function renderManaging(host){
 }
 
 async function freePaper(p, btn){
-  const who = p.claim.state==="mine" ? "this managing desk" : (p.claim.who || "its editor");
-  if(!confirm("Free "+p.paper_id+" from "+who+"?\n\nAny editor can then take it. Work "
-    +"their desk has not sent yet stays on their computer, and their desk tells them "
-    +"the paper is no longer theirs."
-    +(S.indicoSync && S.indicoSync.enabled && p.status!=="done"
-      ? " They are unassigned in Indico too." : ""))) return;
+  const h = p.holder || {taken: p.claim ? "here" : "", here: p.claim, indico: ""};
+  const sync = S.indicoSync && S.indicoSync.enabled;
+  const finished = p.status==="done" || p.status==="needs_author";
+  const lines = [];
+  if(h.taken==="indico"){
+    lines.push("Free "+p.paper_id+" from "+h.indico+", who took it in Indico?", "");
+    lines.push(sync && !finished ? "They are unassigned in Indico, and any editor can then take it here."
+      : "Any editor can then take it here. Indico still shows "+h.indico
+        +(sync ? " (a finished paper stays assigned)" : " (the desk does not write to Indico while "
+          +"the sync is off)")+": unassign them there too if they should not have it.");
+  } else {
+    const who = h.here && h.here.who ? h.here.who : "its editor";
+    lines.push("Free "+p.paper_id+" from "+who+"?", "",
+      "Any editor can then take it. Work their desk has not sent yet stays on their "
+      +"computer, and their desk tells them the paper is no longer theirs.");
+    if(h.indico) lines.push("", (h.taken==="conflict" ? "Indico gives it to "+h.indico+"; " : "")
+      +(sync && !finished ? "they are unassigned in Indico too."
+        : "Indico still shows "+h.indico+": unassign them there too."));
+    else if(sync && !finished) lines.push("They are unassigned in Indico too.");
+  }
+  if(!confirm(lines.join("\n"))) return;
   btn.disabled = true;
   try{
-    await api("/api/chief/free", {folder:p.folder});
-    toast(p.paper_id+" is free for any editor to take");
+    const res = await api("/api/chief/free", {folder:p.folder});
+    const f = res.freed || {};
+    toast(p.paper_id+" is free for any editor to take"
+      +(f.indico==="still assigned" ? ": unassign "+f.indico_editor+" in Indico too"
+        : f.indico==="unassigning" ? "; unassigning "+f.indico_editor+" in Indico" : ""),
+      f.indico==="still assigned");
     await loadWorklist();
   }catch(err){ toast(err.message, true); }
   renderWorklist();
 }
 
 /* -------------------------------------------------------------- prepare */
+/* After the way papers are prepared has improved: read every downloaded paper
+   again. The editors' decisions follow their edits; papers an editor is working
+   on, and finished ones, are left alone. */
+function reprepareBox(){
+  const prepared = S.papers.filter(p=>p.screened);
+  const old = prepared.filter(p=>p.outdated).length;
+  const box = el("div","card pad reprepare");
+  const text = el("div","grow");
+  text.appendChild(el("b",null, old
+    ? old+" of "+prepared.length+" prepared paper"+(prepared.length===1?"":"s")
+      +" "+(old===1?"was":"were")+" prepared by an older version of the agent"
+    : "Every paper was prepared by the current version of the agent"));
+  text.appendChild(el("div","tiny muted",
+    "Preparing again reads each paper with the agent as it is now. Decisions, notes and "
+    +"hand edits are kept; papers an editor is working on, and finished papers, are left alone."));
+  box.appendChild(text);
+  const b = el("button", old ? "primary" : null, "Prepare all again…");
+  b.onclick = () => reprepareAll(b);
+  box.appendChild(b);
+  return box;
+}
+
+async function reprepareAll(btn){
+  btn.disabled = true;
+  try{
+    const plan = await api("/api/prepare", {all:true, force:true, dry_run:true});
+    btn.disabled = false;
+    if(!plan.would_prepare){
+      toast("Nothing to prepare again: "+[plan.held ? plan.held+" being edited" : "",
+        plan.finished ? plan.finished+" finished" : ""].filter(Boolean).join(", ")
+        +" — those are left alone", true);
+      return;
+    }
+    const lines = [
+      "Prepare "+plan.would_prepare+" paper"+(plan.would_prepare===1?"":"s")+" again with the "
+        +"current version of the agent?"
+        +(plan.outdated ? " ("+plan.outdated+" of them were prepared by an older version.)" : ""),
+      "",
+      "• Decisions, notes and hand edits are kept. A decision whose suggestion has changed "
+        +"or gone is dropped, and that paper says which.",
+    ];
+    if(plan.held) lines.push("• Left alone: "+plan.held+" paper"+(plan.held===1?"":"s")
+      +" an editor is working on.");
+    if(plan.finished) lines.push("• Left alone: "+plan.finished+" finished paper"
+      +(plan.finished===1?"":"s")+" (their reviewed files and letters are written).");
+    lines.push("", "This takes a few seconds per paper"
+      +(plan.would_prepare>20 ? " — several minutes in all" : "")+". You can keep working meanwhile.");
+    if(!confirm(lines.join("\n"))) return;
+    await prepare({all:true, force:true});
+  }catch(err){ btn.disabled = false; toast(err.message, true); }
+}
+
 async function prepare(opts){
   try{
     const res = await api("/api/prepare", opts);
@@ -1601,6 +1824,9 @@ async function pollJob(){
       S.job = null;
       if(job.errors && job.errors.length){
         toast(job.errors.length+" problem(s): "+job.errors[0], true);
+      } else if(job.notes && job.notes.length){
+        toast("Prepared. "+job.notes.length+" paper(s) to look at: "+job.notes[0]
+          +(job.notes.length>1 ? " (and "+(job.notes.length-1)+" more)" : ""), true);
       } else { toast("Ready to review"); }
       await loadWorklist();
       if(S.chief) loadChiefPapers();
@@ -1613,19 +1839,22 @@ async function pollJob(){
 }
 
 /* ---------------------------------------------------------------- paper */
+/* Four tabs, in the order an editor works: the title and authors against
+   Indico (and the email if they differ), the reference list, the body of the
+   paper, and the editor's own panel (tags, the letter, notes, files). */
 const TABS = [
-  ["decisions","Your decisions"],
-  ["problems","Problems"],
-  ["mine","Your notes"],
-  ["source","The paper"],
-  ["letter","Letter to the author"],
-  ["files","Files"],
+  ["names","Title & authors"],
+  ["refs","References"],
+  ["body","The paper"],
+  ["panel","Editor's panel"],
 ];
 
 async function openPaper(folder){
   try{
     const data = await api("/api/paper?folder="+encodeURIComponent(folder));
-    S.folder = folder; S.paper = data; S.cursor = 0;
+    if(S.folder!==folder){ S.tab = "names"; S.cursor = 0; S.refFilter = "all";
+                           S.side = "review"; S.pdfName = ""; S.keepWorking = false; }
+    S.folder = folder; S.paper = data;
     if(!data.screened){ renderUnprepared(); return; }
     renderPaper();
     window.scrollTo({top:0});
@@ -1635,6 +1864,7 @@ async function openPaper(folder){
 function renderUnprepared(){
   const host = $("#viewPaper");
   $("#viewWorklist").hidden = true; host.hidden = false; $("#footbar").hidden = true;
+  document.querySelector("main").classList.remove("wide");
   host.innerHTML = "";
   const back = el("button","crumb","← All papers"); back.onclick = backToList;
   host.appendChild(back);
@@ -1652,10 +1882,39 @@ function renderUnprepared(){
   host.appendChild(e);
 }
 
+/* Which changes and findings belong to which tab (the server sorts them). */
+const bodyDecisions  = () => S.paper.decisions.filter(d=>d.scope==="body");
+const titleDecisions = () => S.paper.decisions.filter(d=>d.scope==="title");
+
+function tabBadge(key){
+  const p = S.paper, t = p.title_authors, R = p.references || {counts:{}};
+  if(key==="names"){
+    const n = titleDecisions().filter(d=>d.decision==="undecided").length;
+    if(t && ["differs","due","changed"].includes(t.status)) return ["!", "attn"];
+    return n ? [String(n), ""] : null;
+  }
+  if(key==="refs"){
+    const c = R.counts || {};
+    if(c.undecided) return [String(c.undecided), ""];
+    return c.problem ? [String(c.problem), "attn"] : null;
+  }
+  if(key==="body"){
+    const n = bodyDecisions().filter(d=>d.decision==="undecided").length;
+    return n ? [String(n), ""] : null;
+  }
+  if(key==="panel"){
+    const n = (p.tags && p.tags.chosen || []).length;
+    return n ? [n+" tag"+(n===1?"":"s"), "soft"] : null;
+  }
+  return null;
+}
+
 function renderPaper(){
   const p = S.paper;
   const host = $("#viewPaper");
   $("#viewWorklist").hidden = true; host.hidden = false; $("#footbar").hidden = false;
+  if(!TABS.some(([key])=>key===S.tab)) S.tab = "names";
+  document.querySelector("main").classList.toggle("wide", S.tab==="body" || S.tab==="refs");
   host.innerHTML = "";
 
   const back = el("button","crumb","← All papers"); back.onclick = backToList;
@@ -1664,7 +1923,6 @@ function renderPaper(){
   const head = el("div","paper-head");
   const grow = el("div","grow");
   const h1 = el("h1"); h1.appendChild(el("span","pid",p.paper_id));
-  h1.appendChild(document.createTextNode("  "));
   grow.appendChild(h1);
   grow.appendChild(el("p","sub", p.title || p.name));
   head.appendChild(grow);
@@ -1677,6 +1935,10 @@ function renderPaper(){
   const held = heldNotice(p.indico);
   if(held) host.appendChild(held);
   host.appendChild(claimNotice(p.claim));
+  const hold = holdBanner(p);
+  if(hold) host.appendChild(hold);
+  const again = repreparedNotice(p);
+  if(again) host.appendChild(again);
   const names = p.title_authors;
   if(names && names.status==="due" && S.tab!=="names"){
     const box = el("div","held other");
@@ -1688,40 +1950,25 @@ function renderPaper(){
     host.appendChild(box);
   }
 
-  const c = p.counts;
-  const sum = el("div","summary");
-  const chip = (n,label,cls) => { const d=el("div","chip "+(cls||""));
-    d.appendChild(el("b",null,String(n))); d.appendChild(el("span",null,label));
-    return d; };
-  sum.appendChild(chip(c.applied,"already corrected","ok"));
-  if(c.reverted) sum.appendChild(chip(c.reverted,"you put back","attn"));
-  sum.appendChild(chip(c.to_decide,"need your decision", c.to_decide?"todo":""));
-  sum.appendChild(chip(c.must_fix,"must be fixed", c.must_fix?"attn":""));
-  sum.appendChild(chip(c.my_notes + c.my_edits,"your notes & edits"));
-  host.appendChild(sum);
-
-  const tabList = TABS.slice();
-  if(names) tabList.splice(1, 0, ["names","Title & authors"]);
-  if(!tabList.some(([key])=>key===S.tab)) S.tab = "decisions";
   const tabs = el("div","tabs");
-  tabList.forEach(([key,label])=>{
-    const b = el("button",null,label);
-    const n = {decisions:c.to_decide, problems:c.must_fix+c.worth_a_look,
-               mine:c.my_notes+c.my_edits,
-               names:(names && ["differs","due","changed"].includes(names.status)) ? "!" : 0}[key];
-    if(n) b.appendChild(el("span","n",String(n)));
+  TABS.forEach(([key,label], i)=>{
+    const b = el("button",null,(i+1)+". "+label);
+    const badge = tabBadge(key);
+    if(badge) b.appendChild(el("span","n "+badge[1], badge[0]));
     b.setAttribute("aria-selected", S.tab===key?"true":"false");
-    b.onclick = () => { S.tab=key; S.cursor=0; renderPaper(); };
+    b.onclick = () => { S.tab=key; S.cursor=0; renderPaper(); window.scrollTo({top:0}); };
     tabs.appendChild(b);
   });
   host.appendChild(tabs);
 
   const body = el("div");
   host.appendChild(body);
-  ({decisions:tabDecisions, names:tabNames, problems:tabProblems, mine:tabMine,
-    source:tabSource, letter:tabLetter, files:tabFiles}[S.tab])(body);
+  ({names:tabNames, refs:tabRefs, body:tabBody, panel:tabPanel}[S.tab])(body);
 
   updateFoot();
+  // Where you are, in the address: a reload comes back to this paper and tab.
+  try{ history.replaceState(null, "", "#"+new URLSearchParams({paper:S.folder, tab:S.tab})); }
+  catch(_){}
 }
 
 function updateFoot(){
@@ -1742,43 +1989,78 @@ function updateFoot(){
 
 function backToList(){
   S.folder=null; S.paper=null;
+  try{ history.replaceState(null, "", location.pathname); }catch(_){}
+  document.querySelector("main").classList.remove("wide");
   loadWorklist().then(renderWorklist);
 }
 
-/* ------------------------------------------------- tab: your decisions */
-
-/* The corrections the agent made without asking.  Collapsed, because on a
-   normal paper there are eight of them and they are all the same spacing fix
-   — but present and reversible, because "we did not ask you" must not mean
-   "you cannot say no". */
-function appliedSection(host){
-  const list = S.paper.applied || [];
-  if(!list.length) return;
-  const back = list.filter(a=>a.decision==="reverted").length;
-
-  const det = el("details","autobox");
-  det.open = S.showApplied || back>0;
-  det.ontoggle = () => { S.showApplied = det.open; };
-
-  const sum = el("summary");
-  sum.appendChild(el("b",null,(list.length-back)+" correction"
-    +(list.length-back===1?"":"s")+" already applied"));
-  sum.appendChild(el("span","sub2", back
-    ? back+" put back as the author wrote it"
-    : "nothing needed from you — open this to check or undo any of them"));
-  det.appendChild(sum);
-
-  const inner = el("div","inner");
-  inner.appendChild(el("p","why",
-    "These are the corrections the agent makes the same way every time, with no "
-    +"judgement involved, so it does not ask. If one of them is wrong for this "
-    +"paper, put it back — the reviewed file and the letter to the author both "
-    +"follow what you choose here."));
-  list.forEach(a=>inner.appendChild(appliedCard(a)));
-  det.appendChild(inner);
-  host.appendChild(det);
+/* Prepared again, some earlier decisions may have had no edit left to land on. */
+function repreparedNotice(p){
+  const r = p.reprepared;
+  if(!r || !(r.dropped||[]).length || S.seenReprepared===p.folder+r.at) return null;
+  const box = el("div","held other");
+  box.appendChild(el("b",null,"Prepared again "+when(r.at)+"."));
+  box.appendChild(el("span",null, r.dropped.length+" earlier decision"
+    +(r.dropped.length===1?" no longer applies":"s no longer apply")
+    +", because the suggestion changed or is gone"
+    +(r.kept ? "; "+r.kept+" kept" : "")+". Look at the new suggestions where these were:"));
+  const ul = el("ul","dropped");
+  r.dropped.forEach(d=>{
+    const li = el("li");
+    li.appendChild(el("span","checkid",d.check_id||""));
+    li.appendChild(document.createTextNode(" "+(d.decision ? d.decision+": " : "")
+      +"“"+(d.before||"").slice(0,90)+"” → “"+(d.after||"").slice(0,90)+"”"
+      +(d.note ? " — your note: "+d.note : "")));
+    ul.appendChild(li);
+  });
+  box.appendChild(ul);
+  const ok = el("button","plain","Got it");
+  ok.onclick = () => { S.seenReprepared = p.folder+r.at; renderPaper(); };
+  box.appendChild(ok);
+  return box;
 }
 
+/* ------------------------------------------- setting a paper aside */
+/* While the author has the email, the paper stays this editor's but leaves
+   their list of papers to work on now. */
+function holdBanner(p){
+  const h = p.hold;
+  if(!h) return null;
+  const box = el("div","held "+(h.over?"other":"you"));
+  box.appendChild(el("b",null, h.over ? "The wait is over." : "Set aside, waiting for the author."));
+  box.appendChild(el("span",null,
+    (h.until ? (h.over ? "The author had until " : "Until ")+when(h.until)+". " : "")
+    + "Set aside "+when(h.since)+(h.reason ? " — "+h.reason : "")+"."));
+  const b = el("button","plain","Take it up again");
+  b.onclick = () => holdAction("clear");
+  box.appendChild(b);
+  return box;
+}
+
+async function holdAction(action, reason){
+  try{
+    S.paper = await api("/api/hold",{folder:S.folder, action, reason:reason||""});
+    if(action==="set"){
+      toast("Set aside until the author replies — it stays yours");
+      backToList();
+    } else { toast("Back in your work"); renderPaper(); }
+  }catch(err){ toast(err.message, true); }
+}
+
+/* An email opened in the editor's own mail program: the desk sends nothing. */
+function mailtoHref(text, subject){
+  let body = text || "";
+  const m = body.match(/^Subject:[ \t]*(.*)\r?\n(\r?\n)?/);
+  if(m){ subject = m[1]; body = body.slice(m[0].length); }
+  return "mailto:?subject="+encodeURIComponent(subject||"")+"&body="+encodeURIComponent(body);
+}
+
+function openMail(text, subject){
+  const a = el("a"); a.href = mailtoHref(text, subject);
+  a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* ------------------------------------------------------ shared cards */
 function appliedCard(a){
   const item = el("div","item "+a.decision);
 
@@ -1810,18 +2092,11 @@ function appliedCard(a){
     undo.onclick = () => decide(a.id,"reverted");
     acts.appendChild(undo);
   }
+  if(a.scope==="body") acts.appendChild(showInSource(a.id));
   const id = el("span","checkid"); id.textContent = a.check_id;
   id.title = (a.rule||"") + (a.detail? "\n\n"+a.detail : "");
   acts.appendChild(el("span",null," ")); acts.appendChild(id);
   item.appendChild(acts);
-
-  if(a.decision==="reverted"){
-    const hint = el("p","why");
-    hint.style.marginTop = "9px";
-    hint.textContent = "The author's own wording stands. If they should be told "
-      + "about it, add it under Your notes — the letter no longer mentions this.";
-    item.appendChild(hint);
-  }
 
   if(a.note){
     const n = el("div","hasnote");
@@ -1833,65 +2108,17 @@ function appliedCard(a){
   return item;
 }
 
-function tabDecisions(host){
-  const list = S.paper.decisions;
-  appliedSection(host);
-  if(!list.length){
-    const e = el("div","empty");
-    e.appendChild(el("b",null,"Nothing to decide"));
-    e.appendChild(el("div",null,
-      "Every correction the agent was confident about is already applied — they "
-      +"are listed above, and any of them can be put back. Anything it was not "
-      +"confident about is under Problems."));
-    host.appendChild(e); return;
-  }
-  const undec = list.filter(d=>d.decision==="undecided").length;
-  const g = el("div","group");
-  g.appendChild(el("h2",null,"Accept or reject each change"));
-  g.appendChild(el("p",null,
-    "Each card is one piece of text. Accepting changes only that. Rejecting "
-    +"leaves it exactly as the author wrote it. "
-    +(undec? undec+" left to decide." : "All decided — you can change any of them.")));
-  const hint = el("div","keyhint");
-  hint.innerHTML = 'Keyboard: <kbd>a</kbd> accept · <kbd>r</kbd> reject '
-    + '· <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>n</kbd> add a note';
-  g.appendChild(hint);
-  host.appendChild(g);
-
-  /* Three authors written out in full are three separate changes, correctly —
-     but an editor wants to answer them once.  Offer a bulk action for any
-     kind of change that appears more than once and is still undecided. */
-  const kinds = new Map();
-  list.forEach(d=>{
-    if(d.decision!=="undecided") return;
-    if(!kinds.has(d.check_id)) kinds.set(d.check_id, {heading:d.heading, ids:[]});
-    kinds.get(d.check_id).ids.push(d.id);
-  });
-  const repeated = [...kinds.values()].filter(k=>k.ids.length>1);
-  if(repeated.length){
-    const bulk = el("div","bulk");
-    bulk.appendChild(el("span","lab","Same kind of change, more than once:"));
-    repeated.forEach(k=>{
-      const yes = el("button","yes","Accept all "+k.ids.length+" · "+k.heading.toLowerCase());
-      yes.onclick = () => decideMany(k.ids,"accepted");
-      const no = el("button","no","Keep all as submitted");
-      no.onclick = () => decideMany(k.ids,"rejected");
-      bulk.appendChild(yes); bulk.appendChild(no);
-    });
-    host.appendChild(bulk);
-  }
-
-  list.forEach((d,i)=>host.appendChild(decisionCard(d,i)));
-}
-
+/* A suggestion: accept it, keep the author's text, or accept it in your own
+   words ("Modify"). */
 function decisionCard(d, index){
   const item = el("div","item "+(d.decision!=="undecided"?d.decision:"")
     + (index===S.cursor?" focus":""));
   item.dataset.index = index;
+  item.dataset.id = d.id;
 
   const top = el("div","item-top");
   top.appendChild(el("h3",null,d.heading));
-  if(d.line) top.appendChild(el("span","where","line "+d.line));
+  if(d.line_label) top.appendChild(el("span","where",d.line_label));
   else if(d.kind==="reorder") top.appendChild(el("span","where","reference list"));
   item.appendChild(top);
 
@@ -1900,8 +2127,10 @@ function decisionCard(d, index){
   const ba = el("div","ba");
   const was = el("div","was"); was.appendChild(el("span","lab","As submitted"));
   was.appendChild(document.createTextNode(d.before));
-  const now = el("div","now"); now.appendChild(el("span","lab","Proposed"));
-  now.appendChild(document.createTextNode(d.after || "(removed)"));
+  const now = el("div","now");
+  const mine = d.edited_text!=null;
+  now.appendChild(el("span","lab", mine ? "Accepted in your words" : "Proposed"));
+  now.appendChild(document.createTextNode((mine ? d.edited_text : d.after) || "(removed)"));
   ba.appendChild(was); ba.appendChild(now);
   item.appendChild(ba);
 
@@ -1914,12 +2143,19 @@ function decisionCard(d, index){
     acts.appendChild(yes); acts.appendChild(no);
   } else {
     const badge = el("div","decided "+d.decision,
-      d.decision==="accepted" ? "✓ Accepted" : "✗ Kept as submitted");
+      d.decision==="accepted" ? (mine ? "✓ Accepted, your wording" : "✓ Accepted")
+                              : "✗ Kept as submitted");
     acts.appendChild(badge);
     const undo = el("button","plain","change");
     undo.onclick = () => decide(d.id,"undecided");
     acts.appendChild(undo);
   }
+  if(d.kind!=="reorder"){
+    const mod = el("button",null,"Modify…");
+    mod.onclick = () => openModify(item, d);
+    acts.appendChild(mod);
+  }
+  if(d.scope==="body") acts.appendChild(showInSource(d.id));
   const why = el("span","checkid"); why.textContent = d.check_id;
   why.title = (d.rule||"") + (d.detail? "\n\n"+d.detail : "");
   acts.appendChild(el("span",null," ")); acts.appendChild(why);
@@ -1933,6 +2169,37 @@ function decisionCard(d, index){
   }
   item.appendChild(noteEditor(d.note, d.id, "edit"));
   return item;
+}
+
+function openModify(item, d){
+  if(item.querySelector(".modbox")) return;
+  const box = el("div","modbox");
+  box.appendChild(el("label","tiny muted","Your wording for this change (it replaces “"
+    + (d.before.length>60 ? d.before.slice(0,59)+"…" : d.before) + "”):"));
+  const ta = el("textarea"); ta.value = d.edited_text!=null ? d.edited_text : d.after;
+  ta.spellcheck = false; ta.className = "mono";
+  box.appendChild(ta);
+  const row = el("div","row"); row.style.marginTop="8px";
+  const save = el("button","primary","Accept in my words");
+  save.onclick = async () => {
+    try{ S.paper = await api("/api/edit-text",{folder:S.folder,id:d.id,text:ta.value});
+         toast("Accepted in your words"); renderPaper(); }
+    catch(err){ toast(err.message,true); }
+  };
+  row.appendChild(save);
+  if(d.edited_text!=null){
+    const drop = el("button",null,"Back to the proposed text");
+    drop.onclick = async () => {
+      try{ S.paper = await api("/api/edit-text",{folder:S.folder,id:d.id,text:null});
+           renderPaper(); }catch(err){ toast(err.message,true); }
+    };
+    row.appendChild(drop);
+  }
+  const cancel = el("button","plain","Cancel"); cancel.onclick = () => box.remove();
+  row.appendChild(cancel);
+  box.appendChild(row);
+  item.querySelector(".acts").after(box);
+  ta.focus();
 }
 
 function noteEditor(current, id, kind){
@@ -1961,10 +2228,8 @@ function noteEditor(current, id, kind){
 async function decide(id, decision){
   try{
     S.paper = await api("/api/decide",{folder:S.folder,id,decision});
-    const list = S.paper.decisions;
-    if(decision==="reverted"){
-      S.showApplied = true;      /* keep the section the editor is working in open */
-    }else if(decision!=="undecided"){
+    if(S.tab==="body" && decision!=="undecided" && decision!=="reverted"){
+      const list = bodyDecisions();
       const next = list.findIndex((d,i)=> i>S.cursor && d.decision==="undecided");
       S.cursor = next>=0 ? next : Math.min(S.cursor+1, Math.max(0,list.length-1));
     }
@@ -1978,19 +2243,31 @@ async function decideMany(ids, decision){
     for(const id of ids){
       S.paper = await api("/api/decide",{folder:S.folder,id,decision});
     }
-    const next = S.paper.decisions.findIndex(d=>d.decision==="undecided");
-    S.cursor = next>=0 ? next : 0;
     renderPaper();
     toast(ids.length+(decision==="accepted"?" accepted":" kept as submitted"));
   }catch(err){ toast(err.message, true); }
 }
 
-function focusCursor(){
-  const node = document.querySelector('.item[data-index="'+S.cursor+'"]');
-  if(node) node.scrollIntoView({block:"center", behavior:"smooth"});
+/* Scroll a node to the middle of the panel it scrolls in, not the page. */
+function scrollWithin(node, smooth){
+  if(!node) return;
+  let box = node.parentElement;
+  while(box && box!==document.body){
+    const style = getComputedStyle(box);
+    if(/(auto|scroll)/.test(style.overflowY) && box.scrollHeight>box.clientHeight) break;
+    box = box.parentElement;
+  }
+  if(!box || box===document.body){ node.scrollIntoView({block:"center", behavior:smooth?"smooth":"auto"}); return; }
+  const top = node.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+  box.scrollTo({top:Math.max(0, top - box.clientHeight/3), behavior:smooth?"smooth":"auto"});
 }
 
-/* ------------------------------------------------------ tab: problems */
+function focusCursor(){
+  const sel = S.tab==="refs" ? '.ref[data-index="'+S.cursor+'"]'
+                             : '.item[data-index="'+S.cursor+'"]';
+  scrollWithin(document.querySelector(sel), true);
+}
+
 const OWNER_GROUPS = [
   ["author","Only the author can fix these",
    "The agent will not touch these, because fixing them needs information it "
@@ -2001,31 +2278,19 @@ const OWNER_GROUPS = [
    "What the agent did, and which checks could not run. Nothing to do here."],
 ];
 
-function tabProblems(host){
-  const all = S.paper.findings;
-  if(!all.length){
-    const e = el("div","empty");
-    e.appendChild(el("b",null,"No problems found"));
-    e.appendChild(el("div",null,"Nothing was flagged on this paper."));
-    host.appendChild(e); return;
-  }
-  OWNER_GROUPS.forEach(([owner,title,blurb])=>{
-    const items = all.filter(f=>f.owner===owner);
-    if(!items.length) return;
-    const g = el("div","group");
-    g.appendChild(el("h2",null,title+" ("+items.length+")"));
-    g.appendChild(el("p",null,blurb));
-    items.forEach(f=>g.appendChild(findingCard(f)));
-    host.appendChild(g);
-  });
-}
-
 function findingCard(f){
   const item = el("div","item"+(f.handled?" handled":""));
   const top = el("div","item-top");
   top.appendChild(el("span","sevdot "+f.severity));
   top.appendChild(el("h3",null,f.heading));
-  if(f.line) top.appendChild(el("span","where","line "+f.line));
+  if(f.line){
+    const where = el("span","where","line "+f.line);
+    if(S.tab==="body" && S.paper.body && S.paper.body.editable){
+      where.classList.add("link"); where.title = "Show it in the source";
+      where.onclick = () => jumpToOrigLine(f.line);
+    }
+    top.appendChild(where);
+  }
   top.appendChild(el("span","pill count", f.severity_word));
   item.appendChild(top);
 
@@ -2071,255 +2336,23 @@ function findingCard(f){
   return item;
 }
 
-/* --------------------------------------------------- tab: your notes */
-function tabMine(host){
-  const g = el("div","group");
-  g.appendChild(el("h2",null,"Something you found yourself"));
-  g.appendChild(el("p",null,
-    "The agent only checks what it knows how to check. Anything else you spot "
-    +"goes here, and it will appear in the letter to the author."));
-
-  const form = el("div","card pad");
-  const f1 = el("div"); f1.style.marginBottom="11px";
-  f1.appendChild(el("label","tiny muted","What did you find?"));
-  const ta = el("textarea");
-  ta.placeholder = "e.g. Figure 3 is unreadable at print size.";
-  f1.appendChild(ta); form.appendChild(f1);
-
-  const f2 = el("div"); f2.style.marginBottom="11px";
-  f2.appendChild(el("label","tiny muted","Where? (optional)"));
-  const where = el("input"); where.type="text";
-  where.placeholder = "e.g. Figure 3, reference 7, page 2";
-  f2.appendChild(where); form.appendChild(f2);
-
-  const f3 = el("div","row"); f3.style.marginBottom="11px";
-  const sev = el("select");
-  [["must_fix","Must be fixed"],["worth_a_look","Worth a look"],
-   ["note","Just a note"]].forEach(([v,l])=>{
-    const o = el("option",null,l); o.value=v; sev.appendChild(o);
+function findingGroups(host, items){
+  OWNER_GROUPS.forEach(([owner,title,blurb])=>{
+    const list = items.filter(f=>f.owner===owner);
+    if(!list.length) return;
+    const g = el("div","group");
+    g.appendChild(el("h2",null,title+" ("+list.length+")"));
+    g.appendChild(el("p",null,blurb));
+    list.forEach(f=>g.appendChild(findingCard(f)));
+    host.appendChild(g);
   });
-  sev.value="worth_a_look";
-  sev.style.padding="8px 10px"; sev.style.borderRadius="6px";
-  sev.style.border="1px solid var(--rule)"; sev.style.background="var(--surface2)";
-  f3.appendChild(sev);
-  const forAuthorLab = el("label","opt"); forAuthorLab.style.margin="0";
-  const forAuthor = el("input"); forAuthor.type="checkbox"; forAuthor.checked=true;
-  forAuthorLab.appendChild(forAuthor);
-  forAuthorLab.appendChild(el("span",null,"Tell the author"));
-  f3.appendChild(forAuthorLab);
-  form.appendChild(f3);
-
-  const add = el("button","primary","Add this");
-  add.onclick = async () => {
-    if(!ta.value.trim()){ toast("Write what you found first", true); return; }
-    try{
-      const res = await api("/api/my-note",{folder:S.folder,text:ta.value,
-        where:where.value, severity:sev.value, for_author:forAuthor.checked});
-      S.paper = res.paper; toast("Added"); renderPaper();
-    }catch(err){ toast(err.message,true); }
-  };
-  form.appendChild(add);
-  g.appendChild(form);
-  host.appendChild(g);
-
-  if(S.paper.my_notes.length){
-    const g2 = el("div","group");
-    g2.appendChild(el("h2",null,"What you have found ("+S.paper.my_notes.length+")"));
-    S.paper.my_notes.forEach(n=>{
-      const item = el("div","item");
-      const top = el("div","item-top");
-      top.appendChild(el("h3",null,n.text));
-      if(n.where) top.appendChild(el("span","where",n.where));
-      top.appendChild(el("span","pill count",
-        {must_fix:"Must be fixed",worth_a_look:"Worth a look",note:"Note"}[n.severity]||n.severity));
-      item.appendChild(top);
-      const meta = el("p","why", n.for_author
-        ? "This will appear in the letter to the author."
-        : "Kept for the record only — not sent to the author.");
-      item.appendChild(meta);
-      const acts = el("div","acts");
-      const del = el("button","plain","remove");
-      del.onclick = async () => {
-        try{ S.paper = await api("/api/my-note/delete",{folder:S.folder,id:n.id});
-          renderPaper(); }catch(err){ toast(err.message,true); }
-      };
-      acts.appendChild(del); item.appendChild(acts);
-      g2.appendChild(item);
-    });
-    host.appendChild(g2);
-  }
-
-  if(S.paper.my_edits.length){
-    const g3 = el("div","group");
-    g3.appendChild(el("h2",null,"Lines you changed yourself ("+S.paper.my_edits.length+")"));
-    g3.appendChild(el("p",null,"These are applied on top of the accepted corrections."));
-    S.paper.my_edits.forEach(m=>{
-      const item = el("div","item");
-      const top = el("div","item-top");
-      top.appendChild(el("h3",null,"Line "+m.line));
-      item.appendChild(top);
-      const ba = el("div","ba");
-      const was = el("div","was"); was.appendChild(el("span","lab","Was"));
-      was.appendChild(document.createTextNode(m.before));
-      const now = el("div","now"); now.appendChild(el("span","lab","You wrote"));
-      now.appendChild(document.createTextNode(m.after));
-      ba.appendChild(was); ba.appendChild(now); item.appendChild(ba);
-      if(m.note) { const n=el("div","hasnote");
-        n.appendChild(el("b",null,"Your note: "));
-        n.appendChild(document.createTextNode(m.note)); item.appendChild(n); }
-      const acts = el("div","acts");
-      const del = el("button","plain","undo this change");
-      del.onclick = async () => {
-        try{ S.paper = await api("/api/my-edit/delete",{folder:S.folder,id:m.id});
-          toast("Undone"); renderPaper(); }catch(err){ toast(err.message,true); }
-      };
-      acts.appendChild(del); item.appendChild(acts);
-      g3.appendChild(item);
-    });
-    host.appendChild(g3);
-  }
-
-  const g4 = el("div","group");
-  g4.appendChild(el("h2",null,"A note about the whole paper"));
-  g4.appendChild(el("p",null,"Added to the end of the letter to the author."));
-  const box = el("div","card pad");
-  const pta = el("textarea"); pta.value = S.paper.paper_note || "";
-  pta.placeholder = "Anything you want to say about the paper as a whole.";
-  box.appendChild(pta);
-  const savep = el("button","primary","Save"); savep.style.marginTop="9px";
-  savep.onclick = async () => {
-    try{ await api("/api/paper-note",{folder:S.folder,note:pta.value});
-      toast("Saved"); await refresh(); }catch(err){ toast(err.message,true); }
-  };
-  box.appendChild(savep);
-  g4.appendChild(box);
-  host.appendChild(g4);
 }
 
-/* -------------------------------------------------------- tab: source */
-function tabSource(host){
-  const src = S.paper.source;
-  const g = el("div","group");
-  g.appendChild(el("h2",null,"The paper as it stands"));
-  g.appendChild(el("p",null, src.note || ""));
-  host.appendChild(g);
-
-  if(!src.editable) return;
-
-  /* A LaTeX file opens on twenty lines of preamble that mean nothing to an
-     editor.  These controls put them where the content is: the parts of the
-     paper they know by name, the lines that changed, or a word they remember. */
-  const tools = el("div","srctools");
-  const jumps = [
-    ["Title",      (l)=>/\\title\s*\{/.test(l.text)],
-    ["Authors",    (l)=>/\\author\s*\{/.test(l.text)],
-    ["Body",       (l)=>/\\begin\s*\{document\}|\\maketitle/.test(l.text)],
-    ["References", (l)=>/\\begin\s*\{thebibliography\}|\\printbibliography|REFERENCES/.test(l.text)],
-    ["First change", (l)=>l.changed || l.mine],
-  ];
-  jumps.forEach(([label,test])=>{
-    const target = src.lines.find(test);
-    if(!target) return;
-    const b = el("button",null,label);
-    b.onclick = () => scrollBoxTo(box, target.n, true);
-    tools.appendChild(b);
-  });
-
-  const onlyChanged = el("button",null,"Only changed lines");
-  onlyChanged.setAttribute("aria-pressed","false");
-  onlyChanged.onclick = () => {
-    const on = onlyChanged.getAttribute("aria-pressed")!=="true";
-    onlyChanged.setAttribute("aria-pressed", on?"true":"false");
-    box.querySelectorAll(".srcline").forEach(node=>{
-      const keep = !on || node.classList.contains("changed") || node.classList.contains("mine");
-      node.hidden = !keep;
-    });
-  };
-  tools.appendChild(onlyChanged);
-
-  const find = el("input"); find.type="text";
-  find.placeholder = "Find a word in the paper…";
-  find.oninput = () => {
-    const q = find.value.trim().toLowerCase();
-    let first = null;
-    box.querySelectorAll(".srcline").forEach(node=>{
-      const hit = q && node.querySelector(".tx").textContent.toLowerCase().includes(q);
-      node.classList.toggle("hit", !!hit);
-      if(hit && !first) first = node;
-    });
-    if(first) scrollBoxTo(box, first.dataset.n, false);
-  };
-  tools.appendChild(find);
-  host.appendChild(tools);
-
-  const box = el("div","src");
-  src.lines.forEach(line=>{
-    const row = el("div","srcline"
-      + (line.mine?" mine":"") + (line.changed?" changed":""));
-    row.dataset.n = line.n;
-    row.appendChild(el("div","ln", String(line.n)));
-    const tx = el("div","tx", line.text || " ");
-    row.appendChild(tx);
-    tx.onclick = () => openLineEditor(row, line);
-    box.appendChild(row);
-  });
-  host.appendChild(box);
-
-  const legend = el("p","tiny muted"); legend.style.marginTop="10px";
-  legend.textContent = "Green line numbers were corrected by the agent. "
-    + "Orange ones you changed yourself. Click any line to edit it.";
-  host.appendChild(legend);
-
-  // Land on the first change rather than on the preamble.
-  const firstChange = src.lines.find(l=>l.changed||l.mine);
-  if(firstChange){
-    requestAnimationFrame(()=>scrollBoxTo(box, firstChange.n, false));
-  }
-}
-
-/* Scroll the source pane itself.  scrollIntoView would also scroll the page,
-   pushing the tabs and the paper's own heading off the top of the window —
-   which is disorienting when you only asked to jump within one panel. */
-function scrollBoxTo(box, lineNumber, smooth){
-  const node = box.querySelector('.srcline[data-n="'+lineNumber+'"]');
-  if(!node) return;
-  const top = node.offsetTop - box.clientHeight/2 + node.offsetHeight/2;
-  box.scrollTo({top: Math.max(0, top), behavior: smooth ? "smooth" : "auto"});
-}
-
-function openLineEditor(row, line){
-  if(row.nextSibling && row.nextSibling.classList
-     && row.nextSibling.classList.contains("srcedit")) return;
-  const box = el("div","srcedit");
-  const ta = el("textarea"); ta.value = line.text;
-  ta.spellcheck = false;
-  box.appendChild(ta);
-  const nt = el("input"); nt.type="text";
-  nt.placeholder = "Why (optional) — goes into your review record";
-  nt.style.marginTop="8px";
-  box.appendChild(nt);
-  const acts = el("div","row"); acts.style.marginTop="9px";
-  const save = el("button","primary","Save this line");
-  save.onclick = async () => {
-    if(ta.value === line.text){ toast("That line is unchanged", true); return; }
-    try{
-      const res = await api("/api/my-edit",{folder:S.folder,line:line.n,
-        before:line.text, after:ta.value, note:nt.value});
-      S.paper = res.paper; toast("Line saved"); renderPaper();
-    }catch(err){ toast(err.message,true); }
-  };
-  const cancel = el("button",null,"Cancel");
-  cancel.onclick = () => box.remove();
-  acts.appendChild(save); acts.appendChild(cancel);
-  box.appendChild(acts);
-  row.after(box);
-  ta.focus();
-}
-
-/* -------------------------------------------------------- tab: letter */
-/* --------------------------------------------- tab: title & authors */
+/* --------------------------------------------- tab 1: title & authors */
 function tabNames(host){
-  const t = S.paper.title_authors, c = t.comparison;
+  const t = S.paper.title_authors;
+  if(!t){ namesWithoutIndico(host); titleFormatting(host); return; }
+  const c = t.comparison;
   const g = el("div","group");
   g.appendChild(el("h2",null,"Title and authors against Indico"));
   g.appendChild(el("p",null,"The proceedings' table of contents, author index and DOI "
@@ -2338,8 +2371,9 @@ function tabNames(host){
     unknown: c && c.unreadable.length
       ? "The desk cannot compare this paper on its own: "+c.unreadable.join("; ")+"."
       : t.why_not,
-    differs: "Send the author the email below, then press “I’ve sent it”. If they do "
-      +"not reply within 48 hours, the changes it describes are made.",
+    differs: "Check the email below, change anything you like, send it from your own mail "
+      +"(or as a comment on the paper in Indico), then press “I’ve sent it”. If the author "
+      +"does not reply within 48 hours, the changes it describes are made.",
     waiting: "Sent "+when(t.sent_at)+". The author has until "+t.deadline_text+".",
     due: "No reply by "+t.deadline_text+". The changes the email described are ready.",
     applied: "Applied "+when(t.applied_at)+(t.reply==="agreed" ? ", as the author agreed" : "")
@@ -2357,6 +2391,24 @@ function tabNames(host){
       renderPaper();
     }catch(err){ toast(err.message, true); }
   };
+
+  // Just sent: set the paper aside until the author answers, or keep going.
+  if(t.status==="waiting" && !S.paper.hold && !S.keepWorking){
+    const ask = el("div","card pad setaside");
+    ask.appendChild(el("b",null,"Set this paper aside until the author replies?"));
+    ask.appendChild(el("p","why","It stays yours, and leaves your list of papers to work "
+      +"on now. It comes back when you take it up again, or when "+t.deadline_text
+      +" has passed."));
+    const row = el("div","row");
+    const yes = el("button","primary","Set it aside until "+t.deadline_text);
+    yes.onclick = () => holdAction("set", "waiting for the author's reply about the title and authors");
+    const no = el("button",null,"Keep working on it");
+    no.onclick = () => { S.keepWorking = true; renderPaper(); };
+    row.appendChild(yes); row.appendChild(no);
+    ask.appendChild(row);
+    g.appendChild(ask);
+  }
+
   const acts = el("div","row"); acts.style.margin = "0 0 16px";
   const button = (label, cls, action) => {
     const b = el("button", cls, label); b.onclick = () => step(action); acts.appendChild(b);
@@ -2369,6 +2421,11 @@ function tabNames(host){
   if(t.status==="applied" || t.status==="done") button("Undo the changes", null, "undo");
   if(["waiting","due","replied","changed","applied","done"].includes(t.status))
     button("Start again", "plain", "restart");
+  if(t.status==="waiting" && !S.paper.hold && S.keepWorking){
+    const b = el("button",null,"Set it aside until the author replies");
+    b.onclick = () => holdAction("set", "waiting for the author's reply about the title and authors");
+    acts.appendChild(b);
+  }
   if(acts.childNodes.length) g.appendChild(acts);
 
   if(c && !t.roles_known){
@@ -2405,7 +2462,9 @@ function tabNames(host){
   }
 
   if(c){
-    g.appendChild(el("h3",null,"Title"));
+    const cols = el("div","names-cols");
+    const left = el("div");
+    left.appendChild(el("h3",null,"Title"));
     const table = el("table","cmp");
     const row = (k, v) => { const tr = el("tr"); tr.appendChild(el("th",null,k));
       tr.appendChild(el("td",null,v)); table.appendChild(tr); };
@@ -2414,9 +2473,11 @@ function tabNames(host){
     if(c.title_differs)
       row("Indico becomes", c.proposed_indico_title
         + (c.check_capitals ? "  (check its capitals)" : ""));
-    g.appendChild(table);
+    left.appendChild(table);
+    cols.appendChild(left);
 
-    g.appendChild(el("h3",null,"Authors"));
+    const rightCol = el("div");
+    rightCol.appendChild(el("h3",null,"Authors"));
     const ul = el("ul","people");
     const person = (name, detail, cls, tag) => {
       const li = el("li"); li.appendChild(el("span",null,name));
@@ -2432,34 +2493,44 @@ function tabNames(host){
       ["In Indico only as "+x.name, x.affiliation,
        {primary:"primary author", coauthor:"co-author"}[x.role]].filter(Boolean).join(" · "),
       "to-paper", "will be added to the paper"));
-    g.appendChild(ul);
+    rightCol.appendChild(ul);
     if(c.not_names.length)
-      g.appendChild(el("p","tiny muted","Not read as names (address or footnote "
+      rightCol.appendChild(el("p","tiny muted","Not read as names (address or footnote "
         +"fragments): "+c.not_names.join(", ")));
     if(c.unreadable.length && t.status!=="unknown")
-      g.appendChild(el("p","tiny muted","Not compared: "+c.unreadable.join("; ")+"."));
+      rightCol.appendChild(el("p","tiny muted","Not compared: "+c.unreadable.join("; ")+"."));
+    cols.appendChild(rightCol);
+    g.appendChild(cols);
   }
 
   if(t.email && ["differs","waiting","due","changed"].includes(t.status)){
     g.appendChild(el("h3",null,"Email to the author"));
     const box = el("div","card pad");
-    const text = el("textarea"); text.value = t.email; text.rows = 24;
+    box.appendChild(el("p","tiny muted","Edit it as you like: your wording is kept with the "
+      +"paper. The changes it describes are applied no earlier than the time printed in it."));
+    const text = el("textarea"); text.value = t.email; text.rows = 22; text.className = "mailtext";
     box.appendChild(text);
     const row2 = el("div","row"); row2.style.marginTop = "10px";
     const save = async () => { if(text.value !== t.email)
       await api("/api/title-authors",{folder:S.folder, action:"email", text:text.value}); };
-    if(t.status==="differs"){
-      const sent = el("button","primary","I’ve sent it");
-      sent.onclick = async () => { try{ await save(); }catch(err){ toast(err.message,true); return; }
-        step("send"); };
-      row2.appendChild(sent);
-    }
-    const copy = el("button",null,"Copy to clipboard");
+    const mail = el("button", t.status==="differs" ? "primary" : null, "Open in my mail program");
+    mail.title = "Opens a new message with this subject and text in your own mail program; "
+      +"add the author's address and send it from there.";
+    mail.onclick = async () => { try{ await save(); }catch(err){ toast(err.message,true); return; }
+      openMail(text.value, ""); };
+    row2.appendChild(mail);
+    const copy = el("button",null,"Copy");
     copy.onclick = async () => {
       try{ await navigator.clipboard.writeText(text.value); toast("Copied"); }
       catch(_){ text.select(); toast("Press Ctrl-C / ⌘-C to copy"); }
     };
     row2.appendChild(copy);
+    if(t.status==="differs"){
+      const sent = el("button","yes","I’ve sent it");
+      sent.onclick = async () => { try{ await save(); }catch(err){ toast(err.message,true); return; }
+        S.keepWorking = false; step("send"); };
+      row2.appendChild(sent);
+    }
     const keep = el("button",null,"Save my wording");
     keep.onclick = async () => { try{ await save(); toast("Saved"); await refresh(); }
       catch(err){ toast(err.message,true); } };
@@ -2476,19 +2547,877 @@ function tabNames(host){
     }
     box.appendChild(row2);
     g.appendChild(box);
-    g.appendChild(el("p","tiny muted","The desk sends nothing. Paste the email into a "
-      +"comment on the paper in Indico, which notifies the submitter, or send it by "
-      +"mail. The desk never applies a change before the time printed in it."));
+    g.appendChild(el("p","tiny muted","The desk sends nothing itself: the message opens in "
+      +"your mail program for you to send, or paste it into a comment on the paper in "
+      +"Indico, which notifies the submitter."));
   }
+  host.appendChild(g);
+  titleFormatting(host);
+}
+
+function namesWithoutIndico(host){
+  const p = S.paper;
+  const g = el("div","group");
+  g.appendChild(el("h2",null,"Title and authors"));
+  g.appendChild(el("div","held",
+    "This paper is not part of a conference pulled from Indico, so its title and authors "
+    +"cannot be compared with Indico's. They are shown as the paper gives them."));
+  const table = el("table","cmp");
+  const row = (k, v) => { const tr = el("tr"); tr.appendChild(el("th",null,k));
+    tr.appendChild(el("td",null,v)); table.appendChild(tr); };
+  row("Title", p.title || "—");
+  const names = (p.authors||[]).map(a => typeof a==="string" ? a
+    : [a.name || [a.given, a.family].filter(Boolean).join(" "), a.affiliation ? "("+a.affiliation+")" : ""]
+      .filter(Boolean).join(" ")).filter(Boolean);
+  row("Authors", names.join(", ") || "—");
+  g.appendChild(table);
   host.appendChild(g);
 }
 
-function tabLetter(host){
+/* The title's and authors' own formatting in the paper (sentence case of the
+   title, names written the JACoW way). */
+function titleFormatting(host){
+  const p = S.paper;
+  const dec = titleDecisions(), app = p.applied.filter(a=>a.scope==="title"),
+        fnd = p.findings.filter(f=>f.scope==="title");
+  if(!dec.length && !app.length && !fnd.length) return;
+  const g = el("div","group");
+  g.appendChild(el("h2",null,"Title and author formatting in the paper"));
+  g.appendChild(el("p",null,"How the title and the author names are written in the paper "
+    +"itself, separately from whether they match Indico."));
+  dec.forEach(d=>g.appendChild(decisionCard(d, -1)));
+  app.forEach(a=>g.appendChild(appliedCard(a)));
+  fnd.forEach(f=>g.appendChild(findingCard(f)));
+  host.appendChild(g);
+}
+
+/* ------------------------------------------------- tab 2: references */
+/* Each reference as written, beside what it becomes. Green: rewritten in
+   Appendix B's layout with nothing missing. Red: something the desk cannot
+   put right by itself. Grey: already right. */
+const REF_FILTERS = [
+  ["all","All"], ["undecided","To decide"], ["fixed","Fixed"],
+  ["problem","Problems"], ["ok","Already right"],
+];
+
+function refMatches(r, f){
+  if(f==="all") return true;
+  if(f==="undecided") return (r.suggest_ids||[]).length>0 && r.decision==="undecided" && r.own==null;
+  return r.status===f;
+}
+const visibleRefRows = () => ((S.paper.references||{}).rows||[])
+  .filter(r=>refMatches(r, S.refFilter||"all"));
+
+function tabRefs(host){
+  const R = S.paper.references || {rows:[], counts:{}};
+  const rows = R.rows || [];
+  const g = el("div","group");
+  g.appendChild(el("h2",null,"The reference list"));
+  const intro = {
+    bibitem: "Each \\bibitem as the author wrote it (left), beside the same reference in "
+      +"Appendix B's layout, written as LaTeX (right). Accepting puts the right-hand text in "
+      +"the reviewed source.",
+    word: "Each reference as the author wrote it (left), beside the same reference in "
+      +"Appendix B's layout (right). What you accept goes into the Word file as a tracked change.",
+    bib: "Each .bib entry as the author wrote it (left), beside the entry with the fields the "
+      +"JACoW bibliography style needs (right). “Prints as” is the reference as it will appear "
+      +"in the paper. What you accept goes into the reviewed .bib.",
+  }[R.origin] || "Each reference as the author wrote it, beside the same reference in "
+      +"Appendix B's layout.";
+  g.appendChild(el("p",null,intro));
+  const legend = el("div","reflegend");
+  [["fixed","Rewritten, nothing missing: accept it, edit it, or keep the author's"],
+   ["problem","Something the desk cannot put right by itself (a missing part, an unknown "
+     +"kind, a wrong DOI): edit it yourself, or leave it for the author"],
+   ["ok","Already in the layout"]].forEach(([cls,text])=>{
+    const s = el("span","lg "+cls); s.appendChild(el("i")); s.appendChild(document.createTextNode(text));
+    legend.appendChild(s);
+  });
+  g.appendChild(legend);
+  host.appendChild(g);
+
+  if(!R.recorded && S.paper.screened){
+    const box = el("div","held other");
+    box.appendChild(el("b",null,"Prepared with an older version of the desk."));
+    box.appendChild(el("span",null, S.pool
+      ? "Its references were not recorded one by one. Ask the chief editor to prepare it again."
+      : "Its references were not recorded one by one. Prepare it again to see them side by "
+        +"side — your decisions and notes are kept."));
+    if(!S.pool){
+      const b = el("button","plain","Prepare it again");
+      b.onclick = () => prepare({folder:S.folder});
+      box.appendChild(b);
+    }
+    host.appendChild(box);
+    // What there is: the reference changes as cards.
+    S.paper.decisions.filter(d=>d.scope==="reference").forEach(d=>host.appendChild(decisionCard(d,-1)));
+    return;
+  }
+  if(!rows.length){
+    const e = el("div","empty"); e.appendChild(el("b",null,"No reference list found"));
+    e.appendChild(el("div",null,"The desk found no \\bibitem, .bib entry or numbered reference in this paper."));
+    host.appendChild(e);
+  }
+
+  if(R.reorder) host.appendChild(decisionCard(R.reorder, -1));
+
+  if(rows.length){
+    const bar = el("div","filters");
+    REF_FILTERS.forEach(([key,label])=>{
+      const n = rows.filter(r=>refMatches(r,key)).length;
+      if(key!=="all" && !n) return;
+      const b = el("button",null,label+" ("+n+")");
+      b.setAttribute("aria-pressed", (S.refFilter||"all")===key ? "true" : "false");
+      b.onclick = () => { S.refFilter = key; S.cursor = 0; renderPaper(); };
+      bar.appendChild(b);
+    });
+    const greens = rows.filter(r=>r.status==="fixed" && refMatches(r,"undecided"));
+    if(greens.length>1){
+      const all = el("button","yes","Accept all "+greens.length+" green");
+      all.title = "Accept every green rewrite still to decide. Each one can be changed afterwards.";
+      all.onclick = () => decideMany(greens.flatMap(r=>r.suggest_ids), "accepted");
+      bar.appendChild(all);
+    }
+    host.appendChild(bar);
+    const hint = el("div","keyhint");
+    hint.innerHTML = 'Keyboard: <kbd>a</kbd> accept · <kbd>r</kbd> keep as submitted '
+      + '· <kbd>e</kbd> edit · <kbd>j</kbd>/<kbd>k</kbd> move';
+    host.appendChild(hint);
+  }
+
+  const lists = R.list_findings || [];
+  if(lists.length){
+    const det = el("details","autobox");
+    const sum = el("summary");
+    sum.appendChild(el("b",null,"About the list as a whole ("+lists.length+")"));
+    sum.appendChild(el("span","sub2","citation order, unresolved citations, the bibliography style"));
+    det.appendChild(sum);
+    const inner = el("div","inner");
+    lists.forEach(f=>inner.appendChild(findingCard(f)));
+    det.appendChild(inner);
+    host.appendChild(det);
+  }
+
+  visibleRefRows().forEach((r,i)=>host.appendChild(refRow(r,i)));
+}
+
+const STATUS_WORDS_REF = {fixed:"Fixed", problem:"Problem", ok:"Already right"};
+
+function refRow(r, index){
+  const row = el("div","ref "+r.status
+    + ((r.decision==="rejected"||r.decision==="reverted") && r.own==null ? " kept" : "")
+    + (r.own!=null ? " own" : "") + (index===S.cursor ? " focus" : ""));
+  row.dataset.index = index;
+  row.dataset.ref = r.id;
+
+  const top = el("div","ref-top");
+  top.appendChild(el("span","num", r.origin==="word" ? "["+r.n+"]" : "["+r.n+"]"));
+  if(r.origin!=="word") top.appendChild(el("span","where", r.key));
+  if(r.kind) top.appendChild(el("span","kind", r.kind));
+  top.appendChild(el("span","pill st-"+(r.own!=null ? "warn" : {fixed:"good",problem:"bad",ok:"none"}[r.status]),
+    r.own!=null ? "Your version" : STATUS_WORDS_REF[r.status]));
+  if(r.edit_id && r.own==null){
+    if(r.auto) top.appendChild(el("span","decided "+r.decision,
+      r.decision==="reverted" ? "↩ Put back as submitted" : "✓ Applied"));
+    else if(r.decision!=="undecided") top.appendChild(el("span","decided "+r.decision,
+      r.decision==="accepted" ? "✓ Accepted" : "✗ Kept as submitted"));
+  }
+  if(r.parsed_by==="model") top.appendChild(el("span","pill st-info","read by the local model"));
+  row.appendChild(top);
+
+  const grid = el("div","ref-grid");
+  const left = el("div","src-col"); left.appendChild(el("div","lab","As written"));
+  const right = el("div","res");
+  let result = null, label = "";
+  if(r.own!=null){ result = r.own; label = "Your version"; }
+  else if(r.edit_id){ result = r.proposed;
+    label = r.origin==="bib" ? "Entry for the JACoW style" : "Appendix B"; }
+  if(result!=null){
+    const d = tokenDiff(r.source, result);
+    left.appendChild(diffNode(d.a, "del"));
+    right.appendChild(el("div","lab",label));
+    right.appendChild(diffNode(d.b, "ins"));
+  } else {
+    left.appendChild(diffNode([[r.source,false]], ""));
+    right.appendChild(el("div","lab","Appendix B"));
+    const t = el("div","reftext muted-box");
+    if(r.status==="ok") t.textContent = "No change needed: already in Appendix B's layout.";
+    else{
+      t.textContent = "The desk could not rewrite this reference by itself.";
+      if(r.text && r.text!==r.source){
+        t.appendChild(el("div","nearest","Nearest it got: "+r.text));
+      }
+    }
+    right.appendChild(t);
+  }
+  if(r.origin==="bib" && r.text && result!=null){
+    const pr = el("div","prints"); pr.appendChild(el("b",null,"Prints as: "));
+    pr.appendChild(document.createTextNode(r.text)); right.appendChild(pr);
+  }
+  grid.appendChild(left); grid.appendChild(right);
+  row.appendChild(grid);
+
+  const meta = el("div","refmeta");
+  if(r.missing.length){
+    const m = el("div","missing");
+    m.textContent = "Missing: "+r.missing.map(x=>x.replace(/_/g," ")).join(", ")
+      + " — no registry had "+(r.missing.length===1?"it":"them")+"; it is never invented.";
+    meta.appendChild(m);
+  }
+  r.problems.forEach(pb=>{
+    const line = el("div","prob "+(pb.severity||"warning"));
+    line.appendChild(el("span","sevdot "+(pb.severity==="error"?"error":"warning")));
+    line.appendChild(document.createTextNode(" "+pb.message));
+    if(pb.key){
+      const lab = el("label","inline");
+      const cb = el("input"); cb.type="checkbox"; cb.checked=!!pb.handled;
+      cb.onchange = async () => {
+        try{ await api("/api/finding",{folder:S.folder,key:pb.key,handled:cb.checked}); await refresh(); }
+        catch(err){ toast(err.message,true); cb.checked=!cb.checked; }
+      };
+      lab.appendChild(cb); lab.appendChild(document.createTextNode(" handled"));
+      line.appendChild(lab);
+    }
+    meta.appendChild(line);
+  });
+  if(r.changes.length && r.own==null && r.edit_id)
+    meta.appendChild(el("div","tiny muted","Changed: "+r.changes.join("; ")));
+  if(r.sources.length) meta.appendChild(el("div","tiny muted","Values from "+r.sources.join(", ")+"."));
+  if(meta.childNodes.length) row.appendChild(meta);
+
+  const acts = el("div","acts");
+  if(r.own==null && r.edit_id && !r.auto){
+    if(r.decision==="undecided"){
+      const yes = el("button","yes","Accept"); yes.onclick = () => refDecide(r,"accepted");
+      const no = el("button","no","Keep as submitted"); no.onclick = () => refDecide(r,"rejected");
+      acts.appendChild(yes); acts.appendChild(no);
+    } else {
+      const ch = el("button","plain","change"); ch.onclick = () => refDecide(r,"undecided");
+      acts.appendChild(ch);
+    }
+  }
+  if(r.own==null && r.edit_id && r.auto){
+    const b = r.decision==="reverted" ? el("button","plain","apply it again")
+                                      : el("button","no","Put back as submitted");
+    b.onclick = () => refDecide(r, r.decision==="reverted" ? "undecided" : "reverted");
+    acts.appendChild(b);
+  }
+  const edit = el("button",null, r.own!=null ? "Edit my version…" : "Edit…");
+  edit.onclick = () => openRefEditor(row, r);
+  acts.appendChild(edit);
+  if(r.own!=null){
+    const drop = el("button","plain","Drop my version");
+    drop.onclick = () => saveRefText(r, null);
+    acts.appendChild(drop);
+  }
+  row.appendChild(acts);
+  row.onclick = (e) => {
+    if(e.target.closest("button,textarea,input,label,a")) return;
+    if(S.cursor!==index){ S.cursor = index;
+      document.querySelectorAll(".ref.focus").forEach(n=>n.classList.remove("focus"));
+      row.classList.add("focus"); }
+  };
+  return row;
+}
+
+/* A reference's changes are decided together: the whole rewrite, or the
+   narrow fixes inside it when there is no rewrite. */
+async function refDecide(r, decision){
+  try{
+    const calls = [];
+    (r.suggest_ids||[]).forEach(id=>calls.push([id, decision==="reverted" ? "rejected" : decision]));
+    (r.auto_ids||[]).forEach(id=>calls.push([id,
+      (decision==="rejected" || decision==="reverted") ? "reverted" : "undecided"]));
+    for(const [id, d] of calls){
+      S.paper = await api("/api/decide",{folder:S.folder,id,decision:d});
+    }
+    if(decision==="accepted" || decision==="rejected"){
+      const rows = visibleRefRows();
+      const next = rows.findIndex((x,i)=> i>S.cursor && refMatches(x,"undecided"));
+      if(next>=0) S.cursor = next;
+      else S.cursor = Math.min(S.cursor, Math.max(0, rows.length-1));
+    }
+    renderPaper(); focusCursor();
+  }catch(err){ toast(err.message, true); }
+}
+
+function openRefEditor(row, r){
+  if(row.querySelector(".modbox")) { row.querySelector(".modbox textarea").focus(); return; }
+  const box = el("div","modbox");
+  box.appendChild(el("label","tiny muted", {
+    bibitem:"The reference as LaTeX, without its \\bibitem{"+r.key+"} — it replaces the whole reference.",
+    word:"The reference as it should read — it replaces the whole reference, as a tracked change.",
+    bib:"The whole .bib entry, from @type{"+r.key+", to its closing brace.",
+  }[r.origin] || "The reference as it should read."));
+  const ta = el("textarea"); ta.className = "mono"; ta.spellcheck = false;
+  ta.value = r.own!=null ? r.own : (r.edit_id && r.proposed ? r.proposed : r.source);
+  ta.rows = Math.min(14, Math.max(3, Math.ceil(ta.value.length/90) + (ta.value.match(/\n/g)||[]).length));
+  box.appendChild(ta);
+  if(r.text && r.edit_id==="" && r.status==="problem"){
+    const hint = el("div","tiny muted","Appendix B's layout for it, as far as the desk got: "+r.text);
+    box.appendChild(hint);
+  }
+  const bar = el("div","row"); bar.style.marginTop="8px";
+  const save = el("button","primary","Save my version");
+  save.onclick = () => saveRefText(r, ta.value);
+  const cancel = el("button","plain","Cancel"); cancel.onclick = () => box.remove();
+  bar.appendChild(save); bar.appendChild(cancel);
+  box.appendChild(bar);
+  row.appendChild(box);
+  ta.focus();
+}
+
+async function saveRefText(r, text){
+  try{
+    S.paper = await api("/api/ref-text",{folder:S.folder, ref:r.id, text});
+    toast(text==null ? "Your version dropped" : "Saved: your version of ["+r.n+"]");
+    renderPaper(); focusCursor();
+  }catch(err){ toast(err.message, true); }
+}
+
+/* Word-level differences, so the eye goes to what changed. */
+function tokenDiff(a, b){
+  // A tie (~) is a space for the eye: "G.~J.~Portmann" is "G. J. Portmann".
+  const split = (s) => (s||"").split(/([\s~]+)/).filter(x=>x!=="");
+  const A = split(a), B = split(b);
+  const key = (t) => /^[\s~]+$/.test(t) ? " " : t;
+  const n = A.length, m = B.length;
+  if(!n || !m || n*m > 400000) return {a:A.map(t=>[t,!!m]), b:B.map(t=>[t,!!n])};
+  const L = Array.from({length:n+1}, ()=>new Uint16Array(m+1));
+  for(let i=n-1;i>=0;i--) for(let j=m-1;j>=0;j--)
+    L[i][j] = key(A[i])===key(B[j]) ? L[i+1][j+1]+1 : Math.max(L[i+1][j], L[i][j+1]);
+  const outA = [], outB = []; let i = 0, j = 0;
+  while(i<n && j<m){
+    if(key(A[i])===key(B[j])){ outA.push([A[i],false]); outB.push([B[j],false]); i++; j++; }
+    else if(L[i+1][j]>=L[i][j+1]){ outA.push([A[i],true]); i++; }
+    else { outB.push([B[j],true]); j++; }
+  }
+  while(i<n) outA.push([A[i++],true]);
+  while(j<m) outB.push([B[j++],true]);
+  return {a:outA, b:outB};
+}
+
+function diffNode(tokens, cls){
+  const box = el("div","reftext");
+  tokens.forEach(([t,changed])=>{
+    if(changed && cls && /[^\s~]/.test(t)) box.appendChild(el("span",cls,t));
+    else box.appendChild(document.createTextNode(t));
+  });
+  return box;
+}
+
+function gotoRef(id){
+  S.tab = "refs"; S.refFilter = "all";
+  const rows = visibleRefRows();
+  const i = rows.findIndex(r=>r.id===id);
+  S.cursor = i>=0 ? i : 0;
+  renderPaper(); focusCursor();
+}
+
+/* ---------------------------------------------------- tab 3: the paper */
+/* Laid out like an online LaTeX editor: the source on the left with every
+   suggestion where it is, and on the right the list of changes to review or
+   the PDF. Click a line to edit it; click a suggestion to decide it. */
+function tabBody(host){
+  const B = S.paper.body;
+  if(!B || !B.editable){ wordBody(host); return; }
+
+  const tools = el("div","srctools");
+  (B.jumps||[]).forEach(j=>{
+    const b = el("button",null,j.label);
+    b.onclick = () => scrollToLine(j.line, true);
+    tools.appendChild(b);
+  });
+  if((B.sections||[]).length){
+    const sel = el("select","secsel");
+    const first = el("option",null,"Go to a section…"); first.value=""; sel.appendChild(first);
+    B.sections.forEach(s=>{ const o = el("option",null,s.label); o.value = s.line; sel.appendChild(o); });
+    sel.onchange = () => { if(sel.value) scrollToLine(+sel.value, true); sel.value=""; };
+    tools.appendChild(sel);
+  }
+  const onlyChanged = el("button",null,"Only changed lines");
+  onlyChanged.setAttribute("aria-pressed", S.onlyChanged ? "true" : "false");
+  onlyChanged.onclick = () => { S.onlyChanged = !S.onlyChanged; renderPaper(); };
+  tools.appendChild(onlyChanged);
+  const find = el("input"); find.type="text"; find.placeholder = "Find in the source…";
+  find.value = S.find || "";
+  find.oninput = () => { S.find = find.value; markFind(true); };
+  tools.appendChild(find);
+  host.appendChild(tools);
+
+  const ol = el("div","ol");
+  const left = el("div","ol-src");
+  const box = el("div","src ol-box"); box.id = "srcbox";
+  B.lines.forEach(line=>{
+    const node = srcLine(line);
+    if(S.onlyChanged && !node.classList.contains("changed") && !node.classList.contains("mine")
+       && !node.classList.contains("pending")) node.hidden = true;
+    box.appendChild(node);
+  });
+  box.onscroll = () => { S.srcScroll = box.scrollTop; };
+  left.appendChild(box);
+  const legend = el("p","tiny muted legend");
+  legend.innerHTML = '<span class="lgx und"><del>red</del><ins>green</ins></span> a suggestion '
+    + 'to decide · <span class="lgx ok">green</span> corrected · <span class="lgx own">orange</span> '
+    + 'yours · click a suggestion to decide it, any other text to edit its line';
+  left.appendChild(legend);
+  ol.appendChild(left);
+
+  const side = el("div","ol-side");
+  const st = el("div","side-tabs");
+  const und = bodyDecisions().filter(d=>d.decision==="undecided").length;
+  [["review","Review"+(und?" ("+und+")":"")],["pdf","PDF"]].forEach(([key,label])=>{
+    const b = el("button",null,label);
+    b.setAttribute("aria-selected", (S.side||"review")===key ? "true" : "false");
+    b.onclick = () => { S.side = key; renderPaper(); };
+    st.appendChild(b);
+  });
+  side.appendChild(st);
+  const sb = el("div","side-body"+((S.side||"review")==="pdf" ? " pdf" : ""));
+  side.appendChild(sb);
+  ol.appendChild(side);
+  host.appendChild(ol);
+  if((S.side||"review")==="pdf") pdfPane(sb); else reviewPane(sb);
+
+  requestAnimationFrame(()=>{
+    fitPanes();
+    if(S.find) markFind(false);
+    if(S.srcScroll!=null && S.srcFolder===S.folder){ box.scrollTop = S.srcScroll; }
+    else {
+      S.srcFolder = S.folder;
+      const first = B.lines.find(l=>l.segs.some(s=>s.state==="undecided" && s.scope==="body"))
+        || B.lines.find(l=>l.segs.some(s=>s.id));
+      if(first) scrollToLine(first.n, false);
+    }
+  });
+}
+
+/* The source and the side panel fill the window down to the footer bar. */
+function fitPanes(){
+  const foot = $("#footbar");
+  const bottom = (foot && !foot.hidden ? foot.offsetHeight : 0) + 14;
+  const legend = document.querySelector(".ol-src .legend");
+  const below = legend ? legend.offsetHeight + 10 : 0;
+  document.querySelectorAll(".ol-box, .ol-side").forEach(node=>{
+    const top = node.getBoundingClientRect().top;
+    node.style.height = Math.max(380, window.innerHeight - top - bottom - below) + "px";
+  });
+}
+window.addEventListener("resize", () => { if(S.paper && S.tab==="body") fitPanes(); });
+
+function srcLine(line){
+  const changed = line.segs.some(s=>s.id && (s.state==="applied"||s.state==="accepted"));
+  const pending = line.segs.some(s=>s.state==="undecided");
+  const row = el("div","srcline"+(line.mine?" mine":"")+(changed?" changed":"")
+    +(pending?" pending":""));
+  row.dataset.n = line.n;
+  const ln = el("div","ln", String(line.n));
+  if(line.findings){ ln.classList.add("flag");
+    ln.title = line.findings.length+" problem(s) on this line: see Review"; }
+  if(line.mine) ln.title = "You changed this line (was: "+(line.was||"")+")";
+  row.appendChild(ln);
+  const tx = el("div","tx");
+  if(!line.segs.length || line.segs.every(s=>s.t==="" && !s.id)) tx.textContent = " ";
+  line.segs.forEach(seg => tx.appendChild(segNode(seg)));
+  tx.onclick = (e) => { if(e.target.closest(".sg")) return; openLineEditor(row, line); };
+  row.appendChild(tx);
+  return row;
+}
+
+function segNode(seg){
+  if(!seg.id && seg.state!=="own") return document.createTextNode(seg.t);
+  const span = el("span","sg "+seg.state+(seg.scope==="reference"?" ref":""));
+  if(seg.id) span.dataset.id = seg.id;
+  if(seg.state==="undecided"){
+    if(seg.t) span.appendChild(el("del",null,seg.t));
+    if(seg.last && seg.proposed) span.appendChild(el("ins",null,seg.proposed));
+    if(!seg.t && !seg.proposed) span.appendChild(el("ins",null,"∅"));
+    span.title = seg.scope==="reference" ? "A reference suggestion: decide it on the References tab"
+                                         : "A suggestion: click to decide it";
+  } else {
+    span.textContent = seg.t;
+    if(seg.last && seg.was!=null) span.title = "Was: "+seg.was;
+    else if(seg.last && seg.proposed!=null) span.title = "You kept the author's text. Suggested: "+seg.proposed;
+  }
+  span.onclick = (e) => {
+    e.stopPropagation();
+    if(seg.scope==="reference"){ if(seg.ref) gotoRef(seg.ref); else { S.tab="refs"; renderPaper(); } return; }
+    if(seg.id) focusSuggestion(seg.id);
+  };
+  return span;
+}
+
+function scrollToLine(n, flash){
+  const box = $("#srcbox"); if(!box) return;
+  const node = box.querySelector('.srcline[data-n="'+n+'"]');
+  if(!node) return;
+  if(node.hidden){ S.onlyChanged = false; renderPaper(); return scrollToLine(n, flash); }
+  const top = node.offsetTop - box.clientHeight/3;
+  box.scrollTo({top:Math.max(0, top), behavior: flash ? "smooth" : "auto"});
+  if(flash){ node.classList.remove("flash"); void node.offsetWidth; node.classList.add("flash"); }
+}
+
+function lineOfEdit(id){
+  const B = S.paper.body; if(!B || !B.lines) return null;
+  const line = B.lines.find(l=>l.segs.some(s=>s.id===id));
+  return line ? line.n : null;
+}
+
+function jumpToOrigLine(orig){
+  const B = S.paper.body; if(!B || !B.lines) return;
+  const line = B.lines.find(l=>l.orig>=orig) || B.lines[B.lines.length-1];
+  if(line) scrollToLine(line.n, true);
+}
+
+function showInSource(id){
+  const b = el("button","plain","show in source");
+  b.onclick = () => {
+    const n = lineOfEdit(id);
+    if(S.tab!=="body"){ S.tab = "body"; renderPaper(); }
+    if(n) requestAnimationFrame(()=>scrollToLine(n, true));
+  };
+  return b;
+}
+
+function focusSuggestion(id){
+  const list = bodyDecisions();
+  const i = list.findIndex(d=>d.id===id);
+  if(i>=0){ S.cursor = i; S.side = "review"; S.showDecided = S.showDecided || list[i].decision!=="undecided"; }
+  else { S.side = "review"; S.showApplied = true; }
+  renderPaper();
+  requestAnimationFrame(()=>{
+    const node = document.querySelector('.side-body .item[data-id="'+id+'"]');
+    scrollWithin(node, true);
+    document.querySelectorAll('.sg[data-id="'+id+'"]').forEach(n=>n.classList.add("focus"));
+  });
+}
+
+function markFind(scroll){
+  const box = $("#srcbox"); if(!box) return;
+  const q = (S.find||"").trim().toLowerCase();
+  let first = null;
+  box.querySelectorAll(".srcline").forEach(node=>{
+    const hit = q && node.querySelector(".tx").textContent.toLowerCase().includes(q);
+    node.classList.toggle("hit", !!hit);
+    if(hit && !first) first = node;
+  });
+  if(first && scroll) scrollToLine(first.dataset.n, false);
+}
+
+function openLineEditor(row, line){
+  if(row.nextSibling && row.nextSibling.classList
+     && row.nextSibling.classList.contains("srcedit")) return;
+  const box = el("div","srcedit");
+  const ta = el("textarea"); ta.value = line.text;
+  ta.spellcheck = false;
+  box.appendChild(ta);
+  if(line.segs.some(s=>s.state==="undecided")){
+    box.appendChild(el("p","tiny muted","This line has a suggestion still to decide. You are "
+      +"editing it as the author wrote it; decide the suggestion first if you want to build on it."));
+  }
+  const nt = el("input"); nt.type="text";
+  nt.placeholder = "Why (optional) — goes into your review record";
+  nt.style.marginTop="8px";
+  box.appendChild(nt);
+  const acts = el("div","row"); acts.style.marginTop="9px";
+  const save = el("button","primary","Save this line");
+  save.onclick = async () => {
+    if(ta.value === line.text){ toast("That line is unchanged", true); return; }
+    try{
+      const res = await api("/api/my-edit",{folder:S.folder,line:line.n,
+        before:line.text, after:ta.value, note:nt.value});
+      S.paper = res.paper; toast("Line saved"); renderPaper();
+    }catch(err){ toast(err.message,true); }
+  };
+  const cancel = el("button",null,"Cancel");
+  cancel.onclick = () => box.remove();
+  acts.appendChild(save); acts.appendChild(cancel);
+  if(line.mine){
+    const undo = el("button","plain","Undo my change to this line");
+    undo.onclick = async () => {
+      try{ S.paper = await api("/api/my-edit/delete",{folder:S.folder,id:line.mine});
+           toast("Undone"); renderPaper(); }catch(err){ toast(err.message,true); }
+    };
+    acts.appendChild(undo);
+  }
+  box.appendChild(acts);
+  ta.addEventListener("keydown", (e)=>{
+    if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); save.click(); }
+    if(e.key==="Escape"){ e.preventDefault(); box.remove(); }
+  });
+  row.after(box);
+  ta.focus();
+}
+
+/* The review panel: suggestions to decide, then what is decided, what was
+   corrected automatically, the problems, and your own changes. */
+function reviewPane(host){
+  const p = S.paper;
+  const list = bodyDecisions();
+  const undecided = list.filter(d=>d.decision==="undecided");
+
+  if(list.length){
+    const hint = el("div","keyhint");
+    hint.innerHTML = '<kbd>a</kbd> accept · <kbd>r</kbd> keep as submitted '
+      + '· <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>n</kbd> note';
+    host.appendChild(hint);
+  }
+  const kinds = new Map();
+  undecided.forEach(d=>{
+    if(!kinds.has(d.check_id)) kinds.set(d.check_id, {heading:d.heading, ids:[]});
+    kinds.get(d.check_id).ids.push(d.id);
+  });
+  const repeated = [...kinds.values()].filter(k=>k.ids.length>1);
+  if(repeated.length){
+    const bulk = el("div","bulk");
+    bulk.appendChild(el("span","lab","Same kind of change, more than once:"));
+    repeated.forEach(k=>{
+      const yes = el("button","yes","Accept all "+k.ids.length+" · "+k.heading.toLowerCase());
+      yes.onclick = () => decideMany(k.ids,"accepted");
+      const no = el("button","no","Keep all as submitted");
+      no.onclick = () => decideMany(k.ids,"rejected");
+      bulk.appendChild(yes); bulk.appendChild(no);
+    });
+    host.appendChild(bulk);
+  }
+
+  const g = el("div","group");
+  g.appendChild(el("h2",null, undecided.length ? "To decide ("+undecided.length+")" : "Nothing left to decide"));
+  if(!undecided.length) g.appendChild(el("p",null, list.length
+    ? "Every suggestion in the body is decided. You can change any of them below."
+    : "The agent has no suggestion for the body of this paper. Corrections it made on its "
+      +"own are below, and you can edit any line of the source."));
+  list.forEach((d,i)=>{ if(d.decision==="undecided") g.appendChild(decisionCard(d,i)); });
+  host.appendChild(g);
+
+  const decided = list.filter(d=>d.decision!=="undecided");
+  if(decided.length){
+    const det = el("details","autobox");
+    det.open = !!S.showDecided;
+    det.ontoggle = () => { S.showDecided = det.open; };
+    const sum = el("summary"); sum.appendChild(el("b",null,"Decided ("+decided.length+")"));
+    det.appendChild(sum);
+    const inner = el("div","inner");
+    list.forEach((d,i)=>{ if(d.decision!=="undecided") inner.appendChild(decisionCard(d,i)); });
+    det.appendChild(inner);
+    host.appendChild(det);
+  }
+
+  const applied = p.applied.filter(a=>a.scope==="body");
+  if(applied.length){
+    const back = applied.filter(a=>a.decision==="reverted").length;
+    const det = el("details","autobox");
+    det.open = !!S.showApplied || back>0;
+    det.ontoggle = () => { S.showApplied = det.open; };
+    const sum = el("summary");
+    sum.appendChild(el("b",null,(applied.length-back)+" corrected automatically"));
+    sum.appendChild(el("span","sub2", back ? back+" put back" : "open to check or undo"));
+    det.appendChild(sum);
+    const inner = el("div","inner");
+    applied.forEach(a=>inner.appendChild(appliedCard(a)));
+    det.appendChild(inner);
+    host.appendChild(det);
+  }
+
+  const problems = p.findings.filter(f=>f.scope==="body");
+  if(problems.length) findingGroups(host, problems);
+
+  if(p.my_edits.length){
+    const g3 = el("div","group");
+    g3.appendChild(el("h2",null,"Lines you changed ("+p.my_edits.length+")"));
+    p.my_edits.forEach(m=>{
+      const item = el("div","item");
+      const top = el("div","item-top");
+      top.appendChild(el("h3",null,"Line "+m.line));
+      item.appendChild(top);
+      const ba = el("div","ba");
+      const was = el("div","was"); was.appendChild(el("span","lab","Was"));
+      was.appendChild(document.createTextNode(m.before));
+      const now = el("div","now"); now.appendChild(el("span","lab","You wrote"));
+      now.appendChild(document.createTextNode(m.after));
+      ba.appendChild(was); ba.appendChild(now); item.appendChild(ba);
+      const acts = el("div","acts");
+      const del = el("button","plain","undo this change");
+      del.onclick = async () => {
+        try{ S.paper = await api("/api/my-edit/delete",{folder:S.folder,id:m.id});
+          toast("Undone"); renderPaper(); }catch(err){ toast(err.message,true); }
+      };
+      acts.appendChild(del);
+      const show = el("button","plain","show in source");
+      show.onclick = () => scrollToLine(m.line, true);
+      acts.appendChild(show);
+      item.appendChild(acts);
+      g3.appendChild(item);
+    });
+    host.appendChild(g3);
+  }
+}
+
+/* The PDF beside the source, and a button to compile the paper as it stands. */
+function pdfPane(host){
+  const P = S.paper.pdf || {choices:[]};
+  const bar = el("div","pdfbar");
+  if(P.choices.length){
+    const sel = el("select");
+    P.choices.forEach(c=>{
+      const o = el("option",null,c.label+(c.at ? " · "+when(c.at) : ""));
+      o.value = c.name; sel.appendChild(o);
+    });
+    if(!P.choices.some(c=>c.name===S.pdfName)) S.pdfName = P.choices[0].name;
+    sel.value = S.pdfName;
+    sel.onchange = () => { S.pdfName = sel.value; renderPaper(); };
+    bar.appendChild(sel);
+  }
+  if(P.can_compile){
+    const b = el("button","primary", S.compiling ? "Compiling…" : "Recompile");
+    b.disabled = !!S.compiling;
+    b.title = "Compile the paper as it stands now: your decisions, your wording, your lines.";
+    b.onclick = recompile;
+    bar.appendChild(b);
+    if(S.compiling) bar.appendChild(el("span","spin"));
+  }
+  host.appendChild(bar);
+  if(S.compileError){
+    const e = el("div","held other"); e.style.margin="8px";
+    e.appendChild(el("b",null,"Not compiled."));
+    e.appendChild(el("span",null,S.compileError));
+    host.appendChild(e);
+  }
+  const choice = P.choices.find(c=>c.name===S.pdfName);
+  if(!choice){
+    const e = el("div","empty"); e.style.margin="12px";
+    e.appendChild(el("b",null,"No PDF yet"));
+    e.appendChild(el("div",null, P.can_compile ? "Press Recompile to see the paper as it stands."
+      : "There is no PDF for this paper."));
+    host.appendChild(e);
+    return;
+  }
+  const frame = el("iframe","pdfframe");
+  frame.title = choice.label;
+  frame.src = "/file?folder="+encodeURIComponent(S.folder)+"&name="+encodeURIComponent(choice.name)
+    + "&t="+encodeURIComponent(choice.at||"");
+  host.appendChild(frame);
+}
+
+async function recompile(){
+  try{
+    S.compiling = true; S.compileError = ""; renderPaper();
+    const res = await api("/api/compile",{folder:S.folder});
+    const id = res.job.id, folder = S.folder;
+    const wait = async () => {
+      let job;
+      try{ job = await api("/api/job?id="+encodeURIComponent(id)); }
+      catch(err){ S.compiling = false; toast(err.message,true); return; }
+      if(!job.finished){ setTimeout(wait, 1500); return; }
+      if(S.folder!==folder){ S.compiling = false; return; }
+      S.compiling = false;
+      S.compileError = (job.errors||[])[0] || "";
+      S.paper = await api("/api/paper?folder="+encodeURIComponent(folder));
+      if(!S.compileError){ S.pdfName = (S.paper.pdf.choices[0]||{}).name || ""; toast("Compiled"); }
+      renderPaper();
+    };
+    setTimeout(wait, 1500);
+  }catch(err){ S.compiling = false; toast(err.message, true); renderPaper(); }
+}
+
+/* A Word paper's text is edited in Word: the changes are listed beside the
+   author's PDF. */
+function wordBody(host){
+  const note = el("p","sub"); note.textContent = (S.paper.source||{}).note || "";
+  host.appendChild(note);
+  const ol = el("div","ol");
+  const left = el("div","ol-side solo"); const lb = el("div","side-body"); left.appendChild(lb);
+  reviewPane(lb);
+  const right = el("div","ol-side"); const rb = el("div","side-body pdf"); right.appendChild(rb);
+  pdfPane(rb);
+  ol.appendChild(left); ol.appendChild(right);
+  host.appendChild(ol);
+  requestAnimationFrame(fitPanes);
+}
+
+/* --------------------------------------------- tab 4: editor's panel */
+function tabPanel(host){
+  tagsSection(host);
+  letterSection(host);
+  notesSection(host);
+  filesSection(host);
+}
+
+const TAG_COLOURS = ["red","orange","yellow","violet","pink","green","brown"];
+
+function tagsSection(host){
+  const T = S.paper.tags;
+  if(!T) return;
+  const g = el("div","group");
+  g.appendChild(el("h2",null,"JACoW tags"));
+  g.appendChild(el("p",null,"The editorial tags for this paper, proposed from what was "
+    +"corrected and what the author must fix. Tick or untick any of them. The desk does not "
+    +"write to Indico: copy the codes into the paper's revision there."));
+  const card = el("div","card pad");
+  const chosenRow = el("div","row tagrow");
+  if(T.chosen.length){
+    T.chosen.forEach(code=>{
+      const t = T.vocabulary.find(v=>v.code===code) || {colour:""};
+      const chip = el("span","tagc "+(TAG_COLOURS.includes(t.colour)?t.colour:""), code);
+      chip.title = t.title || "";
+      chosenRow.appendChild(chip);
+    });
+    const copy = el("button",null,"Copy the codes");
+    copy.onclick = async () => {
+      const text = T.chosen.join(", ");
+      try{ await navigator.clipboard.writeText(text); toast("Copied: "+text); }
+      catch(_){ toast(text); }
+    };
+    chosenRow.appendChild(copy);
+  } else chosenRow.appendChild(el("span","muted","No tag chosen yet."));
+  if(Object.keys(T.explicit || {}).length){
+    const reset = el("button","plain","Back to the proposed tags");
+    reset.onclick = async () => {
+      try{ S.paper = await api("/api/tags",{folder:S.folder, reset:true}); renderPaper(); }
+      catch(err){ toast(err.message,true); }
+    };
+    chosenRow.appendChild(reset);
+  }
+  card.appendChild(chosenRow);
+
+  const fams = el("div","tagfams");
+  Object.entries(T.families).forEach(([fam, title])=>{
+    const codes = T.vocabulary.filter(v=>v.family===fam);
+    if(!codes.length) return;
+    const det = el("details","tagfam");
+    det.open = codes.some(v=>T.chosen.includes(v.code) || T.proposed[v.code]);
+    const sum = el("summary"); sum.appendChild(el("b",null,fam)); sum.appendChild(document.createTextNode(" · "+title));
+    det.appendChild(sum);
+    codes.forEach(v=>{
+      const lab = el("label","opt tagopt");
+      const cb = el("input"); cb.type = "checkbox"; cb.checked = T.chosen.includes(v.code);
+      cb.onchange = async () => {
+        try{ S.paper = await api("/api/tags",{folder:S.folder, code:v.code, on:cb.checked});
+             const y = window.scrollY; renderPaper(); window.scrollTo({top:y}); }
+        catch(err){ toast(err.message,true); cb.checked = !cb.checked; }
+      };
+      lab.appendChild(cb);
+      const sp = el("span");
+      sp.appendChild(el("span","tagc small "+(TAG_COLOURS.includes(v.colour)?v.colour:""), v.code));
+      sp.appendChild(document.createTextNode(" "+v.title));
+      if(T.proposed[v.code]) sp.appendChild(el("small",null,"Proposed: "+T.proposed[v.code].join("; ")));
+      lab.appendChild(sp);
+      det.appendChild(lab);
+    });
+    fams.appendChild(det);
+  });
+  card.appendChild(fams);
+  g.appendChild(card);
+  host.appendChild(g);
+}
+
+function letterSection(host){
   const g = el("div","group letter");
   g.appendChild(el("h2",null,"Letter to the author"));
   g.appendChild(el("p",null,
-    "Written for you from your decisions and notes. Edit it however you like — "
-    +"it is saved with the paper and written to a file when you finish."));
+    "Drafted for you from your decisions, the problems only the author can fix, and your "
+    +"notes. Edit it however you like — it is saved with the paper and written to a file "
+    +"when you finish."));
 
   const box = el("div","card pad");
   const ta = el("textarea");
@@ -2500,25 +3429,119 @@ function tabLetter(host){
     try{ await api("/api/letter",{folder:S.folder,letter:ta.value});
       toast("Letter saved"); await refresh(); }catch(err){ toast(err.message,true); }
   };
+  const mail = el("button",null,"Open in my mail program");
+  mail.onclick = () => openMail(ta.value, S.paper.paper_id+": your paper for the proceedings");
   const reset = el("button",null,"Start again from the automatic version");
   reset.onclick = async () => {
     try{ const r = await api("/api/letter",{folder:S.folder,reset:true});
       ta.value = r.letter; toast("Reset"); await refresh(); }
     catch(err){ toast(err.message,true); }
   };
-  const copy = el("button",null,"Copy to clipboard");
+  const copy = el("button",null,"Copy");
   copy.onclick = async () => {
     try{ await navigator.clipboard.writeText(ta.value); toast("Copied"); }
     catch(_){ ta.select(); toast("Press Ctrl-C / ⌘-C to copy"); }
   };
-  acts.appendChild(save); acts.appendChild(reset); acts.appendChild(copy);
+  acts.appendChild(save); acts.appendChild(mail); acts.appendChild(copy); acts.appendChild(reset);
+  if(S.paper.letter_override) acts.appendChild(el("span","tiny muted","Your wording is kept: "
+    +"later decisions do not change it until you start again."));
   box.appendChild(acts);
   g.appendChild(box);
   host.appendChild(g);
 }
 
-/* --------------------------------------------------------- tab: files */
-function tabFiles(host){
+function notesSection(host){
+  const g = el("div","group");
+  g.appendChild(el("h2",null,"Something you found yourself"));
+  g.appendChild(el("p",null,
+    "The agent only checks what it knows how to check. Anything else you spot "
+    +"goes here, and it will appear in the letter to the author."));
+
+  const form = el("div","card pad");
+  const f1 = el("div"); f1.style.marginBottom="11px";
+  f1.appendChild(el("label","tiny muted","What did you find?"));
+  const ta = el("textarea");
+  ta.placeholder = "e.g. Figure 3 is unreadable at print size.";
+  f1.appendChild(ta); form.appendChild(f1);
+
+  const f2 = el("div"); f2.style.marginBottom="11px";
+  f2.appendChild(el("label","tiny muted","Where? (optional)"));
+  const where = el("input"); where.type="text";
+  where.placeholder = "e.g. Figure 3, reference 7, page 2";
+  f2.appendChild(where); form.appendChild(f2);
+
+  const f3 = el("div","row"); f3.style.marginBottom="11px";
+  const sev = el("select");
+  [["must_fix","Must be fixed"],["worth_a_look","Worth a look"],
+   ["note","Just a note"]].forEach(([v,l])=>{
+    const o = el("option",null,l); o.value=v; sev.appendChild(o);
+  });
+  sev.value="worth_a_look";
+  f3.appendChild(sev);
+  const forAuthorLab = el("label","opt"); forAuthorLab.style.margin="0";
+  const forAuthor = el("input"); forAuthor.type="checkbox"; forAuthor.checked=true;
+  forAuthorLab.appendChild(forAuthor);
+  forAuthorLab.appendChild(el("span",null,"Tell the author"));
+  f3.appendChild(forAuthorLab);
+  form.appendChild(f3);
+
+  const add = el("button","primary","Add this");
+  add.onclick = async () => {
+    if(!ta.value.trim()){ toast("Write what you found first", true); return; }
+    try{
+      const res = await api("/api/my-note",{folder:S.folder,text:ta.value,
+        where:where.value, severity:sev.value, for_author:forAuthor.checked});
+      S.paper = res.paper; toast("Added"); renderPaper();
+    }catch(err){ toast(err.message,true); }
+  };
+  form.appendChild(add);
+  g.appendChild(form);
+  host.appendChild(g);
+
+  if(S.paper.my_notes.length){
+    const g2 = el("div","group");
+    g2.appendChild(el("h2",null,"What you have found ("+S.paper.my_notes.length+")"));
+    S.paper.my_notes.forEach(n=>{
+      const item = el("div","item");
+      const top = el("div","item-top");
+      top.appendChild(el("h3",null,n.text));
+      if(n.where) top.appendChild(el("span","where",n.where));
+      top.appendChild(el("span","pill count",
+        {must_fix:"Must be fixed",worth_a_look:"Worth a look",note:"Note"}[n.severity]||n.severity));
+      item.appendChild(top);
+      item.appendChild(el("p","why", n.for_author
+        ? "This will appear in the letter to the author."
+        : "Kept for the record only — not sent to the author."));
+      const acts = el("div","acts");
+      const del = el("button","plain","remove");
+      del.onclick = async () => {
+        try{ S.paper = await api("/api/my-note/delete",{folder:S.folder,id:n.id});
+          renderPaper(); }catch(err){ toast(err.message,true); }
+      };
+      acts.appendChild(del); item.appendChild(acts);
+      g2.appendChild(item);
+    });
+    host.appendChild(g2);
+  }
+
+  const g4 = el("div","group");
+  g4.appendChild(el("h2",null,"A note about the whole paper"));
+  g4.appendChild(el("p",null,"Added to the end of the letter to the author."));
+  const box = el("div","card pad");
+  const pta = el("textarea"); pta.value = S.paper.paper_note || "";
+  pta.placeholder = "Anything you want to say about the paper as a whole.";
+  box.appendChild(pta);
+  const savep = el("button","primary","Save"); savep.style.marginTop="9px";
+  savep.onclick = async () => {
+    try{ await api("/api/paper-note",{folder:S.folder,note:pta.value});
+      toast("Saved"); await refresh(); }catch(err){ toast(err.message,true); }
+  };
+  box.appendChild(savep);
+  g4.appendChild(box);
+  host.appendChild(g4);
+}
+
+function filesSection(host){
   const g = el("div","group");
   g.appendChild(el("h2",null,"Files for this paper"));
   g.appendChild(el("p",null,
@@ -2545,11 +3568,11 @@ function tabFiles(host){
   host.appendChild(g);
 
   if(S.paper.lookups && S.paper.lookups.length){
-    const g2 = el("div","group");
-    g2.appendChild(el("h2",null,"Which checks could run"));
-    g2.appendChild(el("p",null,
-      "Some checks need to look something up online. If a service could not be "
-      +"reached, the agent says so instead of guessing."));
+    const det = el("details","autobox");
+    const sum = el("summary"); sum.appendChild(el("b",null,"Which checks could run"));
+    sum.appendChild(el("span","sub2","online services the agent asked"));
+    det.appendChild(sum);
+    const inner = el("div","inner");
     S.paper.lookups.forEach(s=>{
       const row = el("div","filerow");
       const grow = el("div","grow");
@@ -2559,9 +3582,10 @@ function tabFiles(host){
       row.appendChild(grow);
       row.appendChild(el("span","pill "+(s.reachable?"done":(s.attempted?"needs_author":"new")),
         s.reachable?"ok":(s.attempted?"offline":"—")));
-      g2.appendChild(row);
+      inner.appendChild(row);
     });
-    host.appendChild(g2);
+    det.appendChild(inner);
+    host.appendChild(det);
   }
 }
 
@@ -2655,7 +3679,7 @@ function goRelative(delta, preferUnfinished){
   let i = S.papers.findIndex(x=>x.folder===S.folder);
   if(i<0) { backToList(); return; }
   if(preferUnfinished){
-    const open = (x) => x.status!=="done" && !theirs(x);
+    const open = (x) => x.status!=="done" && !theirs(x) && !(x.hold && !x.hold.over);
     for(let k=i+1;k<S.papers.length;k++){
       if(open(S.papers[k])){ openPaper(S.papers[k].folder); return; }
     }
@@ -2678,19 +3702,39 @@ document.addEventListener("keydown", (e)=>{
   const t = e.target;
   if(t && (t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT")) return;
   if(document.querySelector("dialog[open]")) return;
-  if(!S.paper || S.tab!=="decisions") return;
-  const list = S.paper.decisions;
-  if(!list.length) return;
-  const cur = list[S.cursor];
-  if(e.key==="a" && cur){ e.preventDefault(); decide(cur.id,"accepted"); }
-  else if(e.key==="r" && cur){ e.preventDefault(); decide(cur.id,"rejected"); }
-  else if(e.key==="j"||e.key==="ArrowDown"){ e.preventDefault();
-    S.cursor=Math.min(S.cursor+1,list.length-1); renderPaper(); focusCursor(); }
-  else if(e.key==="k"||e.key==="ArrowUp"){ e.preventDefault();
-    S.cursor=Math.max(S.cursor-1,0); renderPaper(); focusCursor(); }
-  else if(e.key==="n"){
-    const node = document.querySelector('.item[data-index="'+S.cursor+'"] .notebox');
-    if(node){ e.preventDefault(); node.open=true; node.querySelector("textarea").focus(); }
+  if(!S.paper || !S.paper.screened) return;
+  if(["1","2","3","4"].includes(e.key)){
+    e.preventDefault(); S.tab = TABS[+e.key-1][0]; S.cursor = 0; renderPaper(); return;
+  }
+  const move = (list, delta) => {
+    S.cursor = Math.max(0, Math.min(S.cursor+delta, list.length-1));
+    renderPaper(); focusCursor();
+  };
+  if(S.tab==="body"){
+    const list = bodyDecisions();
+    if(!list.length) return;
+    const cur = list[S.cursor];
+    if(e.key==="a" && cur){ e.preventDefault(); decide(cur.id,"accepted"); }
+    else if(e.key==="r" && cur){ e.preventDefault(); decide(cur.id,"rejected"); }
+    else if(e.key==="j"){ e.preventDefault(); move(list, 1); }
+    else if(e.key==="k"){ e.preventDefault(); move(list, -1); }
+    else if(e.key==="n"){
+      const node = document.querySelector('.item[data-index="'+S.cursor+'"] .notebox');
+      if(node){ e.preventDefault(); node.open=true; node.querySelector("textarea").focus(); }
+    }
+  } else if(S.tab==="refs"){
+    const rows = visibleRefRows();
+    if(!rows.length) return;
+    const cur = rows[S.cursor];
+    const decidable = cur && cur.edit_id && !cur.auto && cur.own==null;
+    if(e.key==="a" && decidable){ e.preventDefault(); refDecide(cur,"accepted"); }
+    else if(e.key==="r" && decidable){ e.preventDefault(); refDecide(cur,"rejected"); }
+    else if(e.key==="e" && cur){
+      const node = document.querySelector('.ref[data-index="'+S.cursor+'"]');
+      if(node){ e.preventDefault(); openRefEditor(node, cur); }
+    }
+    else if(e.key==="j"){ e.preventDefault(); move(rows, 1); }
+    else if(e.key==="k"){ e.preventDefault(); move(rows, -1); }
   }
 });
 
@@ -2807,6 +3851,13 @@ async function reboot(){
     if(S.pool) loadPoolPapers();
     if(!S.editor && !S.pool && !S.chief) nameInput.focus();
     if(S.chief || S.pool) setInterval(keepUpToDate, 10000);
+    const wanted = new URLSearchParams(location.hash.slice(1));
+    if(wanted.get("paper") && !S.chief){
+      await openPaper(wanted.get("paper"));
+      const tab = wanted.get("tab");
+      if(wanted.get("side")==="pdf") S.side = "pdf";
+      if(S.paper && S.paper.screened && TABS.some(([key])=>key===tab)){ S.tab = tab; renderPaper(); }
+    }
   }catch(err){
     document.body.innerHTML = '<main><div class="empty"><b>Could not start</b>'
       + '<div>'+err.message+'</div></div></main>';

@@ -40,6 +40,8 @@ def compile_tex(
     out_dir: Path,
     *,
     use_biblatex: bool = False,
+    pdf_name: str | None = None,
+    replace_files: dict[str, str] | None = None,
 ) -> BuildResult:
     """Compile *edited_tex* and place the PDF in *out_dir*.
 
@@ -55,6 +57,11 @@ def compile_tex(
         The ``aiagent_prescreen/`` directory.
     use_biblatex:
         When ``True`` the build uses ``biber`` for bibliography processing.
+    pdf_name:
+        The PDF's name in *out_dir* (default ``<paper_id>_edited.pdf``).
+    replace_files:
+        Files written into the build over the author's (name -> text), e.g. the
+        reviewed ``.bib`` under the name the source asks for.
     """
     # --- 1. Ensure class files are available ---
     from src.assets.cls_manager import ensure_cls_files
@@ -86,6 +93,10 @@ def compile_tex(
     if bib_dir.is_dir():
         _copy_dir_contents(bib_dir, build_dir)
 
+    for name, text in (replace_files or {}).items():
+        if name and "/" not in name and "\\" not in name and not name.startswith("."):
+            (build_dir / name).write_text(text, encoding="utf-8")
+
     # Copy JACoW class files
     # (bib name-fix happens after edited .tex is in place — see below)
     for cls_file in cls_dir.iterdir():
@@ -116,7 +127,7 @@ def compile_tex(
     # --- 4. Copy PDF to out_dir ---
     built_pdf = build_dir / f"{paper_id}.pdf"
     if built_pdf.exists():
-        dest = out_dir / f"{paper_id}_edited.pdf"
+        dest = out_dir / (pdf_name or f"{paper_id}_edited.pdf")
         shutil.copy2(built_pdf, dest)
         result.pdf_path = dest
 
@@ -254,6 +265,16 @@ def _run_latex(tex: Path, cwd: Path, *, use_biblatex: bool) -> BuildResult:
 
 # ---- latexmk ---------------------------------------------------------------
 
+def _working_biber() -> str | None:
+    """biber that runs: TeX Live's universal binary unpacks itself with lipo, which
+    fails on some Macs, so its arm64 slice is used instead (src.annexb.bib._biber)."""
+    try:
+        from src.annexb.bib import _biber
+        return _biber()
+    except Exception:  # noqa: BLE001
+        return shutil.which("biber")
+
+
 def _run_latexmk(tex: Path, cwd: Path) -> BuildResult:
     cmd = [
         "latexmk", "-norc", "-pdf",
@@ -262,6 +283,13 @@ def _run_latexmk(tex: Path, cwd: Path) -> BuildResult:
         "-halt-on-error",
         tex.name,
     ]
+    try:
+        wants_biber = "biblatex" in tex.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        wants_biber = False
+    biber = _working_biber() if wants_biber else None
+    if biber and biber != shutil.which("biber"):
+        cmd[3:3] = ["-e", f"$biber = q[{biber} %O %S];"]
     proc = subprocess.run(
         cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
         errors="replace", timeout=120
@@ -299,10 +327,10 @@ def _run_pdflatex_sequence(
     combined = r1.stdout + r1.stderr
 
     if use_biblatex:
-        biber = shutil.which("biber")
+        biber = _working_biber()
         if biber:
             stem = tex.stem
-            subprocess.run(["biber", stem], cwd=cwd,
+            subprocess.run([biber, stem], cwd=cwd,
                            capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=60)
         else:

@@ -24,6 +24,15 @@ The chief's page reads the same claim files, so it shows who is editing which
 paper next to who has it in Indico. This module never writes to Indico; the
 chief's ``IndicoSync`` follows the claims there.
 
+**Who holds a paper** (:meth:`Pool.holder`) is either kind of taking: a claim
+here, or an editor Indico shows for it (someone who took it in Indico itself,
+or whom the chief assigned there). Either way nobody else may take it to edit
+it, whether or not the chief's desk writes to Indico; Indico's assignments are
+read again just before a paper is handed out. Only the chief frees it
+(:meth:`Pool.free`): the claim goes, and Indico's editor is unassigned there
+when the desk keeps Indico in step, or, when it does not, is no longer honoured
+here until Indico shows someone else (the chief unassigns them in Indico).
+
 While the door is open, ``.pool_door.json`` in the folder says so, and no
 other desk opens the folder directly (:func:`door_open`).
 
@@ -209,9 +218,9 @@ class Pool:
             if take == "qa" and edited_it:
                 take = ""                         # someone else does its QA
             # Indico's assignment decides who may edit it; anyone else may QA it.
-            blocked = (self.sync.blocks(folder, indico_id, indico_name)
-                       if (self.sync and me and held is None
-                           and TAKE_FOR.get(stage) == "edit") else "")
+            blocked = (self.indico_blocks(folder, indico_id, indico_name,
+                                          conference=conference, activity=activity)
+                       if (me and held is None and TAKE_FOR.get(stage) == "edit") else "")
             rows.append({
                 "paper": name,
                 "paper_id": report.get("paper_id") or name,
@@ -266,6 +275,11 @@ class Pool:
         if not me.name:
             me = replace(me, name=indico_name or f"Indico user {indico_id}")
         folder = self.folder_for(paper)
+        from src.desk.reprepare import is_busy
+
+        if is_busy(folder):
+            raise ValueError(f"{paper} is being prepared again on the chief editor's desk; "
+                             "try again in a minute")
         if not (folder / OUT_DIR / "report.json").is_file():
             raise ValueError(f"{paper} is not prepared yet on the chief editor's desk")
         held_now = claim_module.current(folder)
@@ -281,8 +295,10 @@ class Pool:
             if mode == "qa" and has_edited(state, indico_id, indico_name):
                 raise ValueError(f"You edited {paper}, so its QA is done by another "
                                  "editor.")
-        if mode == "edit" and self.sync and held_now is None:
-            blocked = self.sync.blocks(folder, indico_id, indico_name)
+        if mode == "edit" and held_now is None:
+            if self.sync:
+                self.sync.ensure_fresh()          # someone may have taken it in Indico
+            blocked = self.indico_blocks(folder, indico_id, indico_name)
             if blocked:
                 raise ValueError(blocked + " Ask the chief editor if it should be yours.")
         with self.lock:
@@ -295,7 +311,8 @@ class Pool:
                 review = ReviewState.load(folder)
                 review.editor = me.name
                 review.save(folder)
-            self._note(paper, taken_at=_now(), by=me.name, taken_for=held.mode)
+            self._note(paper, taken_at=_now(), by=me.name, taken_for=held.mode,
+                       freed_indico=None)
         if self.sync and held.mode == "edit":
             self.sync.want(paper, indico_id=indico_id, name=indico_name)
         return {"paper": paper, "since": held.since, "mode": held.mode,
@@ -419,8 +436,18 @@ class Pool:
         if state.status in ("done", "needs_author"):
             return
         self._given_up(paper, me, reason)
+        indico_id, indico_name = self.indico_user(me)
+        # Giving it up here gives it up in Indico too: if Indico shows them, the
+        # desk stops honouring that (and unassigns them there when it may).
+        from src.desk.indico import same_person
+
+        assignment = self._indico_holder(folder, paper)
+        if assignment is not None and (
+                (indico_id and assignment.editor_id == indico_id)
+                or same_person(assignment.editor, indico_name or me.name)):
+            self._note(paper, freed_indico={"editor": assignment.editor,
+                                            "editor_id": assignment.editor_id, "at": _now()})
         if self.sync:
-            indico_id, indico_name = self.indico_user(me)
             self.sync.want(paper, indico_id=indico_id, name=indico_name, unassign=True)
 
     # -- papers given up, for the chief's page -------------------------------
@@ -453,30 +480,132 @@ class Pool:
 
     # -- what the chief does --------------------------------------------------
     def free(self, paper: str) -> dict | None:
-        """Free *paper* from whoever holds it, so any editor can take it.
+        """Free *paper* from whoever holds it, here or in Indico, so any editor can take it.
 
-        Their desk hears the next time it sends; work it had not sent yet stays
-        on their computer. Unfinished, they are unassigned in Indico too.
-        Returns who held it, or None if nobody did.
+        A claim here goes; their desk hears the next time it sends, and work it
+        had not sent yet stays on their computer. An editor Indico shows for it
+        (unfinished) is unassigned there when the desk keeps Indico in step;
+        when it does not, the desk stops honouring that assignment (until Indico
+        shows nobody, or someone else) and says so, for the chief to unassign
+        them in Indico. Returns who held it, or None if nobody did.
         """
         from src.desk.state import ReviewState
 
         folder = self.folder_for(paper)
         with self.lock:
             held = claim_module.current(folder)
-            if held is None:
+            in_indico = self._indico_holder(folder, paper)
+            if held is None and in_indico is None:
                 return None
-            try:
-                claim_module.path_for(folder).unlink()
-            except FileNotFoundError:
-                pass
-            self._note(paper, freed_at=_now(), freed_from=held.who)
-        if (self.sync and held.mode == "edit"
-                and ReviewState.load(folder).status not in ("done", "needs_author")):
+            if held is not None:
+                try:
+                    claim_module.path_for(folder).unlink()
+                except FileNotFoundError:
+                    pass
+            facts = {"freed_at": _now(), "freed_from": held.who if held else in_indico.editor}
+            if in_indico is not None:
+                facts["freed_indico"] = {"editor": in_indico.editor,
+                                         "editor_id": in_indico.editor_id, "at": _now()}
+            self._note(paper, **facts)
+        unfinished = ReviewState.load(folder).status not in ("done", "needs_author")
+        indico = ""
+        if in_indico is not None:
+            indico = "still assigned"
+            if self.sync and self.sync.enabled and unfinished:
+                self.sync.want(paper, indico_id=in_indico.editor_id, name=in_indico.editor,
+                               unassign=True)
+                indico = "unassigning"
+        elif self.sync and held is not None and held.mode == "edit" and unfinished:
             ident = self.identities.get(held.desk_id) or {}
             self.sync.want(paper, indico_id=ident.get("id"),
                            name=ident.get("name") or held.name, unassign=True)
-        return {"paper": paper, "who": held.who, "mode": held.mode}
+        return {"paper": paper, "who": held.who if held else in_indico.editor,
+                "mode": held.mode if held else "edit", "taken": "here" if held else "indico",
+                "indico_editor": in_indico.editor if in_indico else "", "indico": indico}
+
+    # -- who holds a paper: a claim here, or Indico's editor ---------------------
+    def _indico_holder(self, folder: Path, paper: str, *, conference=None,
+                       activity: dict | None = None):
+        """Indico's assignment for the paper, when it gives it to an editor the chief
+        has not freed it from; else None. A freed editor is forgotten once Indico
+        shows nobody (so taking it there again holds it again)."""
+        from src.desk.indico import Conference, same_person
+        from src.desk.state import is_pulled_conference
+
+        if conference is None:
+            if not is_pulled_conference(self.root):
+                return None
+            conference = Conference.open(self.root)
+        assignment = conference.assignment(folder) if conference else None
+        activity = self.activity().get("papers", {}) if activity is None else activity
+        freed = (activity.get(paper) or {}).get("freed_indico")
+        if assignment is None or not assignment.editor:
+            if freed:
+                self._note(paper, freed_indico=None)
+            return None
+        if freed and ((freed.get("editor_id") and freed.get("editor_id") == assignment.editor_id)
+                      or same_person(freed.get("editor", ""), assignment.editor)):
+            return None
+        return assignment
+
+    def indico_blocks(self, folder: Path, indico_id: int | None, name: str, *,
+                      conference=None, activity: dict | None = None) -> str:
+        """Why *name* may not take the paper to edit it: Indico gives it to someone else."""
+        from src.desk.indico import same_person
+        from src.desk.state import submission_name
+
+        assignment = self._indico_holder(folder, submission_name(folder),
+                                         conference=conference, activity=activity)
+        if assignment is None:
+            return ""
+        if indico_id and assignment.editor_id == indico_id:
+            return ""
+        if same_person(assignment.editor, name):
+            return ""
+        return f"This paper is assigned to {assignment.editor} in Indico."
+
+    def holder(self, folder: Path, *, conference=None, activity: dict | None = None) -> dict:
+        """Who holds the paper, for the chief's page.
+
+        ``taken`` is ``here`` (a claim on this desk), ``indico`` (an editor in
+        Indico, nobody here), ``both`` (the same person both ways), ``conflict``
+        (one person here, another in Indico) or ``""`` (free). ``freed`` names an
+        Indico editor the chief freed the paper from who is still assigned there.
+        """
+        from src.desk.indico import Conference, same_person
+        from src.desk.state import is_pulled_conference, submission_name
+
+        paper = submission_name(folder)
+        if conference is None and is_pulled_conference(self.root):
+            conference = Conference.open(self.root)
+        activity = self.activity().get("papers", {}) if activity is None else activity
+        held = claim_module.current(folder)
+        in_indico = self._indico_holder(folder, paper, conference=conference,
+                                        activity=activity)
+        assignment = conference.assignment(folder) if conference else None
+        freed = (activity.get(paper) or {}).get("freed_indico")
+        here = None
+        if held is not None:
+            ident = self.identities.get(held.desk_id) or {}
+            here = {"who": held.who, "mode": held.mode, "since": held.since,
+                    "indico_id": held.indico_id or ident.get("id")}
+        taken = ""
+        if here and in_indico:
+            same = ((here["indico_id"] and here["indico_id"] == in_indico.editor_id)
+                    or same_person(here["who"], in_indico.editor))
+            taken = "both" if same else ("conflict" if here["mode"] == "edit" else "here")
+        elif here:
+            taken = "here"
+        elif in_indico:
+            taken = "indico"
+        return {
+            "taken": taken,
+            "here": here,
+            "indico": in_indico.editor if in_indico else "",
+            "freed": (assignment.editor if assignment and assignment.editor and freed
+                      and in_indico is None else ""),
+            "can_free": bool(here or in_indico),
+        }
 
     def _require(self, folder: Path, me: Me) -> None:
         held = claim_module.current(folder)

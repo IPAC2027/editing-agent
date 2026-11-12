@@ -52,14 +52,16 @@ page, so another website open in the same browser cannot drive it.
 | Screen | What you do there |
 |---|---|
 | **The list** | Every submission with its status, how many changes await you, and how many problems the author must fix. Click one to open it. For a conference pulled from Indico, also who has each paper there — you, a colleague, or nobody — as of the pull, or of **Check Indico now** (one read-only request). |
-| **Your decisions** | One card per change: what it is, why JACoW wants it, before and after. Accept or keep as submitted. Keyboard: `a` `r` `j` `k` `n`. Repeated changes of one kind get an "accept all" button. The corrections applied automatically are listed too, folded away, each with **Put back as submitted** — "we did not ask you" never means "you cannot say no". |
-| **Title & authors** | For a conference pulled from Indico: the paper's title and author list against Indico's. Where they differ, the paper's title is taken as right and the author list becomes the combined list — after an email the desk drafts gives the author 48 hours to object. Applying adds the missing authors to the reviewed files and lists the Indico changes for the editor to make. |
-| **Problems** | Sorted by who has to act — only the author can fix these / for you to check / for the record. Tick off what you have handled. |
-| **Your notes** | Anything the agent missed. Goes into the letter. |
-| **The paper** | The paper with your accepted corrections in place. Click any line to edit it yourself. Jump to the title, authors, body, references, or the first change. |
-| **Letter to the author** | Drafted from your decisions and notes. Edit, save, copy. |
-| **Files** | The corrected PDF, the author's original, the Word tracked-changes file. |
+| **1. Title & authors** | For a conference pulled from Indico: the paper's title and author list against Indico's. Where they differ, the paper's title is taken as right and the author list becomes the combined list — after an email the desk drafts gives the author 48 hours to object. Edit the email, open it in your own mail program (the desk sends nothing), press **I've sent it**, and **set the paper aside** until the author replies: it stays yours but leaves your list of papers to do. Applying adds the missing authors to the reviewed files and lists the Indico changes for the editor to make. Also the title's and names' own formatting in the paper. |
+| **2. References** | Each reference as written (left) beside Appendix B's layout (right), changed words marked. Green: rewritten, nothing missing. Red: something the desk cannot fix by itself (a missing part, an unknown kind, a wrong DOI). Grey: already right. Accept, keep as submitted, or edit it yourself; "accept all green". For `\bibitem` papers the right side is LaTeX; for Word, text (a tracked change); for `.bib` papers, the entry's fields for `jacow.bbx` plus how it prints, written to `…_final.bib`. Keyboard: `a` `r` `e` `j` `k`. |
+| **3. The paper** | Like an online LaTeX editor: the source on the left with every suggestion in place (red struck / green inserted), the review list or the PDF on the right. Click a suggestion to decide it (accept, keep, or **Modify…** in your own words); click any other text to edit its line. **Recompile** builds the PDF of the paper as it stands. Problems, sorted by who has to act, and the automatic corrections (each with **Put back as submitted**) are in the review list. Keyboard: `a` `r` `j` `k` `n`. |
+| **4. Editor's panel** | The JACoW tags (TC06, TC12, TC14, FC03, …) proposed from what was corrected, to tick, untick and copy into Indico; the letter to the author, drafted from your decisions and notes; things you found yourself; the files. |
 | **Check a reference list** | Linked from the header. Paste any bibliography; each reference comes back formatted, looked up and checked by the same engine as the papers. Replaces the formatter's separate Streamlit app. |
+
+**Prepare all again…** reads every downloaded paper again after the agent has
+improved; the list says how many were prepared by an older version. Decisions
+follow the suggestions they were about (matched by what the edit says, not its
+number), and papers an editor is working on, and finished ones, are left alone.
 
 **Finish this paper** writes the reviewed source, the letter and a summary of
 every decision, then offers the next unfinished paper. A finished paper can be
@@ -109,9 +111,14 @@ Indico has not seen), the author/title check (OK, email to send, email sent,
 fixed), whether it is edited and by whom, and its QA (not yet, in QA, passed,
 failed with the note), next to Indico's editor (refreshed every 10 seconds).
 New revisions of papers already downloaded are flagged, not downloaded yet.
-**Free** releases a paper from
-whoever holds it: their desk is told on its next send, their unsent work stays
-on their computer, and an unfinished paper is unassigned in Indico. Every
+A paper is held by whoever took it on the desk *or* in Indico (an editor
+who assigned it to themselves there): either way nobody else can take it to
+edit it, whatever the Indico switch says, and Indico is read again just before
+a paper is handed out. The **Taken by** column shows which. **Free** releases a
+paper from whoever holds it: their desk is told on its next send, their unsent
+work stays on their computer, and an unfinished paper is unassigned in Indico
+when the sync is on; when it is off, the desk stops holding the paper for
+Indico's editor and reminds the chief to unassign them there. Every
 editing request to the managing page is refused (`MANAGING_ROUTES` in
 `src/desk/server.py`). To edit, the chief clicks **Edit papers**: it starts an
 editor's desk joined to the chief's own door, with its own settings
@@ -318,89 +325,38 @@ is written and the original is untouched.
 On the 34 LaTeX example submissions, per paper: **8.1 automatic changes, 1.0
 decisions, 0.2 problems needing a human.**
 
-## References: one engine
+## References: Appendix B's exact layout
 
-Every reference — a Word paragraph, a `\bibitem` body, a reference pasted into
-the desk — is formatted, looked up and integrity-checked by
-[jacow-reference-formatter](https://github.com/IPAC2027/jacow-reference-formatter),
-pinned to a release tag in `pyproject.toml`. `src/references.py` is the only
-module that talks to it, and turns its answer into the agent's tiers:
+Every reference is written in the exact layout of Appendix B of the JACoW style guide
+(`src/annexb`): read into fields, sorted into one of Appendix B's 16 kinds (conference
+proceedings, a talk at a past conference, this conference, journal, accepted, submitted,
+arXiv, online, book or chapter, internal report, technical report, thesis, handbook,
+manual, patent, unpublished or private communication), normalised (initials, sentence
+case, the journal's ISO 4 abbreviation with Annex C first, "in Proc. IPAC’23", "Oct.",
+"Menlo Park, CA, USA"), completed from refs.jacow.org, the JACoW conference list,
+Crossref, DataCite and abbrevIso, and written from that kind's template:
 
-| Formatter result | Agent |
-|---|---|
-| Only presentation changes (`DOI:` → `doi:`, "et al" punctuation, serial comma, quotes, dashes) | **auto** |
-| Full reformat that passes `check_rewrite` and adds nothing from a lookup | **suggest** |
-| Reformat that fills in or corrects fields from Crossref, DataCite or JACoW | **suggest**; the card lists each value and its source: "DOI and pages added from Crossref; volume corrected from Crossref (25 → 26)" |
-| `doi_mismatch` | flag REF-INT-01: the cited DOI belongs to another paper |
-| `suspected_fabricated` | flag REF-INT-02: no index has it, check by hand |
-| `unverifiable` | REF-INT-03, NOT CHECKED (only when lookups ran) |
-| Rewrite fails `check_rewrite`, or a value was defaulted | rewrite discarded, author's text kept |
+- a `\bibitem` or a Word reference is **rewritten** (LaTeX: `\emph{Proc.\ IPAC'23}`,
+  `\doi{…}`; Word: a tracked change);
+- a `.bib` entry gets the **fields** that make `jacow.bbx` print the same layout
+  (`venue` and `eventdate` for proceedings, `@atevent`/`@thisevent` for talks, braces
+  for the capitals sentence case must keep), written to `edits_bib.json`,
+  `<name>_edited.bib` and `changes_bib.patch`.
 
-`check_rewrite` lives in the formatter, so its own command line and web page
-are protected by the same guard. It protects the author's information, not
-the author's wording: every value an authoritative source added or corrected
-is declared to it from the formatter's provenance record, so lookups reach the
-editor, while anything lost or invented with no source behind it — a dropped
-journal name, a guessed year, a lost "unpublished", an acronym's capitals —
-still discards the rewrite. Set `REFERENCE_CORRECTIONS=false` to let lookups
-fill gaps only, never change a value the author gave. Word and LaTeX differ only in the output:
-tracked changes for Word, source edits for LaTeX.
-
-### The JACoW reference rules (src/refcheck)
-
-The formatter rewrites a whole reference from the fields it parsed, and on a
-messy reference that rewrite is often refused (rightly: it once turned a
-NeurIPS paper into an arXiv preprint). On its own that left the author's text
-untouched with "check it by hand". Every reference now also goes through
-`src/refcheck`, in three stages, each checked by the one before:
-
-1. **Rules find and fix.** About forty JACoW rules (Annex B, the "Formatting
-   references" and "DOIs for arXiv" pages, the Editor Quality Matrix), each
-   finding its own errors and fixing those it can with no judgement:
-   `doi:` form and place, a bare or repeated DOI, an arXiv DOI derived from the
-   identifier, "et al.", initials, names surname-first or with first names,
-   "and" / ", and", more than six authors, quotes and the comma after them,
-   sentence case (when the formatter's sentence case is sure), "in Proc.
-   IPAC'21" (also from a JACoW DOI when the text gives the long name), month
-   abbreviations, "p." for an article number, "Journal, vol. V, no. N, p. P,
-   Year" from "Journal V, P (Year)", ISO 4 journal names, "to be published",
-   an old JACoW paper's PDF address as its paper ID. Each fix is small and
-   local, and is checked against the author's text by `check_rewrite`, told
-   exactly what that fix may change. A value a lookup verified (a JACoW
-   paper's pages, a missing DOI or volume) is added with its source named.
-2. **Difficulty description.** What the rules could not fix, why, and who can:
-   the **local model** (a title with no quotes, a title in capitals whose
-   words are not all decided, an author list mixed with a year) or the
-   **editor** (a DOI for a different conference than the text names, a JACoW
-   DOI with no paper ID, one page where a range belongs, pages that disagree
-   with the DOI's record, a conference year that disagrees with the date,
-   "in preparation"). Problems for the editor are never sent to a model.
-3. **AI skill.** With `LLM_ENABLED=true`, the local model gets the problems
-   meant for it, the JACoW layout and Annex B's own example for that kind of
-   reference, and the verified facts. A title's capitals are decided word by
-   word (unanimous labels, rebuilt in code); anything else is a corrected
-   reference, accepted only if `check_rewrite` finds nothing lost or invented
-   beyond what the problems allow and the rules, run again, find none of those
-   problems and no new one. One retry with the reasons; then the editor.
-
-The formatter's rewrite and the rules' version compete: the formatter's wins
-when it passed `check_rewrite` (with the rules applied on top) and is left
-with no more problems than the rules' version, since it can carry verified
-values the rules cannot add. Whatever still breaks a rule is one finding per
-reference, **REF-CHECK-01**, with the description and its difficulty (low:
-layout; medium: judgement; high: a fact or a decision). Fixes that are only
-presentation are **auto**; anything else is **suggest**. Every rule is in
-`docs/reference_checker.md`.
+Every rewrite is a suggestion, with what changed and where each value came from; a field
+the layout needs that no source could give is named, never invented. The local model,
+when switched on, only reads references the rules cannot read (every value it points at
+must be a piece of the reference); the template writes the text. Details, the 16 layouts,
+the BibTeX conventions and NAPAC'25 measurements: `docs/reference_checker.md`.
 
 `src/refcheck/doi.py` checks every DOI and looks for missing ones (lookups are always on).
 A DOI that does not exist or is another paper's is corrected when Crossref or DataCite
-gives the right one for the reference. A missing DOI is added when exactly one record
-agrees on the title, first author, year, and journal or proceedings (a conference paper's
-DOI is never given to the journal article of the same title). When nothing fits that
-strictly, a looser search offers its closest record as a *possible* DOI for the editor to
-check, naming what differs. A failed lookup changes nothing.
-References follow one standard (Annex B) in every conference; how strictly is each
-editor's choice at the desk.
+gives the right one for the reference, or when one of its near spellings (a dot left
+out, a digit wrong or swapped, a mistyped prefix) exists and its record agrees with the
+reference. A missing DOI is added when exactly one record agrees on the title, first
+author, year, and journal or proceedings. When nothing fits that strictly, a looser
+search offers its closest record as a *possible* DOI for the editor to check. A failed
+lookup changes nothing. References follow one standard (Appendix B) in every conference.
 
 ### House style
 

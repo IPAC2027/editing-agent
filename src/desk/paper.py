@@ -19,13 +19,21 @@ original files are never touched.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
 from src.desk import files, plain, title_check
 from src.desk.indico import Conference
-from src.desk.state import ManualEdit, ReviewState, _guess_paper_id, finding_key
+from src.desk.state import (
+    ManualEdit,
+    ReviewState,
+    _guess_paper_id,
+    bib_id,
+    finding_key,
+    hold_view,
+)
 from src.edits import EditConflict, EditSet
 
 
@@ -93,6 +101,27 @@ class Paper:
             except Exception:  # noqa: BLE001
                 self.editset = None
 
+        # The .bib file's own edits (biblatex papers), with ids of their own.
+        self.bib_editset: EditSet | None = None
+        bib_edits_path = self.out_dir / "edits_bib.json"
+        if bib_edits_path.exists():
+            try:
+                self.bib_editset = EditSet.read(bib_edits_path)
+                for edit in self.bib_editset.edits:
+                    edit.id = bib_id(edit.id)
+            except Exception:  # noqa: BLE001
+                self.bib_editset = None
+
+        # One record per reference, written when the paper was prepared.
+        refs = _read_json(self.out_dir / "references.json")
+        self.has_reference_records = "references" in refs
+        self.reference_records: list[dict] = refs.get("references", [])
+        self.references_file: str = refs.get("file", "")
+        self.bib_path = self._find_bib()
+        self.bib_source = ""
+        if self.bib_path is not None:
+            self.bib_source = self.bib_path.read_text(encoding="utf-8", errors="replace")
+
         self.source_path = self._find_source()
         self.source = ""
         if self.source_path and self.source_path.suffix.lower() == ".tex":
@@ -109,6 +138,23 @@ class Paper:
     @property
     def paper_id(self) -> str:
         return self.state.paper_id or self.report.get("paper_id", self.folder.name)
+
+    def _find_bib(self) -> Path | None:
+        """The .bib file the .bib edits and records were made against, if any."""
+        if self.kind != "latex" or not (self.bib_editset or any(
+                r.get("origin") == "bib" for r in self.reference_records)):
+            return None
+        from src.workflow.prescreen import _find_bibs
+
+        try:
+            bibs = _find_bibs(self.folder)
+        except Exception:  # noqa: BLE001
+            return None
+        wanted = self.bib_editset.file if self.bib_editset else self.references_file
+        for bib in bibs:
+            if bib.name == wanted:
+                return bib
+        return bibs[0] if bibs else None
 
     def _find_source(self) -> Path | None:
         from src.workflow.prescreen import _find_tex
@@ -160,11 +206,28 @@ class Paper:
             return None
         return reorder
 
+    @property
+    def bib_auto(self) -> list:
+        return self.bib_editset.auto if self.bib_editset else []
+
+    @property
+    def bib_suggested(self) -> list:
+        return self.bib_editset.suggested if self.bib_editset else []
+
     def suggested_ids(self) -> list[str]:
         ids = [edit.id for edit in self.suggested_edits]
+        ids += [edit.id for edit in self.bib_suggested]
         if self.reorder:
             ids.append(self.reorder.get("id", "R1"))
         return ids
+
+    def find_edit(self, edit_id: str):
+        """An edit (or Word correction) by id, wherever it lives; None if unknown."""
+        for edit in [*self.auto_edits, *self.suggested_edits, *self.bib_auto,
+                     *self.bib_suggested]:
+            if edit.id == edit_id:
+                return edit
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -204,16 +267,32 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
             ),
         }
 
+    scopes = _Scopes(paper)
     decisions = [_decision_card(edit, state) for edit in paper.suggested_edits]
+    decisions += [_decision_card(edit, state) for edit in paper.bib_suggested]
     if paper.reorder:
         decisions.insert(0, _reorder_card(paper.reorder, state))
 
     applied = [_applied_card(edit, state) for edit in paper.auto_edits]
+    applied += [_applied_card(edit, state) for edit in paper.bib_auto]
+    bib_ids = {edit.id for edit in [*paper.bib_auto, *paper.bib_suggested]}
+    for card in decisions + applied:
+        if card["kind"] == "reorder":
+            card["scope"], card["ref"] = "reference", ""
+            continue
+        edit = paper.find_edit(card["id"])
+        card["scope"], card["ref"] = scopes.of_edit(edit, bib=card["id"] in bib_ids)
+        if card["id"] in bib_ids:
+            card["line_label"] = f"line {edit.line} of {paper.bib_editset.file}"
+        card["edited_text"] = state.edit_texts.get(card["id"])
 
     findings = _finding_cards(
         paper.report.get("findings", []), state,
         covered=_covered_by_corrections(paper),
     )
+    for card in findings:
+        card["scope"], card["ref"] = scopes.of_finding(card)
+    references = _references_view(paper, findings)
 
     return {
         "folder": str(folder),
@@ -255,6 +334,12 @@ def view(folder: Path, *, default_editor: str = "") -> dict:
         "files": _files(paper),
         "source": _source_view(paper),
         "lookups": paper.report.get("lookups", []),
+        "references": references,
+        "body": _body_view(paper),
+        "tags": _tags_view(paper, decisions, applied, findings, references),
+        "hold": hold_view(state),
+        "pdf": _pdf_view(paper),
+        "reprepared": state.reprepared[-1] if state.reprepared else None,
     }
 
 
@@ -486,6 +571,427 @@ def _source_view(paper: Paper) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Where each change and finding belongs: the title and authors, the reference
+# list, or the body of the paper
+# ---------------------------------------------------------------------------
+
+_TITLE_CHECKS = frozenset({"FMT-TITLE-02", "FMT-AUTH-01", "WORD-TITLE-01", "WORD-AUTH-02",
+                           "WORD-TITLE-03"})
+_REFERENCE_PREFIXES = ("REF-", "DOI-", "CITE-", "BIB-", "PROC-REQ-", "FMT-REF-")
+_REFERENCE_CHECKS = frozenset({"URL-AS-DOI-01", "TITLE-01", "AUTH-01", "AUTH-02",
+                               "JACOW-CLS-02", "JACOW-CLS-03", "FMT-TITLE-03",
+                               "WORD-REFSPACE-01"})
+_LABEL = re.compile(r"^Reference (\{[^}]*\}|\[\d+\])")
+
+
+class _Scopes:
+    """Sorts changes and findings into the desk's tabs."""
+
+    def __init__(self, paper: Paper) -> None:
+        self.paper = paper
+        records = paper.reference_records
+        self.ids = {ref_id(r) for r in records}
+        self.by_edit = {eid: ref_id(r) for r in records for eid in r.get("edit_ids") or []}
+        self.spans = [(r["start"], r["end"], ref_id(r)) for r in records
+                      if r.get("origin") == "bibitem" and r.get("start") is not None]
+        self.lines = [(r.get("line") or 0, r.get("end_line") or r.get("line") or 0, ref_id(r))
+                      for r in records if r.get("origin") == "bibitem"]
+        block = (re.search(r"\\begin\{thebibliography\}.*?\\end\{thebibliography\}",
+                           paper.source, re.DOTALL) if paper.source else None)
+        self.block = block.span() if block else None
+
+    def _by_key(self, key: str) -> str:
+        for origin in ("bibitem", "bib", "word"):
+            if f"{origin}:{key}" in self.ids:
+                return f"{origin}:{key}"
+        return ""
+
+    def of_edit(self, edit, *, bib: bool = False) -> tuple[str, str]:
+        if edit is None:
+            return "body", ""
+        if bib:
+            return "reference", self.by_edit.get(edit.id, "")
+        if isinstance(edit, _WordChange):
+            number = edit.paragraph.get("reference")
+            if number is not None:
+                return "reference", (f"word:{number}" if f"word:{number}" in self.ids else "")
+            return ("title" if edit.check_id in _TITLE_CHECKS else "body"), ""
+        ref = self.by_edit.get(edit.id) or next(
+            (rid for a, b, rid in self.spans if a <= edit.start and edit.end <= b), "")
+        if ref:
+            return "reference", ref
+        if self.block and self.block[0] <= edit.start < self.block[1]:
+            return "reference", ""
+        return ("title" if edit.check_id in _TITLE_CHECKS else "body"), ""
+
+    def of_finding(self, card: dict) -> tuple[str, str]:
+        check_id = card.get("check_id", "")
+        match = _LABEL.match(card.get("detail") or "")
+        ref = self._by_key(match.group(1)[1:-1]) if match else ""
+        line = card.get("line")
+        if not ref and isinstance(line, int) and self.paper.kind == "latex":
+            ref = next((rid for a, b, rid in self.lines if a <= line <= b), "")
+        if ref:
+            return "reference", ref
+        if check_id in _TITLE_CHECKS:
+            return "title", ""
+        if check_id.startswith(_REFERENCE_PREFIXES) or check_id in _REFERENCE_CHECKS:
+            return "reference", ""
+        return "body", ""
+
+
+# ---------------------------------------------------------------------------
+# The References tab: each reference as written, beside what it becomes
+# ---------------------------------------------------------------------------
+
+#: Findings that ask for a DOI: answered when the rewrite carries one.
+_DOI_WANTED = frozenset({"URL-AS-DOI-01", "DOI-REQ-01", "DOI-MISSING-01",
+                         "DOI-FMT-02", "DOI-FMT-01", "DOI-FMT-03"})
+
+#: Problems the desk cannot fix by itself: the reference is shown red.
+_BLOCKING = frozenset({"REF-KIND", "REF-DOI-WRONG", "REF-MISSING", "FMT-REF-03",
+                       "REF-INT-01", "REF-INT-02", "WORD-TRACK-01"})
+
+
+def _is_auto(edit) -> bool:
+    if isinstance(edit, _WordChange):
+        return edit.paragraph.get("tier") == "auto"
+    return getattr(edit, "tier", None) is not None and edit.tier.value == "auto"
+
+
+def _ref_with(text: str, record: dict, edits: list, keep) -> str:
+    """The reference with the edits *keep* chooses applied, as the author's layout has it."""
+    start, end = record["start"], record["end"]
+    body = text[start:end]
+    for edit in sorted((e for e in edits if keep(e)), key=lambda e: e.start, reverse=True):
+        if start <= edit.start and edit.end <= end:
+            body = body[:edit.start - start] + edit.after + body[edit.end - start:]
+    return body.strip()
+
+
+def _references_view(paper: Paper, findings: list[dict]) -> dict:
+    """One row per reference: the source, the result, and how sure the desk is.
+
+    ``status`` is ``fixed`` (rewritten, nothing missing: green), ``problem``
+    (something the desk cannot put right by itself: red) or ``ok`` (already in
+    Appendix B's layout, or nothing to change).
+    """
+    state = paper.state
+    by_ref: dict[str, list[dict]] = {}
+    for card in findings:
+        if card.get("ref"):
+            by_ref.setdefault(card["ref"], []).append(card)
+    rows = []
+    for record in paper.reference_records:
+        rid = ref_id(record)
+        origin = record.get("origin", "")
+        # Every edit inside the reference: the whole rewrite, or (when there is
+        # none) the narrow fixes, decided together as one.
+        edits = [e for e in (paper.find_edit(i) for i in (record.get("edit_ids") or [])) if e]
+        whole = paper.find_edit(record.get("edit_id") or "") if record.get("edit_id") else None
+        if whole is not None:
+            edits = [whole]
+        edit = edits[0] if edits else None
+        auto_ids = [e.id for e in edits if _is_auto(e)]
+        suggest_ids = [e.id for e in edits if not _is_auto(e)]
+        auto = bool(edits) and not suggest_ids
+        decision = ""
+        if auto:
+            decision = ("reverted" if all(state.auto_decision(i) == "reverted" for i in auto_ids)
+                        else "applied")
+        elif suggest_ids:
+            said = {state.decision_for(i) for i in suggest_ids}
+            decision = said.pop() if len(said) == 1 else "undecided"
+        proposed, standing = "", ""
+        if whole is not None:
+            proposed = whole.after.strip() if origin == "bibitem" else whole.after
+        elif edits and record.get("start") is not None:
+            text = paper.bib_source if origin == "bib" else paper.source
+            proposed = _ref_with(text, record, edits, lambda e: True)
+            standing = _ref_with(text, record, edits, lambda e: (
+                state.auto_decision(e.id) == "applied" if _is_auto(e)
+                else state.decision_for(e.id) == "accepted"))
+        problems = list(record.get("problems") or [])
+        seen = {(p["code"], p["message"]) for p in problems}
+        has_doi = bool(re.search(r"\\doi\{|\bdoi\s*[:=]|doi\.org/", proposed or ""))
+        for card in by_ref.get(rid, []):
+            if has_doi and card["check_id"] in _DOI_WANTED:
+                continue        # the rewrite gives the DOI this finding asked for
+            message = _LABEL.sub("", card.get("detail") or "").lstrip(": ").strip()
+            if (card["check_id"], message) in seen:
+                continue
+            seen.add((card["check_id"], message))
+            problems.append({"code": card["check_id"], "message": message or card["why"],
+                             "field": "", "severity": card["severity"], "key": card["key"],
+                             "handled": card["handled"]})
+        blocking = [p for p in problems
+                    if p["code"] in _BLOCKING or p.get("severity") == "error"]
+        status = ("problem" if record.get("missing") or blocking
+                  else "fixed" if edit is not None else "ok")
+        own = state.ref_texts.get(rid)
+        if own is not None:
+            current = own
+        elif standing:
+            current = standing
+        elif decision in ("accepted", "applied") and proposed:
+            current = state.edit_texts.get(edit.id, proposed) if edit is not None else proposed
+        else:
+            current = record.get("source", "")
+        rows.append({
+            "id": rid, "n": record.get("n"), "key": record.get("key", ""), "origin": origin,
+            "kind": record.get("kind", ""), "category": record.get("category", ""),
+            "source": record.get("source", ""), "proposed": proposed,
+            "text": record.get("text", ""), "status": status,
+            "edit_id": edit.id if edit is not None else "", "auto": auto,
+            "suggest_ids": suggest_ids, "auto_ids": auto_ids,
+            "decision": decision, "own": own, "current": current,
+            "missing": record.get("missing") or [], "dropped": record.get("dropped", ""),
+            "changes": record.get("changes") or [], "sources": record.get("sources") or [],
+            "parsed_by": record.get("parsed_by", ""),
+            "problems": [p for p in problems if p.get("severity") != "info"],
+            "info": [p for p in problems if p.get("severity") == "info"],
+            "line": record.get("line"),
+        })
+    reorder = paper.reorder
+    return {
+        "recorded": paper.has_reference_records,
+        "file": paper.references_file,
+        "origin": rows[0]["origin"] if rows else "",
+        "rows": rows,
+        "counts": {
+            "fixed": sum(1 for r in rows if r["status"] == "fixed"),
+            "problem": sum(1 for r in rows if r["status"] == "problem"),
+            "ok": sum(1 for r in rows if r["status"] == "ok"),
+            "undecided": sum(1 for r in rows if r["suggest_ids"]
+                             and r["decision"] == "undecided" and r["own"] is None),
+        },
+        "reorder": _reorder_card(reorder, state) if reorder else None,
+        "list_findings": [card for card in findings
+                          if card.get("scope") == "reference" and not card.get("ref")],
+    }
+
+
+# ---------------------------------------------------------------------------
+# The paper tab: the source as it stands, with each suggestion in place
+# ---------------------------------------------------------------------------
+
+def _body_view(paper: Paper) -> dict:
+    """The LaTeX source line by line, every change shown where it is.
+
+    Each line is a list of pieces: plain text, or part of an edit with its state
+    (``applied``/``reverted`` for automatic corrections, ``accepted``/
+    ``rejected``/``undecided`` for suggestions). A line's ``text`` is what it
+    says now (undecided suggestions not applied), which is what a hand edit of
+    the line replaces. Hand edits are shown on top, as :func:`compose` applies
+    them. Line numbers are those of the text as it stands.
+    """
+    if paper.kind != "latex" or not paper.source:
+        return {"editable": False, "lines": []}
+    source, state = paper.source, paper.state
+    scopes = _Scopes(paper)
+
+    overridden = []
+    for record in paper.reference_records:
+        text = state.ref_texts.get(ref_id(record))
+        if record.get("origin") == "bibitem" and text is not None and record.get("start") is not None:
+            overridden.append((record["start"], record["end"], ref_id(record), text))
+
+    events = []
+    for edit in (paper.editset.edits if paper.editset else []):
+        if any(a <= edit.start and edit.end <= b for a, b, _r, _t in overridden):
+            continue
+        auto = edit.tier.value == "auto"
+        decision = state.auto_decision(edit.id) if auto else state.decision_for(edit.id)
+        after = state.edit_texts.get(edit.id, edit.after)
+        stands = decision in ("applied", "accepted")
+        scope, ref = scopes.of_edit(edit)
+        events.append((edit.start, edit.end, {
+            "id": edit.id, "state": decision, "auto": auto, "scope": scope, "ref": ref,
+            "before": edit.before, "after": after,
+        }, after if stands else edit.before))
+    for start, end, rid, text in overridden:
+        before = source[start:end]
+        lead = before[: len(before) - len(before.lstrip())]
+        trail = before[len(before.rstrip()):]
+        events.append((start, end, {"id": "", "state": "own", "auto": False,
+                                    "scope": "reference", "ref": rid, "before": before,
+                                    "after": text}, lead + text.strip() + trail))
+    events.sort(key=lambda ev: ev[0])
+
+    lines: list[dict] = []
+    current = {"segs": [], "orig": 1}
+
+    def new_line(orig: int) -> None:
+        nonlocal current
+        lines.append(current)
+        current = {"segs": [], "orig": orig}
+
+    def put_text(start: int, end: int) -> None:
+        position = start
+        while position < end:
+            newline = source.find("\n", position, end)
+            stop = end if newline < 0 else newline
+            if stop > position:
+                current["segs"].append({"t": source[position:stop]})
+            if newline < 0:
+                break
+            new_line(source.count("\n", 0, newline + 1) + 1)
+            position = newline + 1
+
+    position = 0
+    for start, end, meta, shown in events:
+        if start < position:
+            continue
+        put_text(position, start)
+        pieces = shown.split("\n")
+        orig = source.count("\n", 0, start) + 1
+        for index, piece in enumerate(pieces):
+            if index:
+                new_line(orig)
+            seg = {"t": piece, **{k: v for k, v in meta.items() if k not in ("before", "after")}}
+            if index == 0:
+                seg["first"] = True
+            if index == len(pieces) - 1:
+                seg["last"] = True
+                if meta["state"] == "undecided" or meta["state"] == "rejected" or (
+                        meta["state"] == "reverted"):
+                    seg["proposed"] = meta["after"]
+                else:
+                    seg["was"] = meta["before"]
+            current["segs"].append(seg)
+        position = end
+    put_text(position, len(source))
+    lines.append(current)
+    if source.endswith("\n") and not lines[-1]["segs"]:
+        lines.pop()
+
+    for number, line in enumerate(lines, start=1):
+        line["n"] = number
+        line["text"] = "".join(seg["t"] for seg in line["segs"]).rstrip("\r")
+        line["mine"] = ""
+
+    texts = [line["text"] for line in lines]
+    for manual in state.manual_edits:
+        index = manual.line - 1
+        if not (0 <= index < len(texts) and texts[index] == manual.before):
+            index = next((i for i, t in enumerate(texts) if t == manual.before), -1)
+        if index < 0:
+            continue
+        texts[index] = manual.after
+        lines[index].update(text=manual.after, mine=manual.id,
+                            was=manual.before, segs=[{"t": manual.after}])
+    finding_lines: dict[int, list[str]] = {}
+    for finding in paper.report.get("findings", []):
+        if isinstance(finding.get("line"), int):
+            finding_lines.setdefault(finding["line"], []).append(
+                finding_key(finding.get("check_id", ""), finding.get("line"),
+                            finding.get("original")))
+    for line in lines:
+        keys = finding_lines.pop(line["orig"], None)
+        if keys:
+            line["findings"] = keys
+
+    jumps = []
+    for label, pattern in (("Title", r"\\title\s*[\[{]"), ("Authors", r"\\author\s*[\[{]"),
+                           ("Abstract", r"\\begin\s*\{abstract\}"),
+                           ("Body", r"\\maketitle"),
+                           ("References", r"\\begin\s*\{thebibliography\}|\\printbibliography")):
+        hit = next((line["n"] for line in lines if re.search(pattern, line["text"])), None)
+        if hit:
+            jumps.append({"label": label, "line": hit})
+    sections = [{"label": plain.readable_title(m.group(2)) or m.group(1), "line": line["n"]}
+                for line in lines
+                for m in [re.search(r"\\(section|subsection)\*?\s*\{(.*)\}", line["text"])] if m]
+    return {"editable": True, "file": paper.source_path.name if paper.source_path else "",
+            "lines": lines, "jumps": jumps, "sections": sections[:60]}
+
+
+# ---------------------------------------------------------------------------
+# The editor's panel: JACoW's editorial tags
+# ---------------------------------------------------------------------------
+
+def _tags_view(paper: Paper, decisions: list, applied: list, findings: list,
+               references: dict) -> dict:
+    """The JACoW tags this paper should carry, proposed from what was corrected.
+
+    Only a tag the evidence really is (:data:`src.indico_client.tags.CHECK_TO_TAG`);
+    the editor ticks or unticks any of them, and may tick any other code. The
+    desk does not write tags to Indico: the editor copies them across.
+    """
+    from src.indico_client.tags import CHECK_TO_TAG, FAMILIES, SERVICE_OWNED, VOCABULARY
+
+    state = paper.state
+    reasons: dict[str, list[str]] = {}
+
+    def add(code: str | None, why: str) -> None:
+        if code and code in VOCABULARY and code not in SERVICE_OWNED:
+            if why not in reasons.setdefault(code, []):
+                reasons[code].append(why)
+
+    for card in applied:
+        if card["decision"] == "applied":
+            add(CHECK_TO_TAG.get(card["check_id"]), card["heading"])
+    for card in decisions:
+        if card["decision"] == "accepted":
+            add(CHECK_TO_TAG.get(card["check_id"]), card["heading"])
+    for row in references["rows"]:
+        changed = row["own"] is not None or row["decision"] in ("accepted", "applied")
+        if not changed:
+            continue
+        add("FC03" if row["origin"] == "bib" else "TC06",
+            "reference entries corrected" if row["origin"] == "bib" else "references reformatted")
+        if row["sources"]:
+            add("TC14", "reference details added from " + ", ".join(row["sources"][:2]))
+    for card in findings:
+        if card["owner"] == plain.AUTHOR and card["severity"] in ("error", "warning") \
+                and not card["handled"]:
+            add(CHECK_TO_TAG.get(card["check_id"]), card["heading"])
+    ta = state.title_authors
+    if ta.applied_at:
+        add("TC01", "title or author list corrected against Indico")
+    if any(note.for_author and not note.resolved for note in state.editor_notes):
+        add("MP04", "your notes to the author")
+    order = list(VOCABULARY)
+    chosen = {code for code in reasons if state.tags.get(code, True)}
+    chosen |= {code for code, on in state.tags.items() if on and code in VOCABULARY}
+    return {
+        "families": FAMILIES,
+        "vocabulary": [{"code": t.code, "title": t.title, "colour": t.colour,
+                        "family": t.family} for t in VOCABULARY.values()
+                       if t.code not in SERVICE_OWNED],
+        "proposed": reasons,
+        "chosen": sorted(chosen, key=order.index),
+        "explicit": dict(state.tags),
+    }
+
+
+# ---------------------------------------------------------------------------
+# The PDF beside the source
+# ---------------------------------------------------------------------------
+
+def preview_name(paper: Paper) -> str:
+    return f"{paper.paper_id}_preview.pdf"
+
+
+def _pdf_view(paper: Paper) -> dict:
+    """PDFs the paper tab can show, newest version of the paper first."""
+    choices = []
+    for name, label in ((preview_name(paper), "Your version, as it stands"),
+                        (f"{paper.paper_id}_final.pdf", "Your reviewed paper"),
+                        (f"{paper.paper_id}_edited.pdf", "With the automatic corrections")):
+        path = paper.out_dir / name
+        if path.exists():
+            choices.append({"name": name, "label": label,
+                            "at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+                            .strftime("%Y-%m-%dT%H:%M:%SZ")})
+    pdf_dir = paper.folder / "PDF"
+    for pdf in (sorted(pdf_dir.glob("*.pdf"))[:1] if pdf_dir.is_dir() else []):
+        choices.append({"name": f"../PDF/{pdf.name}", "label": "As the author submitted it",
+                        "at": ""})
+    return {"choices": choices, "can_compile": paper.kind == "latex" and bool(paper.source)}
+
+
+# ---------------------------------------------------------------------------
 # Composing the reviewed text
 # ---------------------------------------------------------------------------
 
@@ -500,21 +1006,11 @@ def compose(paper: Paper, *, include_undecided: bool = False) -> str:
         return ""
 
     text = paper.source
-    if paper.editset:
-        chosen = [edit.id for edit in paper.auto_edits
-                  if paper.state.auto_decision(edit.id) == "applied"]
-        for edit in paper.suggested_edits:
-            decision = paper.state.decision_for(edit.id)
-            if decision == "accepted" or (include_undecided and decision == "undecided"):
-                chosen.append(edit.id)
-        try:
-            text = paper.editset.apply(paper.source, chosen)
-        except EditConflict as exc:
-            raise DeskError(
-                "The author's file has changed since this paper was prepared, so "
-                "the corrections no longer line up. Press “Prepare this paper” "
-                "again — your decisions and notes are kept."
-            ) from exc
+    spans = _chosen_spans(paper, paper.auto_edits, paper.suggested_edits,
+                          include_undecided=include_undecided) if paper.editset else []
+    spans = _with_ref_texts(paper, paper.source, spans, origin="bibitem")
+    if spans:
+        text = _apply_spans(paper.source, spans)
 
     reorder = paper.reorder
     if reorder:
@@ -530,6 +1026,72 @@ def compose(paper: Paper, *, include_undecided: bool = False) -> str:
     for edit in paper.state.manual_edits:
         text = _apply_manual(text, edit)
     return title_check.add_authors_latex(text, title_check.additions(paper.state))
+
+
+CONFLICT = ("The author's file has changed since this paper was prepared, so the "
+            "corrections no longer line up. Press “Prepare this paper” again — your "
+            "decisions and notes are kept.")
+
+
+def ref_id(record: dict) -> str:
+    """A reference's id on the desk: ``bibitem:key``, ``word:3`` or ``bib:key``."""
+    return f"{record.get('origin', '')}:{record.get('key', '')}"
+
+
+def _chosen_spans(paper: Paper, auto: list, suggested: list, *,
+                  include_undecided: bool = False) -> list[tuple[int, int, str, str]]:
+    """``(start, end, before, after)`` for every edit that stands, in the editor's wording."""
+    state = paper.state
+    spans = [(e.start, e.end, e.before, e.after) for e in auto
+             if state.auto_decision(e.id) == "applied"]
+    for edit in suggested:
+        decision = state.decision_for(edit.id)
+        if decision == "accepted" or (include_undecided and decision == "undecided"):
+            spans.append((edit.start, edit.end, edit.before,
+                          state.edit_texts.get(edit.id, edit.after)))
+    return spans
+
+
+def _with_ref_texts(paper: Paper, source: str, spans: list, *, origin: str) -> list:
+    """*spans* with each reference the editor rewrote replaced by their text.
+
+    The editor's text replaces the whole reference, so any edit inside it gives way.
+    The reference's own leading and trailing white space (a \\bibitem body's line
+    break and indent) is kept.
+    """
+    for record in paper.reference_records:
+        text = paper.state.ref_texts.get(ref_id(record))
+        if record.get("origin") != origin or text is None or record.get("start") is None:
+            continue
+        start, end = record["start"], record["end"]
+        before = source[start:end]
+        lead = before[: len(before) - len(before.lstrip())]
+        trail = before[len(before.rstrip()):]
+        spans = [sp for sp in spans if sp[1] <= start or sp[0] >= end]
+        spans.append((start, end, before, lead + text.strip() + trail))
+    return spans
+
+
+def _apply_spans(source: str, spans: list) -> str:
+    for start, end, before, _after in spans:
+        if source[start:end] != before:
+            raise DeskError(CONFLICT)
+    text = source
+    for start, end, _before, after in sorted(spans, key=lambda sp: sp[0], reverse=True):
+        text = text[:start] + after + text[end:]
+    return text
+
+
+def compose_bib(paper: Paper) -> str:
+    """The .bib as it stands: automatic + accepted edits + the editor's own entries.
+
+    Empty when the paper has no .bib edits or records.
+    """
+    if not paper.bib_source:
+        return ""
+    spans = _chosen_spans(paper, paper.bib_auto, paper.bib_suggested)
+    spans = _with_ref_texts(paper, paper.bib_source, spans, origin="bib")
+    return _apply_spans(paper.bib_source, spans) if spans else paper.bib_source
 
 
 def _apply_manual(text: str, edit: ManualEdit) -> str:
@@ -708,16 +1270,19 @@ def close_paper(folder: Path, *, status: str = "done", compile_pdf: bool = True)
         files.write_text(final_path, final)
         written.append(final_path.name)
 
-        if compile_pdf:
-            from src.latex_build import compile_tex
+        replace = {}
+        bib_text = compose_bib(paper)
+        if bib_text and paper.bib_path is not None:
+            bib_final = paper.out_dir / f"{paper.bib_path.stem}_final.bib"
+            files.write_text(bib_final, bib_text)
+            written.append(bib_final.name)
+            replace[paper.bib_path.name] = bib_text
 
-            try:
-                result = compile_tex(folder, final_path, f"{paper.paper_id}_final",
-                                     paper.out_dir)
-                if result.success and result.pdf_path and result.pdf_path.exists():
-                    written.append(result.pdf_path.name)
-            except Exception:  # noqa: BLE001 — a failed proof build must not block closing
-                pass
+        if compile_pdf:
+            result = build_pdf(paper, final, f"{paper.paper_id}_final", replace)
+            if result is not None and result.success and result.pdf_path \
+                    and result.pdf_path.exists():
+                written.append(result.pdf_path.name)
 
     if paper.kind == "word":
         written += _write_reviewed_docx(paper)
@@ -734,11 +1299,43 @@ def close_paper(folder: Path, *, status: str = "done", compile_pdf: bool = True)
     state.save(folder)
 
     summary_path = paper.out_dir / "review_summary.md"
-    files.write_text(summary_path, _summary_markdown(paper, letter))
+    try:
+        tags = view(folder).get("tags", {}).get("chosen", [])
+    except Exception:  # noqa: BLE001 — the summary is a record, not a gate
+        tags = []
+    files.write_text(summary_path, _summary_markdown(paper, letter, tags))
     written.append(summary_path.name)
 
     return {"written": written, "status": state.status,
             "status_word": state.status_word}
+
+
+def uses_biblatex(text: str) -> bool:
+    return bool(re.search(r"\\addbibresource|\\printbibliography|biblatex", text))
+
+
+def build_pdf(paper: Paper, text: str, stem: str, replace: dict[str, str] | None = None):
+    """Compile *text* (the paper as it stands) to ``<stem>.pdf`` beside the report.
+
+    Returns the build result, or None when there is no LaTeX on this computer. A
+    failed build never stops the editor: the result says what went wrong.
+    """
+    from src.latex_build import compile_tex
+
+    tex_path = paper.out_dir / f"{stem}.tex"
+    if not tex_path.exists() or tex_path.read_text(encoding="utf-8", errors="replace") != text:
+        files.write_text(tex_path, text)
+    if replace is None:
+        bib_text = compose_bib(paper)
+        replace = {paper.bib_path.name: bib_text} if bib_text and paper.bib_path else {}
+    try:
+        return compile_tex(paper.folder, tex_path, stem, paper.out_dir,
+                           use_biblatex=uses_biblatex(text), pdf_name=f"{stem}.pdf",
+                           replace_files=replace)
+    except FileNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001 — a failed proof build must not block the editor
+        return None
 
 
 def _write_reviewed_docx(paper: Paper) -> list[str]:
@@ -753,16 +1350,25 @@ def _write_reviewed_docx(paper: Paper) -> list[str]:
     """
     if not paper.source_path or not paper.source_path.exists():
         return []
+    # References the editor rewrote themselves: their text replaces the reference,
+    # whatever was suggested for it.
+    own = []
+    for record in paper.reference_records:
+        text = paper.state.ref_texts.get(ref_id(record))
+        if record.get("origin") == "word" and text is not None:
+            own.append((record, text))
+    own_numbers = {record.get("n") for record, _text in own}
     accepted = [
         c for c in paper.word_corrections
-        if (c.get("tier") == "auto"
-            and paper.state.auto_decision(c.get("id", "")) == "applied")
-        or paper.state.decision_for(c.get("id", "")) == "accepted"
+        if ((c.get("tier") == "auto"
+             and paper.state.auto_decision(c.get("id", "")) == "applied")
+            or paper.state.decision_for(c.get("id", "")) == "accepted")
+        and not (c.get("reference") is not None and c.get("reference") in own_numbers)
     ]
     target = paper.out_dir / f"{paper.source_path.stem}_reviewed.docx"
     added = title_check.word_author_addition(paper.source_path,
                                              title_check.additions(paper.state))
-    if not accepted and not added:
+    if not accepted and not added and not own:
         # Nothing to change: hand over a clean copy so there is always one
         # file that is "the reviewed document".
         shutil.copy2(paper.source_path, target)
@@ -802,6 +1408,19 @@ def _write_reviewed_docx(paper: Paper) -> list[str]:
             rewrites.append(ParagraphRewrite(paragraph_index=extra["paragraph_index"],
                                              before=extra["before"], after=extra["after"],
                                              author=author))
+    if own:
+        from src.workflow.word_prescreen import _rebuild_paragraph
+
+        for record, text in own:
+            index = record.get("paragraph_index", -1)
+            before = record.get("paragraph_text") or ""
+            if index is None or index < 0 or not before or record.get("paragraph_count", 1) != 1:
+                continue        # not one paragraph: listed in the summary, done by hand
+            after = _rebuild_paragraph(before, record.get("source", ""), text)
+            if after and after != before:
+                rewrites.append(ParagraphRewrite(
+                    paragraph_index=index, before=before, after=after,
+                    author="JACoW prescreen (editor's reference)"))
     if added:
         index, before, after = added
         same = next((r for r in rewrites if r.paragraph_index == index), None)
@@ -827,7 +1446,7 @@ def _write_reviewed_docx(paper: Paper) -> list[str]:
     return [target.name]
 
 
-def _summary_markdown(paper: Paper, letter: str) -> str:
+def _summary_markdown(paper: Paper, letter: str, tags: list[str] | None = None) -> str:
     state = paper.state
     lines = [
         f"# Review summary — {paper.paper_id}",
@@ -894,6 +1513,14 @@ def _summary_markdown(paper: Paper, letter: str) -> str:
         for edit in state.manual_edits:
             lines.append(f"- line {edit.line}: {edit.summary}"
                          + (f"\n  - {edit.note}" if edit.note else ""))
+
+    if state.ref_texts:
+        lines += ["", "## References you wrote yourself", ""]
+        for key, text in state.ref_texts.items():
+            lines.append(f"- {key}: {_short(text, 160)}")
+
+    if tags:
+        lines += ["", "## JACoW tags", "", ", ".join(tags)]
 
     if state.editor_notes:
         lines += ["", "## Issues you found", ""]

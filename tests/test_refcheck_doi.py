@@ -10,6 +10,8 @@ import pytest
 from src.refcheck import doi as D
 from src.refcheck import fix
 
+REAL_GET = D._get        # captured before the fixtures replace it
+
 
 def registry(monkeypatch, *, works=None, search=None, datacite=None, jacow_search=None,
              handles=None):
@@ -322,3 +324,131 @@ def test_a_looser_match_with_two_disagreements_is_not_offered():
                     surnames=["Jackson"], year=1999, type="journal-article",
                     container="American Journal of Physics", publisher="AAPT")
     assert not D.loose_match(f, review)[0]
+
+
+STAB = article("10.1103/physrevstab.2.114202", "Space charge dynamics in high intensity rings",
+               "Holmes", 1999, "Physical Review Special Topics - Accelerators and Beams", 2,
+               "114202")
+
+
+def test_volume_and_page_are_read_without_a_title():
+    f = D.fields_of("J. A. Holmes et al., Phys. Rev. ST Accel. Beams 2, 114202 (1999).")
+    assert (f.volume, f.page, f.year) == ("2", "114202", 1999)
+    f = D.fields_of("A. Alpha, Nucl. Instrum. Methods Phys. Res. A 500 (2003) 123.")
+    assert (f.volume, f.page) == ("500", "123")
+    f = D.fields_of("H. Sugimoto et al., JINST 19 (2024) 02, P02012, Feb. 6, 2024.")
+    assert (f.volume, f.page) == ("19", "P02012")
+
+
+def test_the_near_spellings_start_with_what_the_reference_suggests():
+    f = D.fields_of("J. A. Holmes et al., Phys. Rev. ST Accel. Beams 2, 114202 (1999).")
+    spellings = D.near_spellings("10.1103/PhysRevSTAB.2114202", f)
+    assert spellings[0] == "10.1103/PhysRevSTAB.2.114202"
+    assert len(spellings) <= 24
+    assert "10.1103/PhysRevAccelBeams.27.064403" in D.near_spellings(
+        "10.1130/PhysRevAccelBeams.27.064403", D.Fields())
+
+
+def test_a_dot_left_out_is_corrected_when_the_search_finds_nothing(monkeypatch):
+    # Crossref's search gives nothing; the near spelling exists and its record agrees.
+    asked = registry(monkeypatch, works={"10.1103/PhysRevSTAB.2.114202": STAB},
+                     handles={"10.1103/physrevstab.2.114202": True})
+    raw = ("J. A. Holmes et al., Phys. Rev. ST Accel. Beams 2, 114202 (1999). "
+           "doi:10.1103/PhysRevSTAB.2114202")
+    report = D.check(raw)
+    assert (report.status, report.doi) == ("corrected", "10.1103/PhysRevSTAB.2.114202")
+    assert "a dot left out" in report.reason
+    assert sum("/handles/" in u for u in asked) <= 24
+    result = fix(raw, facts={"doi_fix": (report.written, report.doi, report.source,
+                                          report.reason)})
+    assert result.text.endswith("doi:10.1103/PhysRevSTAB.2.114202")
+
+
+def test_a_wrong_digit_or_prefix_is_corrected_from_the_references_own_numbers(monkeypatch):
+    right = article("10.1103/PhysRevAccelBeams.27.064403", "Interplay of space charge, "
+                    "intrabeam scattering, and synchrotron radiation", "Zampetakis", 2024,
+                    "Physical Review Accelerators and Beams", 27, "064403")
+    registry(monkeypatch, works={"10.1103/PhysRevAccelBeams.27.064403": right},
+             handles={"10.1103/physrevaccelbeams.27.064403": True})
+    base = "M. Zampetakis et al., Phys. Rev. Accel. Beams 27, 064403, Mar. 2024. doi:"
+    for written, slip in (("10.1103/PhysRevAccelBeams.27.064413", "'1' for '0'"),
+                          ("10.1103/PhysRevAccelBeams.27.06443", "a character left out"),
+                          ("10.1103/PhysRevAccelBeams.27.064430", "two characters swapped"),
+                          ("10.1130/PhysRevAccelBeams.27.064403", "the prefix is 10.1103"),
+                          ("10.1103/PhysRevAccelBeams.27.O64403", "'O' for '0'")):
+        report = D.check(base + written)
+        assert (report.status, report.doi) == ("corrected", "10.1103/PhysRevAccelBeams.27.064403")
+        assert slip in report.reason
+
+
+def test_a_near_spelling_with_nothing_to_check_it_against_is_only_possible(monkeypatch):
+    registry(monkeypatch, works={"10.1103/PhysRevSTAB.2.114202": STAB},
+             handles={"10.1103/physrevstab.2.114202": True})
+    report = D.check("doi:10.1103/PhysRevSTAB.2114202")
+    assert (report.status, report.doi) == ("possible", "10.1103/PhysRevSTAB.2.114202")
+
+
+def test_a_near_spelling_whose_record_disagrees_is_not_taken(monkeypatch):
+    registry(monkeypatch, works={"10.1103/PhysRevSTAB.2.114202": STAB},
+             handles={"10.1103/physrevstab.2.114202": True})
+    report = D.check("J. A. Holmes et al., Phys. Rev. ST Accel. Beams 2, 114202 (2009). "
+                     "doi:10.1103/PhysRevSTAB.2114202")
+    assert report.status == "unresolved"
+
+
+def test_two_near_spellings_that_fit_equally_are_not_chosen_between(monkeypatch):
+    twin = dict(STAB, DOI="10.1103/physrevstab.21.14202")
+    registry(monkeypatch, works={"10.1103/PhysRevSTAB.2.114202": STAB,
+                                 "10.1103/PhysRevSTAB.21.14202": twin},
+             handles={"10.1103/physrevstab.2.114202": True,
+                      "10.1103/physrevstab.21.14202": True})
+    report = D.check("J. A. Holmes, “Space charge dynamics in high intensity rings”. "
+                     "doi:10.1103/PhysRevSTAB.2114202")
+    assert report.status != "corrected"
+
+
+def test_another_papers_doi_one_digit_away_is_corrected(monkeypatch):
+    other = article("10.1103/PhysRevAccelBeams.27.064404", "Something else entirely about "
+                    "magnets", "Other", 2024, "Physical Review Accelerators and Beams", 27,
+                    "064404")
+    right = article("10.1103/PhysRevAccelBeams.27.064403", "Interplay of space charge",
+                    "Zampetakis", 2024, "Physical Review Accelerators and Beams", 27, "064403")
+    registry(monkeypatch, works={"10.1103/PhysRevAccelBeams.27.064404": other,
+                                 "10.1103/PhysRevAccelBeams.27.064403": right},
+             handles={"10.1103/physrevaccelbeams.27.064403": True})
+    report = D.check("M. Zampetakis et al., Phys. Rev. Accel. Beams 27, 064403, Mar. 2024. "
+                     "doi:10.1103/PhysRevAccelBeams.27.064404")
+    assert (report.status, report.doi) == ("corrected", "10.1103/PhysRevAccelBeams.27.064403")
+    assert "another paper's" in report.reason
+
+
+def test_too_many_requests_is_waited_out_not_taken_for_no_answer(monkeypatch):
+    import httpx
+
+    codes = [429, 429, 200]
+
+    class Answer:
+        def __init__(self, code):
+            self.status_code, self.headers = code, {"Retry-After": "1"}
+
+        def json(self):
+            return {"message": {"DOI": "10.1103/PhysRevSTAB.2.114202"}}
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: Answer(codes.pop(0)))
+    slept = []
+    monkeypatch.setattr(D.time, "sleep", slept.append)
+    status, body = REAL_GET("https://api.crossref.org/works/10.1103/PhysRevSTAB.2.114202")
+    assert status == 200 and body["message"]["DOI"]
+    assert slept.count(1.0) == 2
+
+
+def test_without_a_title_a_possible_doi_must_have_the_volume_and_page():
+    f = D.fields_of("J. M. Byrd, et al. Phys. Rev. Lett. 89, 224801 (2002).")
+    erratum = D.Work("10.1103/physrevlett.89.139901", title="Erratum: something else",
+                     surnames=["Byrd"], year=2002, volume="89", page="139901",
+                     type="journal-article", container="Physical Review Letters")
+    assert not D.loose_match(f, erratum)[0]
+    right = D.Work("10.1103/physrevlett.89.224801", title="Coherent synchrotron radiation",
+                   surnames=["Byrd"], year=2002, volume="89", page="224801",
+                   type="journal-article", container="Physical Review Letters")
+    assert D.loose_match(f, right)[0]

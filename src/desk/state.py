@@ -135,6 +135,20 @@ class QAState(BaseModel):
     history: list[dict] = Field(default_factory=list)   # {status, by, at, note}
 
 
+class HoldState(BaseModel):
+    """A paper set aside while the editor waits for the author.
+
+    The editor keeps the paper (its claim stays): setting it aside only takes it
+    off their list of papers to work on now, until the author answers or
+    ``until`` passes. ``since`` is empty when the paper is not set aside.
+    """
+
+    since: str = ""
+    until: str = ""                        # the deadline in the email, if there is one
+    reason: str = ""
+    by: str = ""
+
+
 class ReviewState(BaseModel):
     """One editor's work on one paper."""
 
@@ -152,6 +166,20 @@ class ReviewState(BaseModel):
     letter_override: str = ""              # an edited author letter, if any
     title_authors: TitleAuthorState = Field(default_factory=TitleAuthorState)
     qa: QAState = Field(default_factory=QAState)
+    # The editor's own wording for a suggestion (edit id -> text): the suggestion
+    # accepted as they changed it.
+    edit_texts: dict[str, str] = Field(default_factory=dict)
+    # The editor's own text for a whole reference (reference id -> text): a
+    # \\bibitem body, a Word reference, or a .bib entry. It replaces the
+    # reference, whatever was suggested for it.
+    ref_texts: dict[str, str] = Field(default_factory=dict)
+    # JACoW editorial tags the editor ticked (True) or unticked (False) against
+    # what the desk proposes.
+    tags: dict[str, bool] = Field(default_factory=dict)
+    hold: HoldState = Field(default_factory=HoldState)
+    # Each time the paper was prepared again: {at, kept, dropped: [decisions whose
+    # suggestion no longer exists]} (src.desk.reprepare).
+    reprepared: list[dict] = Field(default_factory=list)
     # Everyone whose editing reached the chief's desk ({id: Indico user id,
     # name}): none of them may do the paper's QA.
     edited_by: list[dict] = Field(default_factory=list)
@@ -208,6 +236,24 @@ class ReviewState(BaseModel):
             self.decisions.pop(edit_id, None)
         else:
             self.decisions[edit_id] = decision
+        if decision != "accepted":
+            self.edit_texts.pop(edit_id, None)
+        self.touch()
+
+    def set_edit_text(self, edit_id: str, text: str | None) -> None:
+        """Accept a suggestion in the editor's own wording (None: their wording dropped)."""
+        if text is None:
+            self.edit_texts.pop(edit_id, None)
+        else:
+            self.edit_texts[edit_id] = text
+            self.decisions[edit_id] = "accepted"
+        self.touch()
+
+    def set_ref_text(self, ref_id: str, text: str | None) -> None:
+        if text is None:
+            self.ref_texts.pop(ref_id, None)
+        else:
+            self.ref_texts[ref_id] = text
         self.touch()
 
     def set_edit_note(self, edit_id: str, note: str) -> None:
@@ -325,7 +371,7 @@ def stage_of(state: "ReviewState", *, prepared: bool = True) -> str:
 #: What a send that changes nothing of these leaves as it was: bookkeeping,
 #: not editing.
 NOT_WORK = {"schema_version", "paper_id", "editor", "edited_by", "qa",
-            "opened_at", "updated_at", "closed_at"}
+            "opened_at", "updated_at", "closed_at", "reprepared"}
 
 
 def work_of(state: "ReviewState") -> dict:
@@ -347,6 +393,25 @@ def has_edited(state: "ReviewState", indico_id: int | None, name: str) -> bool:
         if name and same_person(str(entry.get("name") or ""), name):
             return True
     return not state.edited_by and bool(name) and same_person(state.editor, name)
+
+
+def hold_view(state: "ReviewState") -> dict | None:
+    """A paper set aside for the author: since when, until when, and whether that passed."""
+    hold = state.hold
+    if not hold.since:
+        return None
+    until = None
+    try:
+        until = datetime.fromisoformat(hold.until) if hold.until else None
+    except ValueError:
+        until = None
+    over = bool(until and datetime.now(timezone.utc) >= until.astimezone(timezone.utc))
+    until_text = ""
+    if until:
+        u = until.astimezone(timezone.utc)
+        until_text = f"{u:%a} {u.day} {u:%b %H:%M} UTC"
+    return {"since": hold.since, "until": hold.until, "until_text": until_text,
+            "over": over, "reason": hold.reason, "by": hold.by}
 
 
 def qa_view(state: "ReviewState") -> dict:
@@ -383,6 +448,8 @@ class PaperRow(BaseModel):
     claim: dict | None = None           # which desk is editing it now, if any
     stage: str = "unprepared"           # see stage_of
     qa: dict | None = None              # see qa_view
+    hold: dict | None = None            # set aside for the author: see hold_view
+    outdated: bool = False              # prepared by an older version of the preparation
 
     @property
     def progress(self) -> float:
@@ -476,12 +543,16 @@ def describe(folder: Path, *, indico: Assignment | None = None,
             state, record),
         stage=stage_of(state, prepared=bool(report)),
         qa=qa_view(state),
+        hold=hold_view(state),
     )
 
     if not report:
         row.status_word = "Not prepared yet"
         return row
 
+    from src.workflow.prescreen import preparation_build
+
+    row.outdated = report.get("prepared_by") != preparation_build()
     findings = report.get("findings", [])
     row.must_fix = sum(1 for f in findings if f.get("severity") == "error")
     row.worth_a_look = sum(1 for f in findings if f.get("severity") == "warning")
@@ -514,11 +585,13 @@ def _guess_paper_id(folder: Path) -> str:
 def _suggested_ids(out_dir: Path) -> list[str]:
     """Ids of everything awaiting a decision: span suggestions plus structural."""
     ids: list[str] = []
-    edits = _read_json(out_dir / "edits.json")
-    ids += [
-        e.get("id", "") for e in edits.get("edits", [])
-        if e.get("tier") == "suggest"
-    ]
+    for name in ("edits.json", "edits_bib.json"):
+        edits = _read_json(out_dir / name)
+        ids += [
+            bib_id(e.get("id", "")) if name == "edits_bib.json" else e.get("id", "")
+            for e in edits.get("edits", [])
+            if e.get("tier") == "suggest"
+        ]
     structural = _read_json(out_dir / "structural.json")
     reorder = structural.get("reorder")
     if reorder and reorder.get("desired_order") and (
@@ -526,6 +599,14 @@ def _suggested_ids(out_dir: Path) -> list[str]:
     ):
         ids.append(reorder.get("id", "R1"))
     return [i for i in ids if i]
+
+
+def bib_id(edit_id: str) -> str:
+    """A .bib edit's id on the desk: ``B…``, never the ``E…`` of a .tex edit.
+
+    Papers prepared before .bib edits had ids of their own numbered them ``E…``.
+    """
+    return "B" + edit_id[1:] if edit_id.startswith("E") else edit_id
 
 
 def worklist(root: Path, *, me: str = "", desk_id: str = "") -> list[PaperRow]:

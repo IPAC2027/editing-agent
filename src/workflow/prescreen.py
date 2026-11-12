@@ -23,6 +23,8 @@ Two invariants hold by construction, and are asserted by the test suite:
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -242,6 +244,82 @@ def dedupe_findings(findings: list[Finding]) -> list[Finding]:
 # Main entry point
 # ---------------------------------------------------------------------------
 
+def _offline_refs() -> bool:
+    return os.environ.get("AIAGENT_OFFLINE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+REFERENCES_FILE = "references.json"
+
+#: The code that decides what a prepared paper contains. A paper prepared by a
+#: different version of it may be worth preparing again.
+_PREPARATION_CODE = ("workflow", "checks", "autofix", "annexb", "refcheck", "parser",
+                     "knowledge", "references.py", "edits.py", "house_style.py",
+                     "models.py", "latex_build.py")
+_BUILD: str | None = None
+
+
+def preparation_build() -> str:
+    """A fingerprint of the preparation code: changes whenever the way papers are
+    prepared changes (and not when only the desk's page does)."""
+    global _BUILD
+    if _BUILD is None:
+        import hashlib
+
+        root = Path(__file__).resolve().parent.parent
+        digest = hashlib.sha256()
+        for name in _PREPARATION_CODE:
+            path = root / name
+            sources = sorted(path.rglob("*.py")) if path.is_dir() else [path]
+            for source in sources:
+                if source.is_file() and "__pycache__" not in source.parts:
+                    digest.update(source.relative_to(root).as_posix().encode())
+                    digest.update(source.read_bytes())
+        _BUILD = digest.hexdigest()[:12]
+    return _BUILD
+
+
+def stamp_report(out_dir: Path) -> None:
+    """Record in ``report.json`` which version of the preparation code wrote it."""
+    path = out_dir / "report.json"
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    report["prepared_by"] = preparation_build()
+    path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _attach_edit_ids(records: list[dict], editset) -> None:
+    """Name, on each reference record, the edits that change that reference.
+
+    ``edit_id`` is the whole-reference rewrite (or the .bib entry's rewrite);
+    ``edit_ids`` every edit inside the reference, the rewrite included.
+    """
+    for record in records:
+        start, end = record.get("start"), record.get("end")
+        if start is None or end is None:
+            continue
+        inside = [e for e in editset.edits if start <= e.start and e.end <= end]
+        record["edit_ids"] = [e.id for e in inside]
+        whole = [e for e in inside if e.check_id in ("FMT-REF-01", "BIB-ANNEXB-01")]
+        record["edit_id"] = whole[0].id if whole else ""
+
+
+def write_reference_records(out_dir: Path, records: list[dict], *, file: str = "") -> None:
+    """``references.json``: what the desk's References tab shows, one entry per reference."""
+    (out_dir / REFERENCES_FILE).write_text(
+        json.dumps({"version": 1, "file": file, "references": records},
+                   indent=2, ensure_ascii=False),
+        encoding="utf-8")
+
+
+def _merge_bib_edits(field_edits: list, entry_edits: list) -> list:
+    """An entry rewritten for jacow.bbx replaces the field-level fixes inside it."""
+    spans = [(e.start, e.end) for e in entry_edits]
+    return list(entry_edits) + [e for e in field_edits
+                                if not any(a <= e.start and e.end <= b for a, b in spans)]
+
+
 def prescreen(
     folder: Path,
     *,
@@ -341,9 +419,17 @@ def prescreen(
         author_span=getattr(parsed, "author_names_span", None),
         title_span=getattr(parsed, "title_text_span", None),
     )
+    reference_records: list[dict] = []
     rewrite_edits, rewrite_findings = bibitem_rewrite_edits(
         source, paper, file=tex_path.name, evidence_words=evidence_words,
+        records=reference_records,
     )
+    # A reference rewritten in Appendix B's layout is one decision: the narrow
+    # fixes inside it (a DOI's form, a page dash) are already part of the rewrite,
+    # and letting them win the overlap would throw the rewrite away.
+    rewritten = [(e.start, e.end) for e in rewrite_edits]
+    candidates = [c for c in candidates
+                  if not any(a <= c.start and c.end <= b for a, b in rewritten)]
     candidates.extend(rewrite_edits)
     paper.findings.extend(rewrite_findings)
 
@@ -351,6 +437,7 @@ def prescreen(
     structural = StructuralPlan(file=tex_path.name, reorder=plan_reorder(source, paper))
 
     editset, dropped = EditSet.build(source, tex_path.name, candidates)
+    _attach_edit_ids(reference_records, editset)
     if dropped:
         paper.findings.append(Finding(
             check_id="EDIT-OVERLAP-01",
@@ -406,9 +493,23 @@ def prescreen(
     bib_editset = None
     if bib_path:
         bib_source = bib_path.read_text(encoding="utf-8", errors="replace")
+        # Each entry's fields set so that jacow.bbx prints Appendix B's layout (src.annexb.bib).
+        from src.annexb.bib import bib_edits
+        bib_records: list[dict] = []
+        entry_edits, entry_findings = bib_edits(bib_source, file=bib_path.name,
+                                                lookups=not _offline_refs(), llm=llm,
+                                                records=bib_records)
+        paper.findings.extend(entry_findings)
         bib_editset, _ = EditSet.build(
-            bib_source, bib_path.name, bib_field_edits(bib_source, file=bib_path.name),
+            bib_source, bib_path.name,
+            _merge_bib_edits(bib_field_edits(bib_source, file=bib_path.name), entry_edits),
         )
+        # Ids of their own, so a decision on the .bib never lands on a .tex edit.
+        for edit in bib_editset.edits:
+            edit.id = "B" + edit.id[1:]
+        _attach_edit_ids(bib_records, bib_editset)
+        reference_records = bib_records + [r for r in reference_records
+                                           if r.get("origin") != "bib"]
         if bib_editset.edits:
             bib_editset.write(out_dir / "edits_bib.json")
             (out_dir / f"{bib_path.stem}_edited.bib").write_text(
@@ -427,6 +528,12 @@ def prescreen(
                     f"See changes_bib.patch and {bib_path.stem}_edited.bib."
                 ),
             ))
+
+    # One record per reference, for the desk's References tab.
+    write_reference_records(out_dir, reference_records,
+                            file=(bib_path.name if bib_path and any(
+                                r.get("origin") == "bib" for r in reference_records)
+                                else tex_path.name))
 
     # --- Build validation ------------------------------------------------
     build_status = "not compiled"
@@ -455,6 +562,7 @@ def prescreen(
         build_status=build_status,
         bib_editset=bib_editset,
     )
+    stamp_report(out_dir)
     write_review_html(
         editset,
         out_dir,

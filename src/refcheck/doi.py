@@ -158,6 +158,20 @@ def fields_of(text: str, kind: str = "") -> Fields:
     f.page = m.group(1) if m else ""
     ctx = Context(text=text, parts=parts, kind=f.kind)
     span = journal_span(ctx)
+    if span and not (f.volume and f.page):
+        # The numbers right after the journal's name, with or without a title:
+        # "Phys. Rev. ST Accel. Beams 2, 114202 (1999)", "… 2 (1999) 114202", "… 2:114202".
+        after = text[span[1]:]
+        m = re.match(r"\s*,?\s*(?:vol\.\s*)?(?P<vol>\d{1,4})\s*(?:\(\d{1,3}\))?\s*[,:]\s*"
+                     r"(?:no\.\s*\d+\s*,\s*)?(?:pp?\.\s*)?(?P<page>[A-Z]?\d+)\b", after) or \
+            re.match(r"\s*,?\s*(?P<vol>\d{1,4})\s*\((?:19|20)\d{2}\)\s*,?\s*"
+                     r"(?:\d{1,3}\s*,\s*(?=[A-Z]?\d{3}))?"         # an issue: "19 (2024) 02, P02012"
+                     r"(?:pp?\.\s*)?(?P<page>[A-Z]?\d+)\b", after)
+        if m and not (re.fullmatch(r"(?:19|20)\d{2}", m.group("vol")) and
+                      f.year == int(m.group("vol"))):
+            f.volume = f.volume or m.group("vol")
+            if not f.page and not re.fullmatch(r"(?:19|20)\d{2}", m.group("page")):
+                f.page = m.group("page")
     if span:
         f.container = text[span[0]:span[1]]
     elif re.search(r"\bProc\b", text):
@@ -366,6 +380,35 @@ class _Cache:
 CACHE = _Cache()
 UNREACHABLE = object()
 
+#: Seconds between two requests to one service: Crossref's public pool answers
+#: "429 Too Many Requests" to a faster client, and a DOI not found because
+#: Crossref did not answer is a DOI missed.
+_PACE = {"crossref": 0.2, "datacite": 0.1}
+_RETRIES = 2
+_turns: dict[str, float] = {}
+_turns_lock = threading.Lock()
+
+
+def _wait_turn(service: str) -> None:
+    gap = _PACE.get(service, 0.0)
+    if not gap:
+        return
+    with _turns_lock:
+        now = time.monotonic()
+        start = max(now, _turns.get(service, 0.0) + gap)
+        _turns[service] = start
+    if start > now:
+        time.sleep(start - now)
+
+
+def _retry_after(resp, attempt: int) -> float:
+    """How long to wait before asking again: the service's Retry-After, at most 10 s."""
+    try:
+        wait = float(resp.headers.get("Retry-After", ""))
+    except (TypeError, ValueError):
+        wait = 1.5 * (attempt + 1)
+    return max(0.5, min(wait, 10.0))
+
 
 def _get(url: str, params: dict | None = None, service: str = "crossref"):
     """(status, JSON body) or UNREACHABLE. Cached by URL and parameters."""
@@ -382,12 +425,19 @@ def _get(url: str, params: dict | None = None, service: str = "crossref"):
     if email and "crossref" in url:
         agent += f" (mailto:{email})"
     with STATUS.attempt(service) as outcome:
-        try:
-            resp = httpx.get(url, params=params, timeout=_TIMEOUT, follow_redirects=True,
-                             headers={"User-Agent": agent, "Accept": "application/json"})
-        except Exception as exc:  # noqa: BLE001 — no answer is not a "no"
-            outcome.failed(f"{type(exc).__name__}: {exc}")
-            return UNREACHABLE
+        for attempt in range(_RETRIES + 1):
+            _wait_turn(service)
+            try:
+                resp = httpx.get(url, params=params, timeout=_TIMEOUT, follow_redirects=True,
+                                 headers={"User-Agent": agent, "Accept": "application/json"})
+            except Exception as exc:  # noqa: BLE001 — no answer is not a "no"
+                outcome.failed(f"{type(exc).__name__}: {exc}")
+                return UNREACHABLE
+            if resp.status_code in (429, 503) and attempt < _RETRIES:
+                # Too many requests (Crossref's public pool): wait as asked, then again.
+                time.sleep(_retry_after(resp, attempt))
+                continue
+            break
         if resp.status_code not in (200, 404):
             outcome.failed(f"HTTP {resp.status_code}")
             return UNREACHABLE
@@ -493,6 +543,177 @@ def find(f: Fields) -> Work | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# A DOI one slip from the right one
+# ---------------------------------------------------------------------------
+
+#: The registrant a DOI's suffix gives away, when the prefix itself is mistyped.
+_PREFIX_OF = ((re.compile(r"(?:PhysRev|RevModPhys)", re.I), "10.1103"),
+              (re.compile(r"j\.[a-z]+\.\d{4}\.", re.I), "10.1016"),     # j.nima.2019.162345
+              (re.compile(r"JACoW-", re.I), "10.18429"),
+              (re.compile(r"arXiv\.", re.I), "10.48550"),
+              (re.compile(r"1748-0221/", re.I), "10.1088"))             # JINST
+_PROBES = 24
+
+
+def _one_slip(a: str, b: str) -> bool:
+    """*a* and *b* differ by one character: changed, added, dropped, or two swapped."""
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        diff = [i for i in range(len(a)) if a[i] != b[i]]
+        return len(diff) == 1 or (len(diff) == 2 and diff[1] == diff[0] + 1 and
+                                  a[diff[0]] == b[diff[1]] and a[diff[1]] == b[diff[0]])
+    short, long_ = sorted((a, b), key=len)
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+
+
+def near_spellings(doi: str, f: Fields) -> list[str]:
+    """DOIs one slip from *doi*, likeliest first: those the reference's own
+    volume, page and year suggest, a mistyped prefix, then a dot left out
+    (``PhysRevSTAB.2114202``), a dot doubled, a letter O for a zero."""
+    prefix, _, suffix = doi.partition("/")
+    out: list[str] = []
+    seen = {doi.lower()}
+
+    def add(p: str, s: str) -> None:
+        candidate = f"{p}/{s}"
+        if candidate.lower() not in seen and DOI_RE.fullmatch(candidate):
+            seen.add(candidate.lower())
+            out.append(candidate)
+
+    if f.volume and f.page:
+        # Volume and page run together: "PhysRevSTAB.2114202" for vol. 2, p. 114202.
+        joined = re.escape(f.volume + f.page)
+        for m in re.finditer(rf"(?<![0-9]){joined}(?![0-9])", suffix):
+            add(prefix, suffix[:m.start()] + f"{f.volume}.{f.page}" + suffix[m.end():])
+        m = re.match(r"(PhysRev[A-Za-z]*|RevModPhys)(?=[.\d]|$)", suffix)
+        if m:                                              # APS: Journal.volume.page
+            add(prefix, f"{m.group(1)}.{f.volume}.{f.page}")
+    for m in re.finditer(r"\d+", suffix):                  # a digit wrong, added or dropped
+        for value in (f.volume, f.page, str(f.year or "")):
+            digits = re.sub(r"\D", "", value)
+            if len(digits) >= 3 and _one_slip(m.group(0), digits):
+                add(prefix, suffix[:m.start()] + digits + suffix[m.end():])
+    for pattern, registrant in _PREFIX_OF:
+        if pattern.match(suffix) and prefix != registrant:
+            add(registrant, suffix)
+    for i in range(1, len(suffix)):                        # a dot left out
+        a, b = suffix[i - 1], suffix[i]
+        if b.isdigit() and (a.isdigit() or a.isalpha()) or (a.isdigit() and b.isalpha()):
+            add(prefix, suffix[:i] + "." + suffix[i:])
+    add(prefix, re.sub(r"\.{2,}", ".", suffix))
+    add(prefix, re.sub(r"(?<=[\d.])[Oo](?=\d)|(?<=\d)[Oo](?=[.\d]|$)", "0", suffix))
+    add(prefix, re.sub(r"(?<=\d)[lI](?=[.\d]|$)|(?<=[.])[lI](?=\d)", "1", suffix))
+    return out[:_PROBES]
+
+
+def _exists(doi: str) -> bool | None:
+    """Whether doi.org knows *doi* (every registry's DOIs), or None with no answer."""
+    answer = _get(f"https://doi.org/api/handles/{doi}", service="doi.org")
+    if answer is UNREACHABLE:
+        return None
+    status, body = answer
+    return bool(status == 200 and body and body.get("responseCode") == 1)
+
+
+def _agreement(f: Fields, w: Work) -> tuple[int, bool]:
+    """(how much the record agrees with the reference, enough to be sure); -1 if it disagrees."""
+    if not w.title and not w.surnames:
+        return 0, False
+    if not match(f, w, strict=False)[0]:
+        return -1, False
+    title = bool(f.title and w.title and title_similarity(f.title, w.title) >= 0.85)
+    surname = bool(f.surname and any(_fold(f.surname) == _fold(s) or _fold(f.surname) in
+                                     _fold(s).split() for s in w.surnames if s))
+    year = bool(f.year and w.year and f.year == w.year)
+    volume = bool(f.volume and w.volume and
+                  re.sub(r"\D", "", f.volume) == re.sub(r"\D", "", w.volume))
+    page = bool(f.page and w.page and re.sub(r"\D", "", f.page) ==
+                re.sub(r"\D", "", re.split(r"[-–]", w.page)[0]))
+    points = 2 * title + surname + year + volume + page
+    return points, title or (volume and page) or (surname and year and (volume or page))
+
+
+def respell(f: Fields, doi: str) -> tuple[Work | None, list[Work], bool]:
+    """The DOI one slip from *doi* that exists and fits the reference.
+
+    (record, other near spellings that exist, sure): sure when its record
+    agrees with the reference (the title, or the volume and page, or the
+    first author, year and volume or page) and no other near spelling fits
+    as well. With nothing in the reference to check against, the only near
+    spelling that exists is offered, never sure.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    candidates = near_spellings(doi, f)
+    if not candidates:
+        return None, [], False
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        known = list(pool.map(_exists, candidates))
+    works: list[Work] = []
+    for candidate, exists in zip(candidates, known):
+        if exists:
+            work = lookup(candidate)
+            works.append(work if isinstance(work, Work) else Work(doi=candidate, source="doi.org"))
+    if not works:
+        return None, [], False
+    scored = sorted(((*_agreement(f, w), w) for w in works), key=lambda s: s[0], reverse=True)
+    fitting = [s for s in scored if s[0] >= 0]
+    if not fitting:
+        return None, [], False
+    points, sure, best = fitting[0]
+    others = [s[2] for s in fitting[1:]]
+    if sure and not any(s[0] >= points for s in fitting[1:]):
+        return best, others, True
+    if len(fitting) == 1 or points > fitting[1][0]:
+        return best, others, False
+    return None, [], False
+
+
+def _slip(written: str, right: str) -> str:
+    """What the slip was, in a few words."""
+    wp, _, ws = written.lower().partition("/")
+    rp, _, rs = right.lower().partition("/")
+    if wp != rp:
+        return f"the prefix is {rp}, not {wp}"
+    if rs.replace(".", "") == ws.replace(".", ""):
+        return "a dot left out" if len(rs) > len(ws) else "a dot too many"
+    if len(rs) > len(ws):
+        return "a character left out"
+    if len(rs) < len(ws):
+        return "a character too many"
+    diff = [i for i in range(len(rs)) if rs[i] != ws[i]]
+    if len(diff) == 2:
+        return "two characters swapped"
+    if not diff:
+        return "its spelling"
+    as_written = written.partition("/")[2][diff[0]]
+    return f"'{as_written}' for '{right.partition('/')[2][diff[0]]}'"
+
+
+def _respelled(f: Fields, given: str, doi: str, problem: str, *, sure_only: bool = False
+               ) -> DoiReport | None:
+    best, others, sure = respell(f, doi)
+    if best is None or (sure_only and not sure):
+        return None
+    shown = display(best.doi, doi)
+    slip = _slip(doi, best.doi)
+    source = best.source or "doi.org"
+    if sure:
+        record = f"its {source} record" if best.title else "it"
+        return DoiReport("corrected", given, shown, source,
+                         f"{problem}, a typo ({slip}): {shown} exists and {record} agrees with "
+                         "this reference")
+    reason = f"{problem}; possibly {shown} ({slip}), which exists"
+    reason += f": {_describe(best)}" if best.title else ", but the reference gives nothing " \
+        "to check it against"
+    if others:
+        reason += ". Other near spellings that exist: " + ", ".join(display(o.doi) for o in others)
+    return DoiReport("possible", given, shown, source, reason,
+                     [display(o.doi) for o in others])
+
+
 def display(right: str, written: str = "") -> str:
     """*right* as it should be written: JACoW's own form, else the author's capitals.
 
@@ -530,6 +751,9 @@ def loose_match(f: Fields, w: Work) -> tuple[bool, float, list[str]]:
             notes.append(f"the title is {similar:.0%} alike")
     elif not (f.volume and f.page and w.volume and w.page):
         return False, 0.0, []
+    elif re.sub(r"\D", "", f.volume) != re.sub(r"\D", "", w.volume) or \
+            re.sub(r"\D", "", f.page) != re.sub(r"\D", "", re.split(r"[-–]", w.page)[0]):
+        return False, 0.0, []        # with no title, the volume and page are the reference
     rank = similar
     if f.surname and w.surnames:
         mine = _fold(f.surname)
@@ -646,7 +870,10 @@ def check(text: str, kind: str = "") -> DoiReport:
                 return DoiReport("corrected", given, shown, right.source,
                                  f"the cited DOI is another paper's ({why}); {right.source} "
                                  f"gives {shown} for this reference")
-            return _possible(f, given, doi, f"the cited DOI is another paper's ({why})") or \
+            # A digit wrong can make another paper's DOI: one slip away may be this one's.
+            problem = f"the cited DOI {doi} is another paper's ({why})"
+            return _respelled(f, given, doi, problem, sure_only=True) or \
+                _possible(f, given, doi, f"the cited DOI is another paper's ({why})") or \
                 DoiReport("wrong", given, source=work.source,
                           reason=f"the cited DOI is another paper's: {why}")
         right = find(f)
@@ -655,11 +882,13 @@ def check(text: str, kind: str = "") -> DoiReport:
             shown = display(right.doi, doi)
             return DoiReport("corrected", given, shown, right.source,
                              f"the cited DOI {doi} does not exist"
-                             + (", a typo" if near else "")
+                             + (f", a typo ({_slip(doi, right.doi)})" if near else "")
                              + f"; {right.source} gives {shown} for this reference")
-        return _possible(f, given, doi, f"the cited DOI {doi} does not exist") or \
+        problem = f"the cited DOI {doi} does not exist"
+        return _respelled(f, given, doi, problem) or _possible(f, given, doi, problem) or \
             DoiReport("unresolved", given,
-                      reason=f"the cited DOI {doi} does not exist (no registry knows it)")
+                      reason=f"the cited DOI {doi} does not exist (no registry knows it, and "
+                             "no near spelling of it fits)")
     if _NO_DOI.search(text) or f.arxiv or kind in ("web", "private_comm", "unpublished"):
         return DoiReport("none")
     right = find(f)

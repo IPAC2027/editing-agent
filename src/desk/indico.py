@@ -201,11 +201,13 @@ class Conference:
         }
 
 
-def refresh(root: Path, *, client=None) -> dict:
+def refresh(root: Path, *, client=None, assignments_only: bool = False) -> dict:
     """Ask Indico who has each paper now, and remember the answer.
 
     One GET of the event's paper list, through a client opened read-only, so
     this cannot change anything in Indico whatever a later edit does to it.
+    *assignments_only* skips the second request (the authors), for a quick
+    look before a paper is handed out.
     """
     conference = Conference.open(root)
     if conference is None or not (conference.base_url and conference.event_id):
@@ -233,6 +235,8 @@ def refresh(root: Path, *, client=None) -> dict:
         for row in rows if row.submitted
     }
     _write(root / LIVE_FILE, {"checked_at": checked_at, "papers": papers})
+    if assignments_only:
+        return {"checked_at": checked_at, "papers": len(papers)}
 
     # The authors are a second request, and optional: the assignments above
     # have already arrived, and the title and author check can fall back to

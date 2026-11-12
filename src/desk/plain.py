@@ -720,6 +720,65 @@ EXPLANATIONS: dict[str, Explanation] = {
         "A change you made by hand.",
         owner=EDITOR,
     ),
+
+    # ---- the Appendix B reference engine (src.annexb) ---------------------
+    "REF-MISSING": Explanation(
+        "Reference is missing a required part",
+        "Appendix B's layout for this kind of reference needs a part the reference "
+        "does not give, and no registry had it. It is named, never invented.",
+        ask="Please complete this reference: a part Appendix B requires is missing.",
+        owner=AUTHOR,
+    ),
+    "REF-KIND": Explanation(
+        "Kind of reference not recognised",
+        "The desk could not tell which of Appendix B's 16 kinds this reference is, "
+        "so it is left as written. Edit it on the References tab.",
+        owner=EDITOR,
+    ),
+    "REF-DROPPED": Explanation(
+        "Words with no place in the layout",
+        "Some words of the reference have no place in Appendix B's layout for its "
+        "kind, so the rewrite leaves them out. Check nothing that matters was lost.",
+        owner=EDITOR,
+    ),
+    "REF-DOI-WRONG": Explanation(
+        "DOI does not match the reference",
+        "The DOI written in the reference resolves to something else or not at all, "
+        "and no correct one was found.",
+        ask="Please check the DOI in this reference: it does not resolve to the cited work.",
+        owner=AUTHOR,
+    ),
+    "REF-DOI-POSSIBLE": Explanation(
+        "Possible DOI found",
+        "A registry has a DOI that probably belongs to this reference, but not every "
+        "detail matched, so it was not added. Check it before using it.",
+        owner=EDITOR,
+    ),
+    "REF-TITLE-CASE": Explanation(
+        "Title capitals need a look",
+        "The title was put in sentence case, but some words may be names or acronyms "
+        "whose capitals should stay.",
+        owner=EDITOR,
+    ),
+    "REF-JOURNAL": Explanation(
+        "Journal name",
+        "The journal's abbreviation came from a source other than Annex C (or the "
+        "name was corrected for a typo). Check it reads right.",
+        owner=EDITOR,
+    ),
+    "BIB-ANNEXB-01": Explanation(
+        "Reference entry set for the JACoW style",
+        "The .bib entry's fields were set so that the JACoW bibliography style prints "
+        "the reference in Appendix B's layout.",
+        fixed="the bibliography entries, now set so they print in JACoW style",
+        owner=EDITOR,
+    ),
+    "BIB-LAYOUT": Explanation(
+        "Limit of the JACoW bibliography style",
+        "The JACoW bibliography style cannot print this kind of reference exactly as "
+        "Appendix B shows it. Nothing to do unless it matters for this paper.",
+        owner=TOOL,
+    ),
 }
 
 _FALLBACK = Explanation(

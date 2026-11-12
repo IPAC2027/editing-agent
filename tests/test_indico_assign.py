@@ -214,7 +214,12 @@ def test_switching_the_sync_on_leaves_qa_and_indicos_own_choices_alone(conferenc
     # TUP002 is Yue Hao's in Indico; Ling QAs MOP001 (no assignment for a QA).
     claim_module.take(conference / "MOP001" / "original", _me("Ling Wang", "a"),
                       mode="qa", indico_id=LING)
-    pool.take("TUP002", _editor(pool, "Ling Wang", "a"))
+    # Ling took TUP002 here before Indico gave it to Yue (the desk would refuse
+    # it now: a paper Indico gives to someone else cannot be taken).
+    with pytest.raises(ValueError, match="assigned to Yue Hao"):
+        pool.take("TUP002", _editor(pool, "Ling Wang", "a"))
+    claim_module.take(conference / "TUP002" / "original", _me("Ling Wang", "a"),
+                      indico_id=LING)
     sync.set_enabled(True)
 
     assert pool.assign_held() == ["TUP002"]
@@ -487,7 +492,9 @@ def test_the_chief_freeing_an_unfinished_paper_unassigns_its_editor(conference):
     pool.take("MOP001", _editor(pool, "Ling Wang", "a"))
     sync.apply()
 
-    assert pool.free("MOP001") == {"paper": "MOP001", "who": "Ling Wang", "mode": "edit"}
+    freed = pool.free("MOP001")
+    assert (freed["who"], freed["mode"], freed["taken"]) == ("Ling Wang", "edit", "here")
+    assert (freed["indico_editor"], freed["indico"]) == ("Ling Wang", "unassigning")
     sync.apply()
     assert writer.calls[-1] == ("unassign", 901, signed(LING))
     assert pool.free("MOP001") is None                 # nobody holds it now
@@ -530,8 +537,9 @@ def test_nothing_is_written_while_the_switch_is_off(conference):
     sync.apply()
 
     assert writer.calls == [] and sync.view()["enabled"] is False
-    # And off, Indico's assignment does not stop anyone taking a paper.
-    pool.take("TUP002", _editor(pool, "Ling Wang", "a"))
+    # Off, Indico's assignment still holds the paper: someone took it there.
+    with pytest.raises(ValueError, match="assigned to Yue Hao"):
+        pool.take("TUP002", _editor(pool, "Ling Wang", "a"))
 
 
 def test_the_switch_belongs_to_one_event(conference):
@@ -695,3 +703,112 @@ def test_the_chiefs_page_connects_an_account_and_never_sees_the_token(conference
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+# ---------------------------------------------------------------------------
+# Who holds a paper: taken here or taken in Indico, freed only by the chief
+# ---------------------------------------------------------------------------
+
+def test_a_paper_taken_in_indico_is_held_whatever_the_switch_says(conference):
+    """TUP002 was taken in Indico by Yue Hao: nobody else takes it here, switch on or off."""
+    for on in (False, True):
+        sync = _sync(conference, FakeWriter(), on=on)
+        pool = pool_module.Pool(conference, code="x", sync=sync)
+        ling = _editor(pool, "Ling Wang", "a")
+        with pytest.raises(ValueError, match="assigned to Yue Hao in Indico"):
+            pool.take("TUP002", ling)
+        rows = {r["paper"]: r for r in pool.papers(ling.desk_id, ling)}
+        assert rows["TUP002"]["blocked"] and not rows["MOP001"]["blocked"]
+        holder = pool.holder(conference / "TUP002" / "original")
+        assert (holder["taken"], holder["indico"], holder["can_free"]) == ("indico", "Yue Hao", True)
+
+
+def test_the_chief_frees_a_paper_taken_in_indico_with_the_switch_off(conference):
+    writer = FakeWriter()
+    sync = _sync(conference, writer, on=False)
+    pool = pool_module.Pool(conference, code="x", sync=sync)
+    folder = conference / "TUP002" / "original"
+
+    freed = pool.free("TUP002")
+    assert (freed["who"], freed["taken"], freed["indico"]) == ("Yue Hao", "indico",
+                                                                "still assigned")
+    sync.apply()
+    assert writer.calls == []                          # nothing written to Indico
+    # The chief is told Indico still shows Yue; the desk no longer holds it for them.
+    assert pool.holder(folder)["freed"] == "Yue Hao" and pool.holder(folder)["taken"] == ""
+    ling = _editor(pool, "Ling Wang", "a")
+    pool.take("TUP002", ling)
+    assert claim_module.current(folder).name == "Ling Wang"
+
+
+def test_the_chief_frees_a_paper_taken_in_indico_with_the_switch_on(conference):
+    writer = FakeWriter()
+    sync = _sync(conference, writer, on=True)
+    pool = pool_module.Pool(conference, code="x", sync=sync)
+
+    assert pool.free("TUP002")["indico"] == "unassigning"
+    sync.apply()
+    assert writer.calls == [("unassign", 902, signed(YUE))]
+    assert _live(conference)["12"]["editor"] == ""
+    pool.take("TUP002", _editor(pool, "Ling Wang", "a"))
+
+
+def test_taking_it_in_indico_again_after_being_freed_holds_it_again(conference):
+    sync = _sync(conference, FakeWriter(), on=False)
+    pool = pool_module.Pool(conference, code="x", sync=sync)
+    folder = conference / "TUP002" / "original"
+    pool.free("TUP002")
+
+    def indico_shows(editor, editor_id):
+        live = json.loads((conference / "indico_assignments.json").read_text())
+        live["papers"]["12"].update(editor=editor, editor_id=editor_id)
+        (conference / "indico_assignments.json").write_text(json.dumps(live))
+
+    indico_shows("", None)                    # unassigned in Indico, as the chief was told
+    assert pool.holder(folder)["taken"] == "" and not pool.holder(folder)["freed"]
+    indico_shows("Yue Hao", YUE)              # and Yue takes it in Indico again
+    with pytest.raises(ValueError, match="assigned to Yue Hao"):
+        pool.take("TUP002", _editor(pool, "Ling Wang", "a"))
+
+
+def test_indico_is_read_again_just_before_a_paper_is_handed_out(conference):
+    """Yue took MOP001 in Indico a minute ago; the desk's last read did not know yet."""
+    from types import SimpleNamespace
+
+    class Reader(FakeClient):
+        def list_editables(self):
+            editor = SimpleNamespace(id=YUE, identifier=signed(YUE))
+            return [SimpleNamespace(
+                id=11, code="MOP001", editor_name="Yue Hao", state="ready_for_review",
+                submitted=True, editable=SimpleNamespace(id=901, editor=editor))]
+
+    sync = _sync(conference, FakeWriter(), on=False, client=Reader())
+    pool = pool_module.Pool(conference, code="x", sync=sync)
+    with pytest.raises(ValueError, match="assigned to Yue Hao"):
+        pool.take("MOP001", _editor(pool, "Ling Wang", "a"))
+    assert claim_module.current(conference / "MOP001" / "original") is None
+
+
+def test_one_editor_here_and_another_in_indico_is_shown_as_a_conflict(conference):
+    sync = _sync(conference, FakeWriter(), on=False)
+    pool = pool_module.Pool(conference, code="x", sync=sync)
+    claim_module.take(conference / "TUP002" / "original", _me("Ling Wang", "a"),
+                      indico_id=LING)
+    holder = pool.holder(conference / "TUP002" / "original")
+    assert (holder["taken"], holder["here"]["who"], holder["indico"]) == (
+        "conflict", "Ling Wang", "Yue Hao")
+    # Freeing it lets go of both.
+    freed = pool.free("TUP002")
+    assert freed["taken"] == "here" and freed["indico_editor"] == "Yue Hao"
+    assert pool.holder(conference / "TUP002" / "original")["taken"] == ""
+
+
+def test_giving_a_paper_back_gives_it_back_in_indico_too(conference):
+    """The switch off, Indico keeps showing the editor who gave it up: not honoured."""
+    sync = _sync(conference, FakeWriter(), on=False)
+    pool = pool_module.Pool(conference, code="x", sync=sync)
+    yue, ling = _editor(pool, "Yue Hao", "b"), _editor(pool, "Ling Wang", "a")
+    pool.take("TUP002", yue)                  # Indico's own editor takes it here
+    pool.release("TUP002", yue, "no time")
+    pool.take("TUP002", ling)
+    assert claim_module.current(conference / "TUP002" / "original").name == "Ling Wang"

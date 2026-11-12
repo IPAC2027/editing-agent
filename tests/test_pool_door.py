@@ -664,8 +664,14 @@ def test_the_chief_frees_a_paper_and_its_editor_hears_on_the_next_send(
 
     status, data = _call(managing_page, "POST", "/api/chief/free",
                          {"folder": str(pool_paper(chief))})
-    assert status == 200 and data["freed"] == {"paper": "MOP001", "who": "Ling Wang", "mode": "edit"}
+    assert status == 200
+    assert (data["freed"]["who"], data["freed"]["mode"], data["freed"]["taken"]) == (
+        "Ling Wang", "edit", "here")
+    # Indico shows Ling too, and this desk does not write to Indico: the chief
+    # is told to unassign them there, and the desk no longer holds it for them.
+    assert data["freed"]["indico"] == "still assigned"
     assert claim_module.current(pool_paper(chief)) is None
+    assert chief.holder(pool_paper(chief))["taken"] == ""
 
     _decide(folder, decision="rejected")
     with pytest.raises(remote.Refused, match="freed by the chief editor"):
@@ -821,6 +827,11 @@ def test_a_qa_given_up_without_a_verdict_is_announced_as_a_qa(pages, chief):
 def test_nobody_who_edited_a_paper_does_its_qa(tmp_path, pages, chief):
     (ling, ling_port), (yue, yue_port) = pages["ling"], pages["yue"]
     pool = pool_paper(chief)
+    # Nobody has MOP001 in Indico here, so whoever is free may take it to edit.
+    (chief.root / "indico_assignments.json").write_text(json.dumps(
+        {"checked_at": "2026-11-07T10:00:00+00:00",
+         "papers": {"1": {"code": "MOP001", "editor": "", "state": "ready_for_review"}}}),
+        encoding="utf-8")
 
     # Yue takes it to edit and gives it up untouched: Yue has not edited it.
     folder = _call(yue_port, "POST", "/api/pool/take", {"paper": "MOP001"})[1]["folder"]

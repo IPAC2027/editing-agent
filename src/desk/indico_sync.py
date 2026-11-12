@@ -12,8 +12,11 @@ the event's paper editors (:meth:`IndicoSync.may_edit`, a read, whatever the
 switch says). Indico lists editing managers to nobody, so those are the ones
 whose own desk Indico told so.
 
-Writing is switched on per conference, on the chief's page, and is limited to
-those two requests (``src.indico_client.assign``). Indico's own conflict check
+Reading is not switched: the assignments are read every couple of minutes,
+and again (:meth:`IndicoSync.ensure_fresh`) just before the chief's door hands
+a paper out, because a paper an editor took in Indico is held on the desk too
+(``Pool.holder``). Writing is switched on per conference, on the chief's page,
+and is limited to those two requests (``src.indico_client.assign``). Indico's own conflict check
 means a paper someone reassigned in Indico meanwhile is left alone and shown
 as a problem, never taken from them.
 """
@@ -33,6 +36,7 @@ READ_EVERY = 120.0          # seconds between reads of Indico's assignments
 EDITORS_FOR = 600.0         # how long the event's editor list is trusted
 EDITORS_RECHECK = 30.0      # someone not in it: Indico is read again at most this often
 EDITORS_KEPT = 3600.0       # Indico out of reach: an editor listed this recently still is
+FRESH_FOR = 30.0            # before a paper is handed out, assignments at most this old
 
 
 def _now() -> str:
@@ -56,6 +60,8 @@ class IndicoSync:
         self.read_error = ""
         self._editors: tuple[float, list] = (0.0, [])
         self._editors_lock = threading.Lock()
+        self._assignments_at = 0.0
+        self._fresh_lock = threading.Lock()
         if background:
             threading.Thread(target=self._loop, daemon=True).start()
 
@@ -210,21 +216,22 @@ class IndicoSync:
                 found = ""
         return found
 
-    def blocks(self, folder: Path, indico_id: int | None, name: str) -> str:
-        """Why *name* may not take the paper at *folder*: Indico gives it to someone else."""
-        from src.desk.indico import Conference, same_person
+    def ensure_fresh(self, max_age: float = FRESH_FOR) -> None:
+        """Read Indico's assignments now, unless they were read in the last *max_age*
+        seconds (one read-only request), so a paper an editor took in Indico a
+        minute ago is not handed to someone else here. Indico out of reach: the
+        last answer stands."""
+        from src.desk import indico as indico_module
 
-        if not self.enabled:
-            return ""
-        conference = Conference.open(self.root)
-        assignment = conference.assignment(folder) if conference else None
-        if not assignment or not assignment.editor:
-            return ""
-        if indico_id and assignment.editor_id == indico_id:
-            return ""
-        if same_person(assignment.editor, name):
-            return ""
-        return f"This paper is assigned to {assignment.editor}."
+        with self._fresh_lock:
+            if time.time() - self._assignments_at < max_age:
+                return
+            try:
+                indico_module.refresh(self.root, client=self.event.client(),
+                                      assignments_only=True)
+                self._assignments_at = time.time()
+            except Exception:  # noqa: BLE001 — the last answer stands
+                pass
 
     # -- what the desk wants Indico to show -------------------------------------
     def want(self, paper: str, *, indico_id: int | None = None, name: str = "",
@@ -355,6 +362,7 @@ class IndicoSync:
         try:
             indico_module.refresh(self.root, client=self.event.client())
             self.last_read, self.read_error = _now(), ""
+            self._assignments_at = time.time()
         except Exception as exc:  # noqa: BLE001 — shown on the chief's page
             self.read_error = str(exc) or type(exc).__name__
 
